@@ -1,0 +1,1 @@
+Error: No apps found in the App Store for search term: ripgrep

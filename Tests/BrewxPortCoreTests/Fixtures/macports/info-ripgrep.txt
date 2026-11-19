@@ -1,0 +1,6 @@
+description: fast command line search tool
+homepage: https://github.com/BurntSushi/ripgrep
+version: 15.2.0
+variants: pcre, universal
+depends_lib: pcre2, libiconv
+depends_run: 

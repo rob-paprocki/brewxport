@@ -1,0 +1,6 @@
+description: banner-like program prints strings as ASCII art
+homepage: http://www.figlet.org/
+version: 2.2.5
+variants: universal
+depends_lib: 
+depends_run: 

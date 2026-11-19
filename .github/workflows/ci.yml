@@ -1,0 +1,46 @@
+name: CI
+
+# The release tooling's tests and the personal-value check. The Swift tests need a macOS runner and
+# run in the release workflow's test job, and with `swift test` locally.
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+      - name: Release tooling tests
+        run: python3 -I -m unittest discover -s Tests -p 'test_*.py' -v
+      - name: Personal-value check (emails, IPs, MACs)
+        run: python3 -I Tests/check_repo.py
+
+  python39:
+    # The owner's Mac publishes the first version with Apple's Python 3.9, so test on 3.9 too.
+    runs-on: ubuntu-latest
+    container: python:3.9
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+      - name: Trust the workspace (the container runs as root)
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
+      - run: python3 --version
+      - name: Release tooling tests
+        run: python3 -I -m unittest discover -s Tests -p 'test_*.py'
+      - name: Personal-value check (emails, IPs, MACs)
+        run: python3 -I Tests/check_repo.py
+
+  changelog:
+    # On pushes to main: flag visible changes that have no changelog line.
+    if: endsWith(github.repository, '-private') && github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          fetch-depth: 0
+      - name: Changelog check
+        run: python3 -I scripts/release/changelog_check.py

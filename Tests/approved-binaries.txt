@@ -1,0 +1,5 @@
+# Binary files that were looked at and approved, published as they are. One per line: the SHA-256
+# of exactly that content, two spaces, then the path (as `shasum -a 256 PATH` prints it). A changed
+# or new binary fails Tests/check_repo.py and the public build until its line is approved here.
+f59a9fa96dede3aa906010e5226a5d9334418c621efe187a941df2f87f9108c5  docs/images/updates-dark.png
+70e2cb5fbd64e50f3a09545a593fb53a073e6c0ffaaaea6ba0bffa87d06dfc86  docs/images/updates-light.png

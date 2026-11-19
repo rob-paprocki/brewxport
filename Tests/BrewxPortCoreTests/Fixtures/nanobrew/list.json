@@ -1,0 +1,1 @@
+{"schema":1,"packages":[{"name":"figlet","kind":"formula","version":"2.2.5","pinned":false},{"name":"tree","kind":"formula","version":"2.3.2","pinned":false},{"name":"oniguruma","kind":"formula","version":"6.9.10","pinned":false},{"name":"jq","kind":"formula","version":"1.8.2","pinned":false}]}

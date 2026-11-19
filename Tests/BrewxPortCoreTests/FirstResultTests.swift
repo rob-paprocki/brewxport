@@ -1,0 +1,42 @@
+import Foundation
+import Testing
+@testable import BrewxPortCore
+
+@Suite struct FirstResultTests {
+    @Test func returnsTheResult() async throws {
+        #expect(try await firstResult(within: .seconds(5)) { 42 } == 42)
+    }
+
+    @Test func passesTheOperationsErrorThrough() async {
+        struct Boom: Error {}
+        await #expect(throws: Boom.self) { try await firstResult(within: .seconds(5)) { () async throws -> Int in throw Boom() } }
+    }
+
+    @Test(.timeLimit(.minutes(1))) func timesOutEvenWhenTheOperationIgnoresCancellation() async {
+        let start = ContinuousClock.now
+        await #expect(throws: CallTimedOut(timeout: .milliseconds(200))) {
+            try await firstResult(within: .milliseconds(200)) { () async -> Int in
+                // Never returns, and ignores cancellation on purpose (an XPC call to a helper that never replies).
+                await withCheckedContinuation { (_: CheckedContinuation<Void, Never>) in }
+                return 0
+            }
+        }
+        #expect(ContinuousClock.now - start < .seconds(2))
+    }
+
+    @Test(.timeLimit(.minutes(1))) func cancellingTheCallerEndsTheWait() async {
+        let waiter = Task {
+            try await firstResult(within: .seconds(30)) { () async -> Int in
+                await withCheckedContinuation { (_: CheckedContinuation<Void, Never>) in }
+                return 0
+            }
+        }
+        try? await Task.sleep(for: .milliseconds(50))
+        let start = ContinuousClock.now
+        waiter.cancel()
+        let result = await waiter.result
+        #expect(ContinuousClock.now - start < .seconds(2))
+        guard case .failure(let error) = result else { Issue.record("expected a failure"); return }
+        #expect(error is CancellationError)
+    }
+}

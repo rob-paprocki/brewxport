@@ -1,0 +1,8 @@
+figlet	2.2.5	textproc amusements	banner-like program prints strings as ASCII art
+py-pyfiglet	1.0.4	python	A full port of FIGlet into pure python
+py310-pyfiglet	1.0.4	python	A full port of FIGlet into pure python
+py311-pyfiglet	1.0.4	python	A full port of FIGlet into pure python
+py312-pyfiglet	1.0.4	python	A full port of FIGlet into pure python
+py313-pyfiglet	1.0.4	python	A full port of FIGlet into pure python
+py314-pyfiglet	1.0.4	python	A full port of FIGlet into pure python
+toilet	0.3	graphics	toilet - colour based alternative to figlet using libcaca

@@ -1,0 +1,224 @@
+import Foundation
+
+/// MacPorts, driven through the `port` command line. Every install, upgrade and remove needs root.
+public struct MacPortsEngine: Engine {
+    public let id: EngineID = .macports
+    public let capabilities: EngineCapabilities = [.sourceBuilds]
+
+    private let runner: CommandRunning
+    private let executable: URL?
+
+    public var executableURL: URL? { executable }
+
+    public init(runner: CommandRunning, executable: URL?) {
+        self.runner = runner
+        self.executable = executable
+    }
+
+    // MARK: detect
+
+    public func detect() async -> EngineStatus {
+        await detectStatus(runner: runner, executable: executable, arguments: ["version"]) { stdout in
+            // "Version: 2.12.7"
+            for line in stdout.split(whereSeparator: \.isNewline) {
+                let text = line.trimmingCharacters(in: .whitespaces)
+                guard text.hasPrefix("Version:") else { continue }
+                let version = text.dropFirst("Version:".count).trimmingCharacters(in: .whitespaces)
+                if !version.isEmpty { return version }
+            }
+            return nil
+        }
+    }
+
+    // MARK: search / installed / outdated
+
+    public func search(_ query: String) async throws -> [Package] {
+        // Not `-q`: with `-q`, `search --line` prints names only (no version, categories or description).
+        let args = try searchArguments(["search", "--line"], query: query, engine: .macports)
+        let exe = try requireExecutable()
+        let result = try await runner.run(exe, args)
+        guard result.exitCode == 0 else {
+            throw failure("port search failed", result)
+        }
+        // Real port prints "No match for X found" on stdout and exits 0.
+        let lines = result.stdout.split(whereSeparator: \.isNewline)
+            .map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
+        if lines.count == 1, lines[0].hasPrefix("No match for "), lines[0].hasSuffix(" found") { return [] }
+        var packages: [Package] = []
+        for line in result.stdout.split(whereSeparator: \.isNewline) {
+            // name \t version \t categories \t description
+            let fields = line.split(separator: "\t", omittingEmptySubsequences: false)
+            guard fields.count >= 2 else { continue }
+            let name = fields[0].trimmingCharacters(in: .whitespaces)
+            guard !name.isEmpty else { continue }
+            let version = fields[1].trimmingCharacters(in: .whitespaces)
+            let summary = fields.count >= 4 ? fields[3...].joined(separator: "\t").trimmingCharacters(in: .whitespaces) : ""
+            packages.append(Package(id: ref(name),
+                                    displayName: name,
+                                    latestVersion: version.isEmpty ? nil : version,
+                                    summary: summary.isEmpty ? nil : summary))
+        }
+        try requireParsed(packages, lines, "search")
+        return packages
+    }
+
+    public func listInstalled() async throws -> [Package] {
+        // `-v` adds the fields after "(active)", archs among them.
+        let out = try await runOK(["-v", "-q", "installed", "active"])
+        var packages: [Package] = []
+        for line in out.split(whereSeparator: \.isNewline) {
+            // "  name @1.2.3_0+variant (active) requested_variants='+variant' platform='darwin 27' archs='arm64 x86_64' …"
+            let tokens = line.split(whereSeparator: \.isWhitespace)
+            guard tokens.count >= 2, tokens[1].hasPrefix("@") else { continue }
+            var version = tokens[1].dropFirst()
+            if let plus = version.firstIndex(of: "+") { version = version[..<plus] }
+            guard !version.isEmpty else { continue }
+            let name = String(tokens[0])
+            packages.append(Package(id: ref(name), displayName: name, installedVersion: String(version),
+                                    installedArchs: Self.archs(in: line)))
+        }
+        try requireParsed(packages, out.split(whereSeparator: \.isNewline).map(String.init), "installed")
+        return packages
+    }
+
+    public func listOutdated() async throws -> [Package] {
+        let out = try await runOK(["-q", "outdated"])
+        var packages: [Package] = []
+        for line in out.split(whereSeparator: \.isNewline) {
+            // "name   1.0_0 < 1.1_0", optionally followed by a reason such as "(platform darwin 24 != darwin 25)".
+            let tokens = line.split(whereSeparator: \.isWhitespace)
+            guard tokens.count >= 4, ["<", ">", "!="].contains(tokens[2]) else { continue }
+            let name = String(tokens[0])
+            packages.append(Package(id: ref(name), displayName: name,
+                                    installedVersion: String(tokens[1]),
+                                    latestVersion: String(tokens[3])))
+        }
+        try requireParsed(packages, out.split(whereSeparator: \.isNewline).map(String.init), "outdated")
+        return packages
+    }
+
+    /// The archs field of one `port -v installed` line: `archs='arm64 x86_64'`. nil without the field, for
+    /// `noarch`, or when no word in it is an arch BrewxPort knows.
+    static func archs(in line: Substring) -> Set<Arch>? {
+        guard let start = line.range(of: " archs='") else { return nil }
+        let rest = line[start.upperBound...]
+        guard let end = rest.firstIndex(of: "'") else { return nil }
+        let archs = Set(rest[..<end].split(separator: " ").compactMap { Arch(rawValue: String($0)) })
+        return archs.isEmpty ? nil : archs
+    }
+
+    // MARK: info
+
+    /// `port info --description --homepage --version --variants --depends_lib --depends_run <name>` prints one
+    /// "key: value" line per field; variants and dependencies are comma-separated.
+    public func info(_ ref: PackageRef) async throws -> PackageDetails {
+        guard ref.engine == .macports else {
+            throw EngineError(engine: .macports, message: "Package belongs to a different engine")
+        }
+        let name = try packageNameArguments([ref], engine: .macports)[0]
+        // `info` takes patterns: only a literal port name gives one block.
+        guard RootArguments.isValidPortName(name) else {
+            throw EngineError(engine: .macports, message: "Invalid port name: \(name)")
+        }
+        let out = try await runOK(["info", "--description", "--homepage", "--version", "--variants",
+                                   "--depends_lib", "--depends_run", name])
+        var fields: [String: String] = [:]
+        for line in out.split(whereSeparator: \.isNewline) {
+            guard let colon = line.firstIndex(of: ":") else { continue }
+            let key = line[..<colon].trimmingCharacters(in: .whitespaces)
+            guard !key.isEmpty, !key.contains(" ") else { continue }
+            let value = line[line.index(after: colon)...].trimmingCharacters(in: .whitespaces)
+            if fields[key] == nil { fields[key] = value }
+        }
+        guard let version = nonBlank(fields["version"]) else {
+            throw EngineError(engine: .macports, message: "Couldn't read port info output for \(name)")
+        }
+        func list(_ value: String?) -> [String] {
+            var seen = Set<String>()
+            return (value ?? "").split(separator: ",")
+                .map { $0.trimmingCharacters(in: .whitespaces) }
+                .filter { !$0.isEmpty && seen.insert($0).inserted }
+        }
+        let variants = list(fields["variants"]).compactMap { v -> String? in
+            let bare = v.drop(while: { $0 == "+" || $0 == "-" })
+            return bare.isEmpty ? nil : String(bare)
+        }
+        let dependencies = list((fields["depends_lib"] ?? "") + "," + (fields["depends_run"] ?? ""))
+        return PackageDetails(ref: ref, summary: nonBlank(fields["description"]), homepage: webURL(fields["homepage"]),
+                              latestVersion: version, dependencies: dependencies, variants: variants)
+    }
+
+    // MARK: commands
+
+    public func privilege(for op: PackageOperation, _ ref: PackageRef) -> Privilege {
+        .always
+    }
+
+    public func command(for op: PackageOperation, _ refs: [PackageRef], options: InstallOptions) throws -> CommandSpec {
+        guard refs.allSatisfy({ $0.engine == .macports }) else {
+            throw EngineError(engine: .macports, message: "Package belongs to a different engine")
+        }
+        guard options.version == nil else {
+            throw EngineError(engine: .macports, message: "MacPorts can't install a specific version")
+        }
+        let names = try packageNameArguments(refs, engine: .macports)
+        let exe = try requireExecutable()
+        let verb: String
+        var variants: [String] = []
+        switch op {
+        case .install:
+            verb = "install"
+            // port applies trailing variants to every port on the line, so they only make sense for one.
+            guard options.variants.isEmpty || refs.count == 1 else {
+                throw EngineError(engine: .macports, message: "Variants can only be given for one port at a time")
+            }
+            variants = options.variants
+        case .upgrade, .remove:
+            guard options.variants.isEmpty else {
+                throw EngineError(engine: .macports, message: "Variants only apply to install")
+            }
+            verb = op == .upgrade ? "upgrade" : "uninstall"
+        }
+        try RootArguments.validateMacPorts(names: names, variants: variants, extraArgs: options.extraArgs)
+        // Extra flags are port global options; port parses them the same after the action (port.tcl parse_options).
+        return CommandSpec(executable: exe,
+                           arguments: ["-N", verb] + options.extraArgs + names + variants,
+                           needsRoot: true)
+    }
+
+    // MARK: helpers
+
+    /// Non-blank output that yields no records means the format changed; fail instead of showing an empty list.
+    private func requireParsed(_ packages: [Package], _ lines: [String], _ what: String) throws {
+        if packages.isEmpty, lines.contains(where: { !$0.trimmingCharacters(in: .whitespaces).isEmpty }) {
+            throw EngineError(engine: .macports, message: "Couldn't read port \(what) output")
+        }
+    }
+
+    private func ref(_ name: String) -> PackageRef {
+        PackageRef(engine: .macports, kind: .port, name: name)
+    }
+
+    private func runOK(_ args: [String]) async throws -> String {
+        let exe = try requireExecutable()
+        let result = try await runner.run(exe, args)
+        guard result.exitCode == 0 else {
+            throw failure("port \(args.joined(separator: " ")) failed", result)
+        }
+        return result.stdout
+    }
+
+    private func requireExecutable() throws -> URL {
+        guard let executable else {
+            throw EngineError(engine: .macports, message: "MacPorts isn't installed")
+        }
+        return executable
+    }
+
+    private func failure(_ what: String, _ result: CommandResult) -> EngineError {
+        let err = result.stderr.trimmingCharacters(in: .whitespacesAndNewlines)
+        let excerpt = String(err.prefix(300))
+        let suffix = excerpt.isEmpty ? "" : ": \(excerpt)"
+        return EngineError(engine: .macports, message: "\(what) (exit \(result.exitCode))\(suffix)")
+    }
+}

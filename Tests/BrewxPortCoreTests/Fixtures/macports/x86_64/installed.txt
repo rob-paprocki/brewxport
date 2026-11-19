@@ -1,0 +1,1 @@
+  figlet @2.2.5_0 (active) requested_variants='' platform='darwin 24' archs='x86_64' date='2026-11-15T23:25:57-0500'

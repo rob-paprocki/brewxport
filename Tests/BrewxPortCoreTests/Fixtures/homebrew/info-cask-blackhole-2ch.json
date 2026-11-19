@@ -1,0 +1,75 @@
+{
+  "formulae": [],
+  "casks": [
+    {
+      "token": "blackhole-2ch",
+      "full_token": "blackhole-2ch",
+      "old_tokens": [],
+      "tap": "homebrew/cask",
+      "name": [
+        "BlackHole 2ch"
+      ],
+      "desc": "Virtual Audio Driver",
+      "homepage": "https://existential.audio/blackhole/",
+      "url": "https://existential.audio/downloads/BlackHole2ch-0.7.1.pkg",
+      "url_specs": {},
+      "version": "0.7.1",
+      "autobump": true,
+      "no_autobump_message": null,
+      "skip_livecheck": false,
+      "installed": null,
+      "installed_time": null,
+      "bundle_version": null,
+      "bundle_short_version": null,
+      "pinned": false,
+      "pinned_version": null,
+      "outdated": false,
+      "sha256": "57b540f27a3e29c37e310e01bee0fdfab76733087e47f997ef9dccf851400dcf",
+      "artifacts": [
+        {
+          "uninstall": [
+            {
+              "quit": "com.apple.audio.AudioMIDISetup",
+              "pkgutil": "audio.existential.BlackHole2ch"
+            }
+          ]
+        },
+        {
+          "pkg": [
+            "BlackHole2ch-0.7.1.pkg"
+          ]
+        },
+        {
+          "zap": []
+        }
+      ],
+      "caveats": "You must reboot for the installation of blackhole-2ch to take effect.\n",
+      "caveats_rosetta": null,
+      "depends_on": {
+        "macos": {}
+      },
+      "conflicts_with": null,
+      "container": null,
+      "rename": [],
+      "auto_updates": null,
+      "deprecated": false,
+      "deprecation_date": null,
+      "deprecation_reason": null,
+      "deprecation_replacement_formula": null,
+      "deprecation_replacement_cask": null,
+      "deprecate_args": null,
+      "disabled": false,
+      "disable_date": null,
+      "disable_reason": null,
+      "disable_replacement_formula": null,
+      "disable_replacement_cask": null,
+      "disable_args": null,
+      "tap_git_head": "e9f4b2544f0cfe28799193f64ab6fcf6acdfec18",
+      "languages": [],
+      "ruby_source_path": "Casks/b/blackhole-2ch.rb",
+      "ruby_source_checksum": {
+        "sha256": "febd6b8a9bbf9548e0b0a00a795bd2f631b7a0d162281fe98d8613f17c4a5d66"
+      }
+    }
+  ]
+}

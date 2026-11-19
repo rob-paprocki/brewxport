@@ -1,0 +1,1 @@
+{"schema":1,"query":"ripgrep","packages":[{"name":"ripgrep","kind":"formula","version":"15.2.0","desc":"Search tool like grep and The Silver Searcher","installed":false},{"name":"ripgrep-all","kind":"formula","version":"0.10.10","desc":"Wrapper around ripgrep that adds multiple rich file types","installed":false}]}

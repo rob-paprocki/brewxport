@@ -1,0 +1,609 @@
+{
+  "formulae": [
+    {
+      "name": "abseil",
+      "full_name": "abseil",
+      "tap": "homebrew/core",
+      "oldnames": [],
+      "aliases": [],
+      "versioned_formulae": [],
+      "desc": "C++ Common Libraries",
+      "license": "Apache-2.0",
+      "homepage": "https://abseil.io",
+      "versions": {
+        "stable": "20260817.0",
+        "head": "HEAD",
+        "bottle": true
+      },
+      "urls": {
+        "stable": {
+          "url": "https://github.com/abseil/abseil-cpp/archive/refs/tags/20260817.0.tar.gz",
+          "tag": null,
+          "revision": null,
+          "using": null,
+          "checksum": "f7e05179df39c45434cad433f5783840bb3788ef322976f9138bc6b72b3a107d"
+        },
+        "head": {
+          "url": "https://github.com/abseil/abseil-cpp.git",
+          "branch": "master",
+          "using": null
+        }
+      },
+      "patches": [],
+      "local_patch_checksums": {},
+      "revision": 0,
+      "version_scheme": 0,
+      "compatibility_version": 3,
+      "autobump": true,
+      "no_autobump_message": null,
+      "skip_livecheck": false,
+      "bottle": {
+        "stable": {
+          "rebuild": 1,
+          "root_url": "https://ghcr.io/v2/homebrew/core",
+          "files": {
+            "arm64_golden_gate": {
+              "cellar": ":any",
+              "url": "https://ghcr.io/v2/homebrew/core/abseil/blobs/sha256:2646bd89795f0c7a87af89580cd3f14a29eef006ab76fed189eb1e70250c9fbc",
+              "sha256": "2646bd89795f0c7a87af89580cd3f14a29eef006ab76fed189eb1e70250c9fbc"
+            }
+          }
+        }
+      },
+      "pour_bottle_only_if": null,
+      "keg_only": false,
+      "keg_only_reason": null,
+      "options": [],
+      "build_dependencies": [
+        "cmake",
+        "googletest"
+      ],
+      "dependencies": [],
+      "test_dependencies": [
+        "cmake"
+      ],
+      "recommended_dependencies": [],
+      "optional_dependencies": [],
+      "no_linkage_dependencies": [],
+      "uses_from_macos": [],
+      "uses_from_macos_bounds": [],
+      "requirements": [],
+      "conflicts_with": [],
+      "conflicts_with_reasons": [],
+      "link_overwrite": [],
+      "caveats": null,
+      "installed": [
+        {
+          "sbom": "/opt/homebrew/Cellar/abseil/20260817.0/sbom.spdx.json",
+          "version": "20260817.0",
+          "used_options": [],
+          "built_as_bottle": true,
+          "poured_from_bottle": true,
+          "time": 1794722738,
+          "runtime_dependencies": [],
+          "installed_on_request": false
+        }
+      ],
+      "linked_keg": "20260817.0",
+      "pinned": false,
+      "outdated": false,
+      "deprecated": false,
+      "deprecation_date": null,
+      "deprecation_reason": null,
+      "deprecation_replacement_formula": null,
+      "deprecation_replacement_cask": null,
+      "deprecate_args": null,
+      "disabled": false,
+      "disable_date": null,
+      "disable_reason": null,
+      "disable_replacement_formula": null,
+      "disable_replacement_cask": null,
+      "disable_args": null,
+      "post_install_steps": [],
+      "post_install_defined": false,
+      "service": null,
+      "tap_git_head": "0a752f1cebe5c6700d050b7ab5a86a03d26bc0c6",
+      "ruby_source_path": "Formula/a/abseil.rb",
+      "ruby_source_checksum": {
+        "sha256": "593fc7901a8949808a470c6b505b095cb0944367e64b2db876ea73661e59b3e7"
+      }
+    },
+    {
+      "name": "ada-url",
+      "full_name": "ada-url",
+      "tap": "homebrew/core",
+      "oldnames": [],
+      "aliases": [],
+      "versioned_formulae": [],
+      "desc": "WHATWG-compliant and fast URL parser written in modern C++",
+      "license": "Apache-2.0 OR MIT",
+      "homepage": "https://ada-url.com",
+      "versions": {
+        "stable": "4.0.0",
+        "head": "HEAD",
+        "bottle": true
+      },
+      "urls": {
+        "stable": {
+          "url": "https://github.com/ada-url/ada/archive/refs/tags/v4.0.0.tar.gz",
+          "tag": null,
+          "revision": null,
+          "using": null,
+          "checksum": "6d6c7ef7dd2e329320d34eb2ab29ccdc879ee3935af9dfb894a6640e58dc381d"
+        },
+        "head": {
+          "url": "https://github.com/ada-url/ada.git",
+          "branch": "main",
+          "using": null
+        }
+      },
+      "patches": [],
+      "local_patch_checksums": {},
+      "revision": 2,
+      "version_scheme": 0,
+      "compatibility_version": 2,
+      "autobump": true,
+      "no_autobump_message": null,
+      "skip_livecheck": false,
+      "bottle": {
+        "stable": {
+          "rebuild": 0,
+          "root_url": "https://ghcr.io/v2/homebrew/core",
+          "files": {
+            "arm64_golden_gate": {
+              "cellar": ":any",
+              "url": "https://ghcr.io/v2/homebrew/core/ada-url/blobs/sha256:0301940cf2332dffce80cf23a186226baacf1573198b836251ffc86cf3224427",
+              "sha256": "0301940cf2332dffce80cf23a186226baacf1573198b836251ffc86cf3224427"
+            }
+          }
+        }
+      },
+      "pour_bottle_only_if": null,
+      "keg_only": false,
+      "keg_only_reason": null,
+      "options": [],
+      "build_dependencies": [
+        "cmake",
+        "cxxopts"
+      ],
+      "dependencies": [
+        "fmt",
+        "simdutf"
+      ],
+      "test_dependencies": [],
+      "recommended_dependencies": [],
+      "optional_dependencies": [],
+      "no_linkage_dependencies": [],
+      "uses_from_macos": [
+        {
+          "python": "build"
+        }
+      ],
+      "uses_from_macos_bounds": [
+        {}
+      ],
+      "requirements": [],
+      "conflicts_with": [],
+      "conflicts_with_reasons": [],
+      "link_overwrite": [],
+      "caveats": null,
+      "installed": [
+        {
+          "sbom": "/opt/homebrew/Cellar/ada-url/4.0.0_1/sbom.spdx.json",
+          "version": "4.0.0_1",
+          "used_options": [],
+          "built_as_bottle": true,
+          "poured_from_bottle": true,
+          "time": 1794722740,
+          "runtime_dependencies": [
+            {
+              "full_name": "fmt",
+              "version": "12.2.1",
+              "revision": 0,
+              "bottle_rebuild": 0,
+              "pkg_version": "12.2.1",
+              "declared_directly": true,
+              "compatibility_version": 2
+            },
+            {
+              "full_name": "icu4c@79",
+              "version": "79.1",
+              "revision": 0,
+              "bottle_rebuild": 0,
+              "pkg_version": "79.1",
+              "declared_directly": false,
+              "compatibility_version": 1
+            },
+            {
+              "full_name": "simdutf",
+              "version": "9.3.3",
+              "revision": 0,
+              "bottle_rebuild": 0,
+              "pkg_version": "9.3.3",
+              "declared_directly": true,
+              "compatibility_version": 7
+            }
+          ],
+          "installed_on_request": false
+        }
+      ],
+      "linked_keg": "4.0.0_1",
+      "pinned": false,
+      "outdated": true,
+      "deprecated": false,
+      "deprecation_date": null,
+      "deprecation_reason": null,
+      "deprecation_replacement_formula": null,
+      "deprecation_replacement_cask": null,
+      "deprecate_args": null,
+      "disabled": false,
+      "disable_date": null,
+      "disable_reason": null,
+      "disable_replacement_formula": null,
+      "disable_replacement_cask": null,
+      "disable_args": null,
+      "post_install_steps": [],
+      "post_install_defined": false,
+      "service": null,
+      "tap_git_head": "0a752f1cebe5c6700d050b7ab5a86a03d26bc0c6",
+      "ruby_source_path": "Formula/a/ada-url.rb",
+      "ruby_source_checksum": {
+        "sha256": "4256a9516bf2d0e38fc8561b487c8a07d2e402298090d00ec7a59e03141db98d"
+      }
+    },
+    {
+      "name": "aom",
+      "full_name": "aom",
+      "tap": "homebrew/core",
+      "oldnames": [],
+      "aliases": [],
+      "versioned_formulae": [],
+      "desc": "Codec library for encoding and decoding AV1 video streams",
+      "license": "BSD-2-Clause",
+      "homepage": "https://aomedia.googlesource.com/aom",
+      "versions": {
+        "stable": "3.15.3",
+        "head": "HEAD",
+        "bottle": true
+      },
+      "urls": {
+        "stable": {
+          "url": "https://aomedia.googlesource.com/aom.git",
+          "tag": "v3.15.3",
+          "revision": "b141d9c45db236335351c8a4b2a14b3ade27c937",
+          "using": null,
+          "checksum": null
+        },
+        "head": {
+          "url": "https://aomedia.googlesource.com/aom.git",
+          "branch": "main",
+          "using": null
+        }
+      },
+      "patches": [],
+      "local_patch_checksums": {},
+      "revision": 0,
+      "version_scheme": 0,
+      "compatibility_version": 1,
+      "autobump": true,
+      "no_autobump_message": null,
+      "skip_livecheck": false,
+      "bottle": {
+        "stable": {
+          "rebuild": 0,
+          "root_url": "https://ghcr.io/v2/homebrew/core",
+          "files": {
+            "arm64_golden_gate": {
+              "cellar": ":any",
+              "url": "https://ghcr.io/v2/homebrew/core/aom/blobs/sha256:62c6e88627ca648845e877164e637feb66e64fbcc95a839f1f4a484fdfa359cd",
+              "sha256": "62c6e88627ca648845e877164e637feb66e64fbcc95a839f1f4a484fdfa359cd"
+            }
+          }
+        }
+      },
+      "pour_bottle_only_if": null,
+      "keg_only": false,
+      "keg_only_reason": null,
+      "options": [],
+      "build_dependencies": [
+        "cmake",
+        "pkgconf"
+      ],
+      "dependencies": [
+        "libvmaf"
+      ],
+      "test_dependencies": [],
+      "recommended_dependencies": [],
+      "optional_dependencies": [],
+      "no_linkage_dependencies": [],
+      "uses_from_macos": [],
+      "uses_from_macos_bounds": [],
+      "requirements": [],
+      "conflicts_with": [],
+      "conflicts_with_reasons": [],
+      "link_overwrite": [],
+      "caveats": null,
+      "installed": [
+        {
+          "sbom": "/opt/homebrew/Cellar/aom/3.15.3/sbom.spdx.json",
+          "version": "3.15.3",
+          "used_options": [],
+          "built_as_bottle": true,
+          "poured_from_bottle": true,
+          "time": 1794722756,
+          "runtime_dependencies": [
+            {
+              "full_name": "libvmaf",
+              "version": "3.2.1",
+              "revision": 0,
+              "bottle_rebuild": 0,
+              "pkg_version": "3.2.1",
+              "declared_directly": true,
+              "compatibility_version": 1
+            }
+          ],
+          "installed_on_request": false
+        }
+      ],
+      "linked_keg": "3.15.3",
+      "pinned": false,
+      "outdated": false,
+      "deprecated": false,
+      "deprecation_date": null,
+      "deprecation_reason": null,
+      "deprecation_replacement_formula": null,
+      "deprecation_replacement_cask": null,
+      "deprecate_args": null,
+      "disabled": false,
+      "disable_date": null,
+      "disable_reason": null,
+      "disable_replacement_formula": null,
+      "disable_replacement_cask": null,
+      "disable_args": null,
+      "post_install_steps": [],
+      "post_install_defined": false,
+      "service": null,
+      "tap_git_head": "0a752f1cebe5c6700d050b7ab5a86a03d26bc0c6",
+      "ruby_source_path": "Formula/a/aom.rb",
+      "ruby_source_checksum": {
+        "sha256": "4e0022eb623e33a862b612237eaec8bae138876dde6f9ca6d164d36678f46b23"
+      }
+    }
+  ],
+  "casks": [
+    {
+      "token": "android-commandlinetools",
+      "full_token": "android-commandlinetools",
+      "old_tokens": [],
+      "tap": "homebrew/cask",
+      "name": [
+        "Android SDK Command-line Tools"
+      ],
+      "desc": "Command-line tools for building and debugging Android apps",
+      "homepage": "https://developer.android.com/studio",
+      "url": "https://dl.google.com/android/repository/commandlinetools-mac_arm64-15859902_latest.zip",
+      "url_specs": {},
+      "version": "15859902",
+      "autobump": true,
+      "no_autobump_message": null,
+      "skip_livecheck": false,
+      "installed": "15859902",
+      "installed_time": 1794740863,
+      "bundle_version": null,
+      "bundle_short_version": null,
+      "pinned": false,
+      "pinned_version": null,
+      "outdated": false,
+      "sha256": "835b62a26162b229b441d1f6d4680383815a270809eb33522c0d480fa5002c4e",
+      "artifacts": [
+        {
+          "artifact": [
+            "cmdline-tools",
+            {
+              "target": "/opt/homebrew/share/android-commandlinetools/cmdline-tools/latest"
+            }
+          ],
+          "target": "/opt/homebrew/share/android-commandlinetools/cmdline-tools/latest"
+        },
+        {
+          "binary": [
+            "/opt/homebrew/share/android-commandlinetools/cmdline-tools/latest/bin/apkanalyzer"
+          ],
+          "target": "/opt/homebrew/bin/apkanalyzer"
+        },
+        {
+          "binary": [
+            "/opt/homebrew/share/android-commandlinetools/cmdline-tools/latest/bin/avdmanager"
+          ],
+          "target": "/opt/homebrew/bin/avdmanager"
+        },
+        {
+          "binary": [
+            "/opt/homebrew/share/android-commandlinetools/cmdline-tools/latest/bin/d8"
+          ],
+          "target": "/opt/homebrew/bin/d8"
+        },
+        {
+          "binary": [
+            "/opt/homebrew/share/android-commandlinetools/cmdline-tools/latest/bin/lint"
+          ],
+          "target": "/opt/homebrew/bin/lint"
+        },
+        {
+          "binary": [
+            "/opt/homebrew/share/android-commandlinetools/cmdline-tools/latest/bin/profgen"
+          ],
+          "target": "/opt/homebrew/bin/profgen"
+        },
+        {
+          "binary": [
+            "/opt/homebrew/share/android-commandlinetools/cmdline-tools/latest/bin/resourceshrinker"
+          ],
+          "target": "/opt/homebrew/bin/resourceshrinker"
+        },
+        {
+          "binary": [
+            "/opt/homebrew/share/android-commandlinetools/cmdline-tools/latest/bin/retrace"
+          ],
+          "target": "/opt/homebrew/bin/retrace"
+        },
+        {
+          "binary": [
+            "/opt/homebrew/share/android-commandlinetools/cmdline-tools/latest/bin/screenshot2"
+          ],
+          "target": "/opt/homebrew/bin/screenshot2"
+        },
+        {
+          "binary": [
+            "/opt/homebrew/share/android-commandlinetools/cmdline-tools/latest/bin/sdkmanager"
+          ],
+          "target": "/opt/homebrew/bin/sdkmanager"
+        },
+        {
+          "binary": [
+            "/opt/homebrew/share/android-commandlinetools/cmdline-tools/latest/bin/android"
+          ],
+          "target": "/opt/homebrew/bin/android"
+        },
+        {
+          "binary": [
+            "/opt/homebrew/share/android-commandlinetools/cmdline-tools/latest/bin/r8"
+          ],
+          "target": "/opt/homebrew/bin/r8"
+        },
+        {
+          "zap": [
+            {
+              "trash": [
+                "~/.android",
+                "/opt/homebrew/share/android-commandlinetools"
+              ]
+            }
+          ]
+        }
+      ],
+      "caveats": "Default Android SDK root is /opt/homebrew/share/android-commandlinetools\n\nandroid-commandlinetools requires Java. You can install the latest version with:\n  brew install --cask temurin\n",
+      "caveats_rosetta": null,
+      "depends_on": {},
+      "conflicts_with": null,
+      "container": null,
+      "rename": [],
+      "auto_updates": null,
+      "deprecated": false,
+      "deprecation_date": null,
+      "deprecation_reason": null,
+      "deprecation_replacement_formula": null,
+      "deprecation_replacement_cask": null,
+      "deprecate_args": null,
+      "disabled": false,
+      "disable_date": null,
+      "disable_reason": null,
+      "disable_replacement_formula": null,
+      "disable_replacement_cask": null,
+      "disable_args": null,
+      "tap_git_head": "e9f4b2544f0cfe28799193f64ab6fcf6acdfec18",
+      "languages": [],
+      "ruby_source_path": "Casks/a/android-commandlinetools.rb",
+      "ruby_source_checksum": {
+        "sha256": "81c359976b3962c902aebbc6ad1f09c9f4d5baaefa1e0e9bd0c2eb3f18745252"
+      }
+    },
+    {
+      "token": "android-platform-tools",
+      "full_token": "android-platform-tools",
+      "old_tokens": [],
+      "tap": "homebrew/cask",
+      "name": [
+        "Android SDK Platform-Tools"
+      ],
+      "desc": "Android SDK component",
+      "homepage": "https://developer.android.com/tools/releases/platform-tools",
+      "url": "https://dl.google.com/android/repository/platform-tools_r37.0.1-darwin.zip",
+      "url_specs": {},
+      "version": "37.0.1",
+      "autobump": true,
+      "no_autobump_message": null,
+      "skip_livecheck": false,
+      "installed": "37.0.1",
+      "installed_time": 1794740862,
+      "bundle_version": null,
+      "bundle_short_version": null,
+      "pinned": false,
+      "pinned_version": null,
+      "outdated": false,
+      "sha256": "ee39ad5967e95c2a07f04dbcbde96b1a0c916ba376096db5d2f498b7727a5d1d",
+      "artifacts": [
+        {
+          "binary": [
+            "/opt/homebrew/Caskroom/android-platform-tools/37.0.1/platform-tools/adb"
+          ],
+          "target": "/opt/homebrew/bin/adb"
+        },
+        {
+          "binary": [
+            "/opt/homebrew/Caskroom/android-platform-tools/37.0.1/platform-tools/etc1tool"
+          ],
+          "target": "/opt/homebrew/bin/etc1tool"
+        },
+        {
+          "binary": [
+            "/opt/homebrew/Caskroom/android-platform-tools/37.0.1/platform-tools/fastboot"
+          ],
+          "target": "/opt/homebrew/bin/fastboot"
+        },
+        {
+          "binary": [
+            "/opt/homebrew/Caskroom/android-platform-tools/37.0.1/platform-tools/hprof-conv"
+          ],
+          "target": "/opt/homebrew/bin/hprof-conv"
+        },
+        {
+          "binary": [
+            "/opt/homebrew/Caskroom/android-platform-tools/37.0.1/platform-tools/make_f2fs"
+          ],
+          "target": "/opt/homebrew/bin/make_f2fs"
+        },
+        {
+          "binary": [
+            "/opt/homebrew/Caskroom/android-platform-tools/37.0.1/platform-tools/make_f2fs_casefold"
+          ],
+          "target": "/opt/homebrew/bin/make_f2fs_casefold"
+        },
+        {
+          "binary": [
+            "/opt/homebrew/Caskroom/android-platform-tools/37.0.1/platform-tools/mke2fs"
+          ],
+          "target": "/opt/homebrew/bin/mke2fs"
+        },
+        {
+          "zap": []
+        }
+      ],
+      "caveats": null,
+      "caveats_rosetta": null,
+      "depends_on": {},
+      "conflicts_with": null,
+      "container": null,
+      "rename": [],
+      "auto_updates": null,
+      "deprecated": false,
+      "deprecation_date": null,
+      "deprecation_reason": null,
+      "deprecation_replacement_formula": null,
+      "deprecation_replacement_cask": null,
+      "deprecate_args": null,
+      "disabled": false,
+      "disable_date": null,
+      "disable_reason": null,
+      "disable_replacement_formula": null,
+      "disable_replacement_cask": null,
+      "disable_args": null,
+      "tap_git_head": "e9f4b2544f0cfe28799193f64ab6fcf6acdfec18",
+      "languages": [],
+      "ruby_source_path": "Casks/a/android-platform-tools.rb",
+      "ruby_source_checksum": {
+        "sha256": "bc0c3a44a7aca0c61629065299a4bbf3a13f6c08d11f7dec6c8cd4bd399f5513"
+      }
+    }
+  ]
+}
