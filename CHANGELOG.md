@@ -7,6 +7,15 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-11-19
+
+**Upgrading:** nothing to do. From this release on, download `BrewxPort-X.Y.Z.dmg` and drag BrewxPort to Applications, or run the new installer package. The zip is still there.
+
+### Added
+
+- Each release now has a disk image, `BrewxPort-X.Y.Z.dmg`, signed and notarized like the app inside it. Open it and drag BrewxPort to Applications. `scripts/build-app.sh --notarize PROFILE --dmg` builds it.
+- Each release also has an installer package, `BrewxPort-X.Y.Z.pkg`, for people and deployment tools that prefer one. It installs the same app to Applications, has no install scripts, and is signed and notarized. `scripts/build-app.sh --notarize PROFILE --pkg` builds it.
+
 ## [0.1.0] - 2026-11-19
 
 **Upgrading:** nothing to do.

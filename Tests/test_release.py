@@ -1331,7 +1331,7 @@ class PublicShape(unittest.TestCase):
         # release.yml made the release, and never over an existing file.
         # It is always notarized, with the owner's keychain profile, set up by the owner himself.
         build_line = ('/tmp/brewxport-app/scripts/build-app.sh --identity "Developer ID Application" '
-                      '--out /tmp/brewxport-app-out --notarize brewxport-notary')
+                      '--out /tmp/brewxport-app-out --notarize brewxport-notary --dmg --pkg')
         self.assertIn(build_line, rel)
         self.assertNotRegex(rel.replace(build_line, ""), r"scripts/build-app\.sh --identity")
         self.assertIn("xcrun notarytool store-credentials brewxport-notary --apple-id APPLE_ID --team-id TEAM_ID", rel)
@@ -1339,6 +1339,19 @@ class PublicShape(unittest.TestCase):
         self.assertLess(rel.index(build_line), rel.index("gh release upload vX.Y.Z BrewxPort-X.Y.Z.zip"))
         self.assertNotIn("NOTARY_PROFILE", rel)
         self.assertIn("gh release upload vX.Y.Z BrewxPort-X.Y.Z.zip -R rob-paprocki/brewxport", rel)
+        # The disk image is the main download: notarized, stapled, checked with Gatekeeper, attached after the build.
+        self.assertIn("gh release upload vX.Y.Z BrewxPort-X.Y.Z.dmg -R rob-paprocki/brewxport", rel)
+        self.assertLess(rel.index(build_line), rel.index("gh release upload vX.Y.Z BrewxPort-X.Y.Z.dmg"))
+        self.assertIn("xcrun stapler validate /tmp/brewxport-app-out/BrewxPort-X.Y.Z.dmg", rel)
+        self.assertIn("spctl -a -vvv -t open --context context:primary-signature", rel)
+        self.assertNotIn("--dmg-unnotarized --", rel)
+        # The installer package: notarized, stapled, Gatekeeper's install check, its app scanned too.
+        self.assertIn("gh release upload vX.Y.Z BrewxPort-X.Y.Z.pkg -R rob-paprocki/brewxport", rel)
+        self.assertLess(rel.index(build_line), rel.index("gh release upload vX.Y.Z BrewxPort-X.Y.Z.pkg"))
+        self.assertIn("xcrun stapler validate /tmp/brewxport-app-out/BrewxPort-X.Y.Z.pkg", rel)
+        self.assertIn("spctl -a -vvv -t install /tmp/brewxport-app-out/BrewxPort-X.Y.Z.pkg", rel)
+        self.assertIn("pkgutil --expand-full /tmp/brewxport-app-out/BrewxPort-X.Y.Z.pkg", rel)
+        self.assertLess(rel.index("pkgutil --expand-full"), rel.index("build_public.py --explain wordlist.local /tmp"))
         self.assertNotIn("--clobber", rel)
         self.assertLess(rel.index("gh workflow run release.yml -R rob-paprocki/brewxport -f tag=vX.Y.Z"),
                         rel.index("gh release upload vX.Y.Z BrewxPort-X.Y.Z.zip"))

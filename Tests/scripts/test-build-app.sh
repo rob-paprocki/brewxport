@@ -2,7 +2,8 @@
 # Builds BrewxPort.app into a temporary directory with scripts/build-app.sh and checks the result independently of
 # the script's own checks: layout, universal binaries, signatures, entitlements, the Developer ID code
 # requirements, the launchd plist, the helper's embedded BrewxPortClientRequirement, that no team ID reached the
-# build output, and `BrewxPort --self-check`.
+# build output, and `BrewxPort --self-check`. Then a local --dmg-unnotarized build: the signed disk image, mounted
+# and checked (notarization itself is covered by Tests/scripts/test-notarize.sh, and by every release).
 #
 # usage: Tests/scripts/test-build-app.sh [build-app.sh arguments, e.g. --identity NAME --keychain PATH]
 # Needs a code-signing identity (see build-app.sh) and the network (secure timestamps). It never registers the
@@ -17,6 +18,7 @@ pass() { echo "ok:   $*"; }
 
 bash -n "$SCRIPT" && pass "bash -n scripts/build-app.sh" || fail "bash -n scripts/build-app.sh"
 bash -n "$0" && pass "bash -n Tests/scripts/test-build-app.sh" || fail "bash -n Tests/scripts/test-build-app.sh"
+bash -n "$ROOT/scripts/make-dmg.sh" && pass "bash -n scripts/make-dmg.sh" || fail "bash -n scripts/make-dmg.sh"
 bash -n "$ROOT/scripts/demo.sh" && pass "bash -n scripts/demo.sh" || fail "bash -n scripts/demo.sh"
 
 # Demo mode builds none of the live services: no forbidden name on any non-comment line of Sources/BrewxPortUI/Demo.
@@ -166,6 +168,46 @@ if "$SCRIPT" ${1+"$@"} --with-demo-fixtures --out "$TMP/demo-out" >"$TMP/demo-bu
 else
     tail -40 "$TMP/demo-build.log" >&2
     fail "build-app.sh --with-demo-fixtures failed"
+fi
+
+# --dmg-unnotarized: a signed disk image of the (unnotarized) app, for local tests. Releases use --notarize --dmg.
+if "$SCRIPT" ${1+"$@"} --dmg-unnotarized --out "$TMP/dmg-out" >"$TMP/dmg-build.log" 2>&1; then
+    version="$(plutil -extract CFBundleShortVersionString raw -o - "$TMP/dmg-out/BrewxPort.app/Contents/Info.plist")"
+    DMG="$TMP/dmg-out/BrewxPort-$version-unnotarized.dmg"
+    [ -f "$DMG" ] && [ ! -e "$TMP/dmg-out/BrewxPort-$version.dmg" ] &&
+        pass "--dmg-unnotarized made BrewxPort-$version-unnotarized.dmg only" || fail "--dmg-unnotarized: image name"
+    [ "$(tail -1 "$TMP/dmg-build.log")" = "made $(cd "$TMP/dmg-out" && pwd)/BrewxPort-$version-unnotarized.dmg" ] &&
+        pass "--dmg-unnotarized prints the image path last" || fail "--dmg-unnotarized: last line"
+    codesign --verify --strict "$DMG" && pass "the disk image's signature verifies" || fail "disk image signature"
+    if [ -n "$team" ]; then
+        dmg_team="$(codesign -dv --verbose=4 "$DMG" 2>&1 | awk -F= '/^TeamIdentifier=/ { print $2 }')"
+        [ "$dmg_team" = "$team" ] && pass "the disk image is signed by the app's team" || fail "disk image: another team"
+        ! grep -q -- "$team" "$TMP/dmg-build.log" && pass "team ID not printed by the disk-image build" ||
+            fail "the disk-image build output contains the team ID"
+    fi
+    [[ "$(codesign -dv --verbose=4 "$DMG" 2>&1)" == *$'\n'"Timestamp="* ]] && pass "the disk image has a secure timestamp" ||
+        fail "disk image: no secure timestamp"
+    mkdir "$TMP/dmg-mount"
+    if hdiutil attach "$DMG" -nobrowse -readonly -noautoopen -mountpoint "$TMP/dmg-mount" -quiet; then
+        [ "$(diskutil info -plist "$TMP/dmg-mount" | plutil -extract VolumeName raw -o - -)" = "BrewxPort $version" ] &&
+            pass "volume named BrewxPort $version" || fail "disk image volume name"
+        [ "$(readlink "$TMP/dmg-mount/Applications")" = /Applications ] && pass "the image has the Applications link" ||
+            fail "the image lacks the Applications link"
+        codesign --verify --strict --deep "$TMP/dmg-mount/BrewxPort.app" && pass "the app on the image verifies" ||
+            fail "the app on the image doesn't verify"
+        for path in Contents/MacOS/BrewxPort Contents/MacOS/brewxport-askpass Contents/Library/HelperTools/BrewxPortHelper; do
+            archs="$(lipo -archs "$TMP/dmg-mount/BrewxPort.app/$path")"
+            [ "$archs" = "x86_64 arm64" ] || [ "$archs" = "arm64 x86_64" ] && pass "image: $path is $archs" ||
+                fail "image: $path is $archs"
+        done
+        no_home_paths "$TMP/dmg-mount/BrewxPort.app" "image: "
+        hdiutil detach "$TMP/dmg-mount" -quiet || hdiutil detach "$TMP/dmg-mount" -force -quiet
+    else
+        fail "couldn't mount the disk image"
+    fi
+else
+    tail -40 "$TMP/dmg-build.log" >&2
+    fail "build-app.sh --dmg-unnotarized failed"
 fi
 
 if [ "$failures" -gt 0 ]; then

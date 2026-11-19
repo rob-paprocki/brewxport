@@ -8,7 +8,7 @@
 #   BrewxPort.app/Contents/Library/LaunchDaemons/com.brewxport.helper.plist
 #
 # usage: scripts/build-app.sh [--identity NAME] [--keychain PATH] [--out DIR] [--with-demo-fixtures]
-#                             [--notarize PROFILE]
+#                             [--notarize PROFILE [--dmg] [--pkg]] [--dmg-unnotarized] [--installer-identity NAME]
 #
 #   --identity  code-signing identity: a name (or part of one) or a SHA-1. Default: $BREWXPORT_SIGN_IDENTITY, else
 #               "Developer ID Application". It must match exactly one valid identity.
@@ -18,6 +18,15 @@
 #               `BrewxPort --demo` works from the bundle. Never for a release: a release bundle has no fixtures.
 #   --notarize  after the build, notarize and staple the app with this notarytool keychain profile and leave
 #               BrewxPort-<version>.zip next to it (scripts/notarize.sh). Every release is built this way.
+#   --dmg       with --notarize: then put the stapled app on a signed, notarized and stapled disk image,
+#               BrewxPort-<version>.dmg, next to the zip (scripts/make-dmg.sh). Every release is built this way.
+#   --dmg-unnotarized  for local tests only: a signed disk image of the unnotarized app, named
+#               BrewxPort-<version>-unnotarized.dmg. Can't be combined with --notarize.
+#   --pkg       with --notarize: also wrap the stapled app in a signed, notarized and stapled installer package,
+#               BrewxPort-<version>.pkg, that installs it to /Applications (scripts/make-pkg.sh). Every release
+#               is built this way, next to the disk image.
+#   --installer-identity  the Developer ID Installer identity for --pkg: a name (or part of one) or a SHA-1.
+#               Default: $BREWXPORT_INSTALLER_IDENTITY, else "Developer ID Installer". Never printed.
 #
 # The team ID is read from the identity's certificate (its OU) at build time and is never stored in the
 # repository or printed. It goes into BrewxPortHelper's embedded Info.plist as BrewxPortClientRequirement, so the helper
@@ -34,6 +43,10 @@ KEYCHAIN=""
 OUT="$ROOT/build"
 DEMO_FIXTURES=0
 NOTARY_PROFILE=""
+DMG=0
+DMG_UNNOTARIZED=0
+PKG=0
+INSTALLER_IDENTITY="${BREWXPORT_INSTALLER_IDENTITY:-Developer ID Installer}"
 
 die() { echo "build-app: $*" >&2; exit 1; }
 
@@ -44,7 +57,11 @@ while [ $# -gt 0 ]; do
         --out) [ $# -ge 2 ] || die "--out needs a value"; OUT="$2"; shift 2 ;;
         --with-demo-fixtures) DEMO_FIXTURES=1; shift ;;
         --notarize) [ $# -ge 2 ] || die "--notarize needs a keychain profile"; NOTARY_PROFILE="$2"; shift 2 ;;
-        -h|--help) sed -n '2,27p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+        --dmg) DMG=1; shift ;;
+        --dmg-unnotarized) DMG_UNNOTARIZED=1; shift ;;
+        --pkg) PKG=1; shift ;;
+        --installer-identity) [ $# -ge 2 ] || die "--installer-identity needs a value"; INSTALLER_IDENTITY="$2"; shift 2 ;;
+        -h|--help) sed -n '2,37p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
         *) die "unknown argument: $1 (see --help)" ;;
     esac
 done
@@ -52,6 +69,22 @@ done
 if [ -n "$NOTARY_PROFILE" ] && [ "$DEMO_FIXTURES" -eq 1 ]; then
     die "--notarize is for releases, and a release bundle has no demo fixtures"
 fi
+if [ "$DMG" -eq 1 ] && [ -z "$NOTARY_PROFILE" ]; then
+    die "--dmg needs --notarize PROFILE: a release disk image is always notarized (--dmg-unnotarized is for local tests)"
+fi
+if [ "$DMG_UNNOTARIZED" -eq 1 ] && { [ -n "$NOTARY_PROFILE" ] || [ "$DMG" -eq 1 ]; }; then
+    die "--dmg-unnotarized is for local tests; with --notarize, use --dmg"
+fi
+if { [ "$DMG" -eq 1 ] || [ "$DMG_UNNOTARIZED" -eq 1 ]; } && [ "$DEMO_FIXTURES" -eq 1 ]; then
+    die "a disk image never ships demo fixtures"
+fi
+if [ "$PKG" -eq 1 ] && [ -z "$NOTARY_PROFILE" ]; then
+    die "--pkg needs --notarize PROFILE: a release package is always notarized"
+fi
+if [ "$PKG" -eq 1 ] && [ "$DEMO_FIXTURES" -eq 1 ]; then
+    die "a package never ships demo fixtures"
+fi
+[ -n "$INSTALLER_IDENTITY" ] || die "the installer identity is empty"
 if [ -n "$KEYCHAIN" ]; then
     [ -f "$KEYCHAIN" ] || die "no keychain at $KEYCHAIN"
 fi
@@ -89,20 +122,39 @@ identities="$(security find-identity -v -p codesigning ${keychain_args[@]+"${key
         sha = $2; name = $0; sub(/^[^"]*"/, "", name); sub(/"[^"]*$/, "", name)
         if (!(sha in seen)) { seen[sha] = 1; print sha "\t" name }
     }')"
-upper_identity="$(printf '%s' "$IDENTITY" | tr 'a-f' 'A-F')"
-matches="$(printf '%s\n' "$identities" | awk -F'\t' -v want="$IDENTITY" -v sha="$upper_identity" '
-    NF == 2 && ($1 == sha || index($2, want) > 0) { print $1 }')"
-count="$(printf '%s' "$matches" | grep -c . || true)"
-[ "$count" -ge 1 ] || die "no valid code-signing identity matches the one asked for"
-[ "$count" -eq 1 ] || die "$count identities match; pass the SHA-1 of one with --identity"
-SIGN_SHA="$matches"
+# The one SHA-1 among "SHA1<TAB>name" lines whose SHA-1 is $2 or whose name contains $2. Never prints a name.
+match_identity() { # identities want flag
+    local upper matches count
+    upper="$(printf '%s' "$2" | tr 'a-f' 'A-F')"
+    matches="$(printf '%s\n' "$1" | awk -F'\t' -v want="$2" -v sha="$upper" '
+        NF == 2 && ($1 == sha || index($2, want) > 0) { print $1 }')"
+    count="$(printf '%s' "$matches" | grep -c . || true)"
+    [ "$count" -ge 1 ] || die "no valid identity matches the one asked for with $3"
+    [ "$count" -eq 1 ] || die "$count identities match; pass the SHA-1 of one with $3"
+    printf '%s' "$matches"
+}
+SIGN_SHA="$(match_identity "$identities" "$IDENTITY" --identity)"
 
-# The certificate whose SHA-1 is SIGN_SHA, then its subject's OU.
+# The Developer ID Installer identity, for --pkg. `security find-identity -p codesigning` leaves installer
+# identities out, so this lists them without a policy.
+INSTALLER_SHA=""
+if [ "$PKG" -eq 1 ]; then
+    installers="$(security find-identity -v ${keychain_args[@]+"${keychain_args[@]}"} |
+        awk '/^ *[0-9]+\) [0-9A-F]{40} "/ {
+            sha = $2; name = $0; sub(/^[^"]*"/, "", name); sub(/"[^"]*$/, "", name)
+            if (!(sha in seen) && index(name, "Installer") > 0) { seen[sha] = 1; print sha "\t" name }
+        }')"
+    INSTALLER_SHA="$(match_identity "$installers" "$INSTALLER_IDENTITY" --installer-identity)"
+fi
+
+# The certificate whose SHA-1 is SIGN_SHA, then its subject's OU. The awk filters read to the end rather than
+# exit early: under pipefail, an early exit would kill `security` with SIGPIPE when more certificates follow.
 TEAM="$(security find-certificate -a -Z -p ${keychain_args[@]+"${keychain_args[@]}"} |
-    awk -v sha="$SIGN_SHA" '/^SHA-1 hash:/ { grab = ($3 == sha) } grab { print } /END CERTIFICATE/ && grab { exit }' |
+    awk -v sha="$SIGN_SHA" '/^SHA-1 hash:/ { grab = (!done && $3 == sha) } grab { print }
+        /END CERTIFICATE/ && grab { grab = 0; done = 1 }' |
     sed -n '/BEGIN CERTIFICATE/,/END CERTIFICATE/p' |
     /usr/bin/openssl x509 -noout -subject -nameopt multiline 2>/dev/null |
-    awk -F' = ' '/organizationalUnitName/ { print $2; exit }')"
+    awk -F' = ' '/organizationalUnitName/ && !found { print $2; found = 1 }')"
 [[ "$TEAM" =~ ^[A-Z0-9]{10}$ ]] || die "couldn't read a team ID from the identity's certificate"
 
 # Same string as CodeIdentity.requirement(identifier:team:) and the test script's; change all three together.
@@ -236,4 +288,17 @@ echo "built $APP"
 
 if [ -n "$NOTARY_PROFILE" ]; then
     "$ROOT/scripts/notarize.sh" "$APP" "$NOTARY_PROFILE"
+fi
+
+DMG_ARGS=(--sign "$SIGN_SHA")
+if [ -n "$KEYCHAIN" ]; then DMG_ARGS+=(--keychain "$KEYCHAIN"); fi
+if [ "$DMG" -eq 1 ]; then
+    "$ROOT/scripts/make-dmg.sh" "$APP" "${DMG_ARGS[@]}" --notarize "$NOTARY_PROFILE"
+elif [ "$DMG_UNNOTARIZED" -eq 1 ]; then
+    "$ROOT/scripts/make-dmg.sh" "$APP" "${DMG_ARGS[@]}" --unnotarized
+fi
+if [ "$PKG" -eq 1 ]; then
+    PKG_ARGS=(--sign "$INSTALLER_SHA")
+    if [ -n "$KEYCHAIN" ]; then PKG_ARGS+=(--keychain "$KEYCHAIN"); fi
+    "$ROOT/scripts/make-pkg.sh" "$APP" "${PKG_ARGS[@]}" --notarize "$NOTARY_PROFILE"
 fi
