@@ -42,6 +42,9 @@ import Foundation
             #expect(path.split(separator: ":").contains(Substring(p)))
         }
         #expect(env["HOMEBREW_NO_AUTO_UPDATE"] == "1")
+        // Without it, NO_AUTO_UPDATE also freezes Homebrew's package data, so Updates compares against whatever was
+        // downloaded the last time brew ran in Terminal (Homebrew 7 api.rb; checked in a VM 2026-11-21).
+        #expect(env["HOMEBREW_FORCE_API_AUTO_UPDATE"] == "1")
         #expect(env["HOMEBREW_NO_ENV_HINTS"] == "1")
         #expect(env["NONINTERACTIVE"] == "1")
     }

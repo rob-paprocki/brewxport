@@ -64,7 +64,12 @@ public struct ProcessRunner: CommandRunning {
         var env: [String: String] = [
             "PATH": "/opt/homebrew/bin:/usr/local/bin:/opt/local/bin:/usr/bin:/bin:/usr/sbin:/sbin",
             "LANG": "en_US.UTF-8",
+            // No `brew update` of Homebrew itself or its taps behind the user's back...
             "HOMEBREW_NO_AUTO_UPDATE": "1",
+            // ...but keep the package data fresh: on its own, NO_AUTO_UPDATE stops Homebrew 7 ever re-downloading
+            // it, so `outdated` and `upgrade` would work from the copy fetched the last time brew ran in Terminal.
+            // With this, install/outdated/upgrade refresh data older than HOMEBREW_API_AUTO_UPDATE_SECS (450 s).
+            "HOMEBREW_FORCE_API_AUTO_UPDATE": "1",
             "HOMEBREW_NO_ENV_HINTS": "1",
             "NONINTERACTIVE": "1",
         ]

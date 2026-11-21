@@ -7,6 +7,16 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.2.1] - 2026-11-21
+
+**Upgrading:** nothing to do.
+
+### Fixed
+
+- Updates works from current Homebrew data. BrewxPort used to stop Homebrew from refreshing its list of available versions, so it only knew about releases up to the last time you ran `brew` in Terminal. It still doesn't update Homebrew itself or your taps.
+- When something goes wrong in a run, the panel says "Finished with problems" instead of "Finished". That covers a step that failed or was skipped, such as app updates on an account that isn't an administrator.
+- After an update, BrewxPort checks Updates again and names any package that's still out of date.
+
 ## [0.2.0] - 2026-11-19
 
 **Upgrading:** nothing to do. From this release on, download `BrewxPort-X.Y.Z.dmg` and drag BrewxPort to Applications, or run the new installer package. The zip is still there.

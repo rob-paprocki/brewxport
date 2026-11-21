@@ -566,13 +566,45 @@ import BrewxPortRun
     }
 
     @Test func finishedRunSaysFinishedWithNoProblems() async {
-        let executor = FakeRunExecutor()
+        // A real run reports each step; a bare `.done` would leave the step skipped ("Finished with problems").
+        let executor = FakeRunExecutor(events: [.started(0), .finished(0, 0), .done])
         let model = BrewxPortAppModel(services: F.services(executor: executor, isDemo: true))
         _ = await F.source([F.package(.homebrew, .formula, "wget")], in: model)
         model.perform(.install, on: [F.wget])
         #expect(await waitUntil { executor.runs.count == 1 && !model.run.isRunning })
         #expect(model.run.headline == "Finished")
         #expect(model.run.problems.isEmpty)
+    }
+
+    // The 0.2.0 report: Updates listed apps, the run said "Finished", nothing changed. On a standard account the cask
+    // step is skipped while the formula step runs; the header has to say so.
+    @Test func standardAccountSkippingACaskSaysFinishedWithProblems() async {
+        let executor = FakeRunExecutor()
+        let model = BrewxPortAppModel(services: F.services(executor: executor, isDemo: true, isAdministrator: false))
+        let wget = F.package(.homebrew, .formula, "wget", installed: "1")
+        let firefox = F.package(.homebrew, .cask, "firefox", installed: "1")
+        _ = await F.source([wget, firefox], in: model)
+        model.perform(.update, on: [wget.id, firefox.id])
+        #expect(await waitUntil { executor.runs.count == 1 && !model.run.isRunning })
+        #expect(model.run.problems.contains { $0.contains("administrator account") })
+        #expect(model.run.headline == "Finished with problems")
+    }
+
+    // Whatever the cause (a skipped step, a failed one, Homebrew printing "Not upgrading" and exiting 0), a package
+    // that's still outdated once Updates reloads after the run is named in the panel.
+    @Test func updateThatLeavesAPackageOutdatedNamesIt() async {
+        let catalog = FakeCatalog()
+        let executor = FakeRunExecutor()
+        let model = BrewxPortAppModel(services: F.services(catalog: catalog, executor: executor, isDemo: true))
+        let wget = F.package(.homebrew, .formula, "wget", installed: "1")
+        let jq = F.package(.homebrew, .formula, "jq", installed: "1")
+        // Homebrew keeps reporting wget as outdated after the run; jq was updated.
+        catalog.script(.outdated, .homebrew, packages: [wget])
+        _ = await F.source([wget, jq], in: model)
+        model.perform(.update, on: [wget.id, jq.id])
+        #expect(await waitUntil { executor.runs.count == 1 && !model.run.isRunning })
+        #expect(await waitUntil { model.run.problems.contains("Still out of date after the update: wget.") })
+        #expect(model.run.headline == "Finished with problems")
     }
 
     @Test func returnAndToolbarInstallSkipFilterHiddenRows() async {

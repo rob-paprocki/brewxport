@@ -515,6 +515,8 @@ import BrewxPortRun
 
     private func startRun(_ requests: [ActionRequest], caskRoutes: [PackageRef: CaskRoute]) {
         let plan = ActionPlanner.make(requests, engines: services.engines, order: engineOrder, caskRoutes: caskRoutes)
+        requestedUpgrades = requests.filter { $0.operation == .upgrade }
+            .map { (ref: $0.package.id, name: $0.package.displayName) }
         if services.isDemo {
             run.start(plan) { .enabled }
         } else if services.helper == nil {
@@ -535,7 +537,29 @@ import BrewxPortRun
 
     private func runEnded() {
         reloadListsNow()
+        checkUpdatesTookEffect()
         onRunEnded?()
+    }
+
+    /// The packages the last run was asked to update, by ref with the name to show. Set by `startRun`.
+    @ObservationIgnored private var requestedUpgrades: [(ref: PackageRef, name: String)] = []
+
+    /// After an update run, once Updates has reloaded: any package the run was asked to update that the engine still
+    /// lists as outdated is named in the run panel. That covers every way an update can quietly not happen (a step
+    /// the preflight skipped, a failed one, Homebrew printing "Not upgrading …" and exiting 0).
+    private func checkUpdatesTookEffect() {
+        let asked = requestedUpgrades
+        requestedUpgrades = []
+        guard !asked.isEmpty else { return }
+        let runNumber = run.runNumber
+        Task { [weak self] in
+            guard let self else { return }
+            await self.updates.list.settled()
+            let still = Set(self.updates.list.all.map(\.id))
+            let names = asked.filter { still.contains($0.ref) }.map(\.name)
+            guard !names.isEmpty else { return }
+            self.run.addProblem("Still out of date after the update: \(names.joined(separator: ", ")).", run: runNumber)
+        }
     }
 
     /// Called after every run ends. The app reopens the window if it was closed during the run.

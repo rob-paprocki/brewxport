@@ -43,10 +43,31 @@ public final class RunController: PasswordPrompting {
     /// these without the log being opened.
     public private(set) var problems: [String] = []
 
-    /// The panel's header: "Running", "Nothing ran" when the plan and preflight left no step, else "Finished".
+    /// The panel's header: "Running", "Nothing ran" when the plan and preflight left no step, "Finished with
+    /// problems" when a step failed or was skipped or something is listed in `problems` (a step the preflight left
+    /// out, a package still outdated after the run), else "Finished".
     public var headline: String {
         if isRunning { return "Running" }
-        return steps.isEmpty ? "Nothing ran" : "Finished"
+        if steps.isEmpty { return "Nothing ran" }
+        let stepWentWrong = steps.contains {
+            switch $0.state {
+            case .failed, .skipped: return true
+            default: return false
+            }
+        }
+        return stepWentWrong || !problems.isEmpty || passwordRejected || privilegeProblem != nil
+            ? "Finished with problems" : "Finished"
+    }
+
+    /// Which run is current; `addProblem` ignores a report for an earlier one.
+    public var runNumber: Int { generation }
+
+    /// A problem found after run `run` ended (Updates still listing a package it updated). Shown with the others and
+    /// noted in the log. Ignored once another run has started.
+    public func addProblem(_ problem: String, run: Int) {
+        guard run == generation, !isRunning, !problems.contains(problem) else { return }
+        problems.append(problem)
+        log.note(problem, isError: true)
     }
 
     /// Shown from `start` until `dismissPanel()`, which is a no-op mid-run.
