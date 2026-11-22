@@ -7,6 +7,26 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-11-22
+
+**Upgrading:** nothing to do.
+
+### Added
+
+- Move to: right-click a command-line tool on Installed, or choose Package > Move to, to move it to Homebrew, nanobrew or MacPorts. Packages that need it move too, after a preview that lists everything. Old copies are removed only after the new ones are installed and checked, and leftover libraries are offered for removal. Moves between Homebrew and nanobrew need no password.
+- Add to PATH on the Move to preview: when the other package manager's folder isn't on your PATH, one click adds the line to `~/.zprofile` or `~/.bash_profile`. Nothing is edited unless you click it.
+- BrewxPort has an app icon: a ship carrying colored containers. Earlier versions showed macOS's blank app icon.
+- A Helper row at the bottom of the sidebar shows whether BrewxPort's helper is ready or needs your approval. Its page says what the helper does, has Check again (and Reinstall helper when it's broken), and opens Login Items in System Settings, where macOS lists it. The helper used to show only on the MacPorts page.
+
+### Changed
+
+- A wrong administrator password brings the password sheet back, up to three tries, instead of ending the run. A new run's password sheet no longer shows the last run's error.
+
+### Fixed
+
+- The `.pkg` installer's Customize step shows a plain list: BrewxPort, ticked and greyed out, with the "Set up" checkbox below it. In 0.3.0 both sat under a row with no name and a half-ticked checkbox.
+- The "Set up" checkbox's description says why it shows Zero KB: nothing is downloaded until BrewxPort next opens. For MacPorts it also mentions the 1.3 GB Command Line Tools download when they're missing.
+
 ## [0.3.0] - 2026-11-22
 
 **Upgrading:** nothing to do.

@@ -54,7 +54,7 @@ BrewxPort shows a setup screen at launch when none of the four package managers 
   <img alt="BrewxPort's setup screen, with the recommended package manager first" src="docs/images/setup-light.png" width="800">
 </picture>
 
-The recommended one comes first and the others sit below it. Choose Set Up, or Not now to skip it. If BrewxPort's helper still needs your approval, the screen asks for it in System Settings > General > Login Items and then carries on.
+The recommended one comes first and the others sit below it. Choose Set Up, or Not now to skip it. If BrewxPort's helper still needs your approval, the screen asks for it in System Settings > General > Login Items and then carries on. Later, the Helper row at the bottom of the sidebar shows whether it's ready.
 
 You can come back later from File > Set Up Package Manager…, from the Set Up button on a missing package manager's Engines page, or from the banner on the Bundles page when a bundle needs one you don't have.
 
@@ -71,7 +71,7 @@ MacPorts needs Apple's Command Line Tools. If they're missing, BrewxPort install
 
 Each setup needs an administrator account. Homebrew, MacPorts and nanobrew ask for the password once, and `mas` asks only when it goes in through MacPorts. Homebrew isn't offered on Intel Macs because it no longer supports them, and MacPorts is the option there.
 
-BrewxPort doesn't edit your shell files. The Homebrew and MacPorts installers add themselves to your PATH and nanobrew doesn't. The run log says which happened.
+BrewxPort only edits a shell file when you click Add to PATH in a Move to preview. The Homebrew and MacPorts installers add themselves to your PATH and nanobrew doesn't. The run log says which happened.
 
 ## Quick start
 
@@ -99,6 +99,19 @@ Add `--notarize PROFILE` to have Apple notarize it as well. `PROFILE` is a keych
 
 > [!WARNING]
 > A normal launch of `BrewxPort.app` registers its admin helper. Try it in a virtual machine, or use `scripts/demo.sh`.
+
+## Move a package to another package manager
+
+Right-click a command-line tool on the Installed page, or choose Package > Move to, and pick Homebrew, nanobrew or MacPorts. BrewxPort works out the move and shows it to you before anything runs:
+
+- Packages from the same package manager that need the one you picked move with it. Move Homebrew's `oniguruma` to nanobrew and Homebrew's `jq`, which needs it, goes too.
+- If one of them isn't on the other package manager, it stays where it is, and so does the old copy it needs. The preview names each one.
+- Libraries that only the moved packages used are listed under Also remove leftovers, ticked. Untick it to keep them.
+- If the other package manager's folder isn't on your PATH, the preview says so and offers Add to PATH. It shows the line and the file first, then adds it to `~/.zprofile` (or `~/.bash_profile` for bash) when you click. For other shells, or a setup BrewxPort can't read for sure, you get the line to copy instead. Open a new Terminal window afterwards.
+
+The new copies go in first. BrewxPort then checks that the other package manager lists every one of them, and only then removes the old copies. If an install fails, nothing is removed. Moves between Homebrew and nanobrew don't ask for a password; anything involving MacPorts asks once.
+
+Only command-line tools move. Mac App Store apps, Homebrew apps (casks) and formulae from third-party taps stay put. A package moves only if the other package manager has one with exactly the same name, and you get that package manager's current version.
 
 ## Move to another Mac
 

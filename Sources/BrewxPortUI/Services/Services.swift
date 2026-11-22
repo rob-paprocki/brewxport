@@ -3,8 +3,16 @@ import BrewxPortCore
 import BrewxPortRun
 
 public protocol RunExecuting: Sendable {
-    func run(_ steps: [RunStep], reason: String) -> AsyncStream<RunEvent>
+    /// `verify` answers the run's check steps (`RunStep.verifyInstalled`).
+    func run(_ steps: [RunStep], reason: String, verify: @escaping InstalledVerifier) -> AsyncStream<RunEvent>
     func cancel()
+}
+
+extension RunExecuting {
+    /// A run whose check steps all fail (`RunSession.failClosed`).
+    public func run(_ steps: [RunStep], reason: String) -> AsyncStream<RunEvent> {
+        run(steps, reason: reason, verify: RunSession.failClosed)
+    }
 }
 extension RunSession: RunExecuting {}
 
@@ -53,13 +61,16 @@ public struct Services: Sendable {
     public let receipts: any InstallerReceiptReading
     public let setupProblem: String?
     public let isDemo: Bool
+    /// The move preview's "Add to PATH". Defaults to copy-only, which never writes.
+    public let shellPath: ShellPathEditor
 
     public init(
         engines: [any Engine], catalog: any PackageQuerying, executor: (any RunExecuting)?,
         helper: (any HelperManaging)?, passwords: PromptPasswordProvider, isAdministrator: @escaping AdminCheck,
         store: any KeyValueStoring, path: any PathResolving, fileExists: @escaping @Sendable (String) -> Bool,
         host: Arch, hostInfo: HostInfo, cltPresent: @escaping @Sendable () -> Bool,
-        receipts: any InstallerReceiptReading, setupProblem: String?, isDemo: Bool
+        receipts: any InstallerReceiptReading, setupProblem: String?, isDemo: Bool,
+        shellPath: ShellPathEditor? = nil
     ) {
         self.engines = engines
         self.catalog = catalog
@@ -76,5 +87,6 @@ public struct Services: Sendable {
         self.receipts = receipts
         self.setupProblem = setupProblem
         self.isDemo = isDemo
+        self.shellPath = shellPath ?? .copyOnly
     }
 }

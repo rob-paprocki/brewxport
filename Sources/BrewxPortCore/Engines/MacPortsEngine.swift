@@ -1,7 +1,7 @@
 import Foundation
 
 /// MacPorts, driven through the `port` command line. Every install, upgrade and remove needs root.
-public struct MacPortsEngine: Engine {
+public struct MacPortsEngine: Engine, DependentsListing {
     public let id: EngineID = .macports
     public let capabilities: EngineCapabilities = [.sourceBuilds]
 
@@ -152,8 +152,9 @@ public struct MacPortsEngine: Engine {
 
     // MARK: info
 
-    /// `port info --description --homepage --version --variants --depends_lib --depends_run <name>` prints one
-    /// "key: value" line per field; variants and dependencies are comma-separated.
+    /// `port info --name --description --homepage --version --variants --depends_lib --depends_run <name>` prints one
+    /// "key: value" line per field; variants and dependencies are comma-separated. `port` matches the name ignoring
+    /// case, and `name:` is the port's own spelling (`ImageMagick` for `imagemagick`).
     public func info(_ ref: PackageRef) async throws -> PackageDetails {
         guard ref.engine == .macports else {
             throw EngineError(engine: .macports, message: "Package belongs to a different engine")
@@ -163,7 +164,7 @@ public struct MacPortsEngine: Engine {
         guard RootArguments.isValidPortName(name) else {
             throw EngineError(engine: .macports, message: "Invalid port name: \(name)")
         }
-        let out = try await runOK(["info", "--description", "--homepage", "--version", "--variants",
+        let out = try await runOK(["info", "--name", "--description", "--homepage", "--version", "--variants",
                                    "--depends_lib", "--depends_run", name])
         var fields: [String: String] = [:]
         for line in out.split(whereSeparator: \.isNewline) {
@@ -188,13 +189,23 @@ public struct MacPortsEngine: Engine {
         }
         let dependencies = list((fields["depends_lib"] ?? "") + "," + (fields["depends_run"] ?? ""))
         return PackageDetails(ref: ref, summary: nonBlank(fields["description"]), homepage: webURL(fields["homepage"]),
-                              latestVersion: version, dependencies: dependencies, variants: variants)
+                              latestVersion: version, dependencies: dependencies, variants: variants,
+                              reportedName: nonBlank(fields["name"]))
     }
 
     // MARK: commands
 
     public func privilege(for op: PackageOperation, _ ref: PackageRef) -> Privilege {
         .always
+    }
+
+    /// Installed ports that directly depend on `name`: `port -q dependents <name>`, one name per line, nothing when
+    /// there are none. A port that isn't installed exits 1, which throws.
+    public func installedDependents(of name: String) async throws -> Set<String> {
+        let name = try packageNameArguments([ref(name)], engine: .macports)[0]
+        let out = try await runOK(["-q", "dependents", name])
+        return Set(out.split(whereSeparator: \.isNewline)
+            .map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty })
     }
 
     public func command(for op: PackageOperation, _ refs: [PackageRef], options: InstallOptions) throws -> CommandSpec {
@@ -216,6 +227,12 @@ public struct MacPortsEngine: Engine {
                 throw EngineError(engine: .macports, message: "Variants can only be given for one port at a time")
             }
             variants = options.variants
+        case .markRequested, .markDependency:
+            // `port setrequested` / `unsetrequested` change a flag: no variants, no flags, one or more names.
+            guard options.variants.isEmpty, options.extraArgs.isEmpty else {
+                throw EngineError(engine: .macports, message: "Marking a port takes no variants or options")
+            }
+            verb = op == .markRequested ? "setrequested" : "unsetrequested"
         case .upgrade, .remove:
             guard options.variants.isEmpty else {
                 throw EngineError(engine: .macports, message: "Variants only apply to install")

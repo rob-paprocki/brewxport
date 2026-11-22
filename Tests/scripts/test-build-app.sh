@@ -58,7 +58,8 @@ fi
 
 # Layout
 for path in Contents/Info.plist Contents/MacOS/BrewxPort Contents/MacOS/brewxport-askpass \
-    Contents/Library/HelperTools/BrewxPortHelper Contents/Library/LaunchDaemons/com.brewxport.helper.plist; do
+    Contents/Library/HelperTools/BrewxPortHelper Contents/Library/LaunchDaemons/com.brewxport.helper.plist \
+    Contents/Resources/AppIcon.icns; do
     [ -f "$APP/$path" ] && pass "$path" || fail "missing $path"
 done
 for path in Contents/MacOS/BrewxPort Contents/MacOS/brewxport-askpass Contents/Library/HelperTools/BrewxPortHelper; do
@@ -66,6 +67,8 @@ for path in Contents/MacOS/BrewxPort Contents/MacOS/brewxport-askpass Contents/L
 done
 [ "$(plutil -extract CFBundleIdentifier raw -o - "$APP/Contents/Info.plist")" = com.brewxport.app ] &&
     pass "bundle id com.brewxport.app" || fail "bundle id isn't com.brewxport.app"
+[ "$(plutil -extract CFBundleIconFile raw -o - "$APP/Contents/Info.plist")" = AppIcon ] &&
+    pass "the app names its icon" || fail "CFBundleIconFile isn't AppIcon"
 [ ! -e "$APP/Contents/Resources/DemoFixtures" ] && pass "a default build has no demo fixtures" ||
     fail "a default build has Contents/Resources/DemoFixtures"
 

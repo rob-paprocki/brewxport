@@ -45,8 +45,8 @@ public actor LoginShellPath: PathResolving {
     static let fallbackSystemPaths = ["/usr/bin", "/bin", "/usr/sbin", "/sbin"]
 
     private let runner: any CommandRunning
-    private let shell: String?
-    private let allowedShells: Set<String>
+    private nonisolated let shell: String?
+    private nonisolated let allowedShells: Set<String>
     private let systemPaths: @Sendable () -> [String]
     private let timeout: Duration
     private let processEnvironment: [String: String]
@@ -76,6 +76,15 @@ public actor LoginShellPath: PathResolving {
         self.systemPaths = systemPaths
         self.timeout = timeout
     }
+
+    /// The login shell the PATH comes from: the user's pw_shell when it's listed in /etc/shells, else nil.
+    public nonisolated var loginShell: String? {
+        guard let shell, !shell.isEmpty, allowedShells.contains(shell) else { return nil }
+        return shell
+    }
+
+    /// Drops the cached answer: the next call asks the shell again.
+    public func forget() async { answer = nil }
 
     /// The first call asks the shell; every later call (and any call made while the first is waiting) gets the
     /// same answer, unless the shell didn't answer in time: then the next call asks again.

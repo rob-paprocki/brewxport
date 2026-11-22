@@ -1,10 +1,12 @@
 import SwiftUI
 import BrewxPortRun
 
-/// Asks for the administrator password once per run. The field's text goes into a `SecretBuffer` the moment it's
-/// submitted, and the field is cleared straight away.
+/// Asks for the administrator password: once per run, and again (saying so) after a wrong one, up to
+/// `RunSession.passwordAttempts` in all. The field's text goes into a `SecretBuffer` the moment it's submitted, and
+/// the field is cleared straight away.
 struct PasswordSheet: View {
     let reason: String
+    /// The same run's last password was rejected.
     let previousAttemptFailed: Bool
     /// Shown above the field (demo mode's note), when there is one.
     var note: String? = nil
@@ -12,12 +14,14 @@ struct PasswordSheet: View {
 
     @State private var text = ""
 
+    static let retryLine = "That password didn't work. Try again."
+
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             Text("Administrator password").font(.headline)
             Text(reason).fixedSize(horizontal: false, vertical: true)
             if previousAttemptFailed {
-                Text("That password didn't work").foregroundStyle(.red)
+                Text(Self.retryLine).foregroundStyle(.red)
             }
             if let note {
                 Text(note).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)

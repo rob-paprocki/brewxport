@@ -1,0 +1,4 @@
+figlet 2.2.5
+tree 2.3.2
+jq 1.8.2
+  oniguruma 6.9.10

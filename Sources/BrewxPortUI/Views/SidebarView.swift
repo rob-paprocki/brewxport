@@ -1,7 +1,9 @@
 import BrewxPortCore
+import BrewxPortRun
 import SwiftUI
 
-/// Library (Discover, Updates, Installed, Bundles) and one row per engine, in the host's engine order.
+/// Library (Discover, Updates, Installed, Bundles), one row per engine in the host's engine order, and BrewxPort's
+/// helper.
 struct SidebarView: View {
     @Bindable var model: BrewxPortAppModel
 
@@ -19,6 +21,11 @@ struct SidebarView: View {
                 ForEach(model.engineOrder, id: \.self) { id in
                     EngineRow(id: id, status: model.engineStatuses[id])
                         .tag(SidebarItem.engine(id))
+                }
+            }
+            if model.hasHelper {
+                Section("BrewxPort") {
+                    HelperRow(state: model.helperState).tag(SidebarItem.helper)
                 }
             }
         }
@@ -59,6 +66,37 @@ private struct EngineRow: View {
         case .present?: .green
         case .unusable?: .orange
         case .missing?, nil: .secondary
+        }
+    }
+}
+
+private struct HelperRow: View {
+    let state: HelperState?
+
+    var body: some View {
+        HStack {
+            Label {
+                VStack(alignment: .leading, spacing: 1) {
+                    Text("Helper")
+                    Text(HelperStateDisplay.shortText(for: state))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            } icon: {
+                Image(systemName: "lock.shield")
+            }
+            Spacer()
+            Image(systemName: HelperStateDisplay.symbol(for: state))
+                .foregroundStyle(statusColor)
+                .accessibilityLabel(HelperStateDisplay.shortText(for: state))
+        }
+    }
+
+    private var statusColor: Color {
+        switch state {
+        case .enabled?: .green
+        case .requiresApproval?, .failed?: .orange
+        case nil, .notRegistered?, .outdated?: .secondary
         }
     }
 }

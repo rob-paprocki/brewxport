@@ -8,8 +8,13 @@ import BrewxPortRun
 /// every row action. Views bind to it and call its methods; they never build a step or decide what's allowed.
 @MainActor @Observable public final class BrewxPortAppModel {
     /// Switching pages points an open inspector at the new page's selection, never at a row from the last page.
+    /// Leaving the Helper page stops its approval poll.
     public var sidebar: SidebarItem = .updates {
-        didSet { if sidebar != oldValue { selectionChanged(selectedOnScreen) } }
+        didSet {
+            guard sidebar != oldValue else { return }
+            selectionChanged(selectedOnScreen)
+            if sidebar != .helper { stopHelperPagePoll() }
+        }
     }
     public private(set) var engineStatuses: [EngineID: EngineStatus] = [:]
     public private(set) var checkingEngines = false
@@ -26,6 +31,7 @@ import BrewxPortRun
     public let installed: InstalledModel
     public let bundles: BundlesModel
     public let setup: SetupModel
+    public let move: MoveModel
     public var inspectorOpen = false
     /// Bumped by Find (Cmd-F); DiscoverView maps it to `.searchFocused`.
     public var focusSearchRequest = 0
@@ -99,6 +105,7 @@ import BrewxPortRun
         bundles = BundlesModel(catalog: services.catalog, installed: installed, order: order, archFor: archFor,
                                host: host, appVersion: BundleFile.appVersion(Bundle.main.infoDictionary))
         setup = SetupModel(services: services)
+        move = MoveModel(services: services, installed: installed)
         // Updates and Installed come ahead of Discover: their rows carry installed versions. Bundles' rows are
         // built from a file and never looked up from here (see `listRow(for:)`).
         packageSources = [updatesList, installedList, discoverList]
@@ -117,6 +124,7 @@ import BrewxPortRun
         run.onRunEnded = { [weak self] in self?.runEnded() }
         run.onPasswordSheetClosed = { [weak self] in self?.openPendingFile() }
         bundles.connect(self)
+        move.connect(self)
         setup.stageChanged = { [weak self] in self?.setupStageChanged($0) }
         activeObserver = NotificationToken(center: notifications, name: NSApplication.didBecomeActiveNotification) {
             [weak self] in MainActor.assumeIsolated { self?.appBecameActive() }
@@ -179,6 +187,8 @@ import BrewxPortRun
     /// How the poll waits between reads. Tests shorten it.
     @ObservationIgnored var pollSleep: @Sendable (Duration) async -> Void = { try? await Task.sleep(for: $0) }
     @ObservationIgnored private var approvalPoll: Task<Void, Never>?
+    /// The Helper page's poll, after its Open Login Items. Separate from the setup's, so neither stops the other.
+    @ObservationIgnored private var helperPagePoll: Task<Void, Never>?
     @ObservationIgnored private let notifications: NotificationCenter
     @ObservationIgnored private var activeObserver: NotificationToken?
 
@@ -188,11 +198,16 @@ import BrewxPortRun
         approvalPoll?.cancel()
         approvalPoll = nil
         guard stage == .needsHelperApproval, services.helper != nil else { return }
-        approvalPoll = Task { [weak self] in
+        approvalPoll = pollHelper { $0.setup.stage == .needsHelperApproval }
+    }
+
+    /// Reads the helper's state (read-only, never registering) every `helperApprovalPoll` while `condition` holds.
+    private func pollHelper(while condition: @escaping @MainActor (BrewxPortAppModel) -> Bool) -> Task<Void, Never> {
+        Task { [weak self] in
             while !Task.isCancelled {
                 guard let self else { return }
                 await self.pollSleep(BrewxPortTimeouts.helperApprovalPoll)
-                guard !Task.isCancelled, self.setup.stage == .needsHelperApproval else { return }
+                guard !Task.isCancelled, condition(self) else { return }
                 // A helper call already in flight will deliver its own answer; skip this tick.
                 guard !self.checkingHelper else { continue }
                 _ = await self.helper(.refresh)
@@ -200,10 +215,22 @@ import BrewxPortRun
         }
     }
 
-    /// Coming back from System Settings: read the helper's state once, if the setup is waiting for it.
+    /// The helper still waits on the person: not registered, or not yet approved in Login Items.
+    private var helperAwaitsApproval: Bool {
+        helperState == .requiresApproval || helperState == .notRegistered
+    }
+
+    /// Coming back from System Settings: read the helper's state once, if the setup is waiting for it or the helper
+    /// still needs approval (the sidebar's Helper row would otherwise keep saying so until the next run checks).
     private func appBecameActive() {
-        guard setup.stage == .needsHelperApproval, services.helper != nil else { return }
+        guard services.helper != nil, setup.stage == .needsHelperApproval || helperAwaitsApproval,
+              !checkingHelper else { return }
         Task { _ = await helper(.refresh) }
+    }
+
+    private func stopHelperPagePoll() {
+        helperPagePoll?.cancel()
+        helperPagePoll = nil
     }
 
     /// "Check again": `HelperManaging.refresh()`, which only reads. Ignored during a run or another helper call.
@@ -219,10 +246,15 @@ import BrewxPortRun
         Task { _ = await helper(.reinstall) }
     }
 
-    /// Ignored during a run.
+    /// Ignored during a run. From the Helper page, while the helper waits on approval, it also reads the helper's
+    /// state every couple of seconds (as the setup sheet does) until it's approved or the page is left. The setup
+    /// sheet's own button relies on the setup's poll.
     public func openLoginItems() {
         guard !run.isRunning else { return }
         services.helper?.openLoginItems()
+        guard sidebar == .helper, helperAwaitsApproval, services.helper != nil else { return }
+        stopHelperPagePoll()
+        helperPagePoll = pollHelper { $0.sidebar == .helper && $0.helperAwaitsApproval }
     }
 
     private var mayTouchHelper: Bool {
@@ -283,7 +315,7 @@ import BrewxPortRun
     /// Copy name don't start a run and always work.
     ///
     /// On Bundles, Install builds its requests from the preview (`BundlesModel.install`), and Update and Uninstall do
-    /// nothing.
+    /// nothing. Move to starts the move check for one row (`MoveModel.start`) under the same conditions as Install.
     public func perform(_ action: RowAction, on refs: Set<PackageRef>) {
         switch action {
         case .install where currentView == .bundles:
@@ -299,6 +331,9 @@ import BrewxPortRun
             let known = refs.filter { row(for: $0) != nil }
             guard !known.isEmpty else { return }
             pendingUninstall = known
+        case .moveTo(let target):
+            guard canRun, !busy, !modalUp, refs.count == 1, let ref = refs.first, let row = row(for: ref) else { return }
+            move.start(row.package, to: target)
         case .ignore:
             preferences.ignore(refs)
             recomputeUpdates()
@@ -391,7 +426,7 @@ import BrewxPortRun
         case .updates: .updates
         case .installed: .installed
         case .bundles: .bundles
-        case .engine: nil
+        case .engine, .helper: nil
         }
     }
 
@@ -414,12 +449,35 @@ import BrewxPortRun
     }
 
     /// The right-click menu for `refs` in a table: `RowActions` over that page's rows. On Bundles, Install shows
-    /// for the rows the preview can install, and a menu opened while it's checking is empty.
+    /// for the rows the preview can install, and a menu opened while it's checking is empty. "Move to" items are off
+    /// while anything modal is up (the move sheet included), as `perform` ignores them then.
     public func rowMenuItems(for refs: Set<PackageRef>, in view: PackageView) -> [RowActionItem] {
         let rows = view == .bundles ? bundles.rowsByRef : list(for: view).byRef
-        return RowActions.items(for: refs, in: view, rows: rows, outdated: outdatedRefs, prefs: preferences,
-                                isRunning: busy, canRun: canRun,
-                                installable: view == .bundles ? bundles.installableRefs : [])
+        let items = RowActions.items(for: refs, in: view, rows: rows, outdated: outdatedRefs, prefs: preferences,
+                                     isRunning: busy, canRun: canRun,
+                                     installable: view == .bundles ? bundles.installableRefs : [],
+                                     moveTargets: moveTargets, isDemo: services.isDemo)
+        return modalUp ? items.map { $0.isMove ? $0.disabled() : $0 } : items
+    }
+
+    /// The Package menu's "Move to" submenu: the right-click menu's Move items for the selection on Installed.
+    public var moveMenuItems: [RowActionItem] {
+        guard currentView == .installed else { return [] }
+        return rowMenuItems(for: selectedOnScreen, in: .installed).filter(\.isMove)
+    }
+
+    /// The Package menu's "Move to" items: the move for the one selected Installed row.
+    public func moveSelection(_ action: RowAction) {
+        guard currentView == .installed, case .moveTo = action else { return }
+        perform(action, on: selectedOnScreen)
+    }
+
+    /// The package managers a package can move to: present, and able to list what depends on a package.
+    private var moveTargets: [EngineID] {
+        [EngineID.homebrew, .nanobrew, .macports].filter { id in
+            guard case .present? = engineStatuses[id] else { return false }
+            return services.engines.contains { $0.id == id && $0 is any DependentsListing }
+        }
     }
 
     /// The Package menu's first item: Install on Discover and Bundles, Update on Updates and Installed.
@@ -599,12 +657,13 @@ import BrewxPortRun
     /// A run is going, or nanobrew cask routes are being looked up before one.
     var busy: Bool { run.isRunning || preparing }
 
-    /// Something modal is up: the password sheet, the remove confirmation, the open panel, the export review sheet
-    /// or the save panel. The menu's Open Bundle, exports and package items are off meanwhile, and a file the Finder
-    /// opens waits until it's gone (`openFromFinder`).
+    /// Something modal is up: the password sheet, the remove confirmation, the open panel, the export review sheet,
+    /// the save panel or the move sheet. The menu's Open Bundle, exports and package items are off meanwhile, and a
+    /// file the Finder opens waits until it's gone (`openFromFinder`). The move sheet's own Move button doesn't check
+    /// this (`MoveModel.confirm`), and the sheet is gone once the move runs.
     public var modalUp: Bool {
         run.showingPasswordSheet || confirmingRemoval || showingOpenPanel || exportReview != nil
-            || exportToSave != nil
+            || exportToSave != nil || move.sheetShown
     }
 
     /// True while the remove confirmation is up. The menu's Find, Refresh and package items are off then, and
@@ -697,16 +756,53 @@ import BrewxPortRun
     /// The first problem of the last setup plan that had nothing to run; the setup screen words it.
     @ObservationIgnored private(set) var lastSetupPlanProblem: String?
 
-    /// True when a run started.
+    /// True when a run started. `verify` answers the plan's check steps (only a move has any).
     @discardableResult
-    private func start(_ plan: ActionPlan) -> Bool {
+    private func start(_ plan: ActionPlan, verify: @escaping InstalledVerifier = RunSession.failClosed) -> Bool {
         if services.isDemo {
-            return run.start(plan) { .enabled }
+            return run.start(plan, verify: verify) { .enabled }
         } else if services.helper == nil {
-            return run.start(plan, helperUnavailableReason: services.setupProblem) { nil }
+            return run.start(plan, helperUnavailableReason: services.setupProblem, verify: verify) { nil }
         } else {
-            return run.start(plan) { [weak self] in await self?.helper(.ensure) }
+            return run.start(plan, verify: verify) { [weak self] in await self?.helper(.ensure) }
         }
+    }
+
+    // MARK: Move to
+
+    /// `MoveModel.confirm`'s way into the one run path, with `missingOnTarget` answering the check step. The run's end
+    /// reloads Installed (and Discover's installed marks) like every other run. `checked` gets what each check found
+    /// missing. False when nothing started.
+    func startMove(_ plan: ActionPlan, checked: @escaping @Sendable ([PackageRef]) -> Void = { _ in }) -> Bool {
+        guard canRun, !busy else { return false }
+        requestedUpgrades = []
+        let engines = services.engines
+        return start(plan) { refs in
+            let missing = await Self.missing(refs, engines: engines)
+            checked(missing)
+            return missing
+        }
+    }
+
+    /// The move's check step: the refs a fresh `listInstalled()` on their engine doesn't list with the same kind and
+    /// name (names compared ignoring case, so a same-named cask never stands in for a formula). Fails closed: every ref counts as missing when any engine's listing throws, takes longer than
+    /// the engine timeout, or the engine isn't there.
+    public func missingOnTarget(_ refs: [PackageRef]) async -> [PackageRef] {
+        await Self.missing(refs, engines: services.engines)
+    }
+
+    nonisolated static func missing(_ refs: [PackageRef], engines: [any Engine],
+                                    timeout: Duration = BrewxPortTimeouts.engineQuery) async -> [PackageRef] {
+        struct Key: Hashable { let engine: EngineID; let kind: PackageKind; let name: String }
+        var present: Set<Key> = []
+        for id in Set(refs.map(\.engine)) {
+            guard let engine = engines.first(where: { $0.id == id }),
+                  let listed = try? await firstResult(within: timeout, { try await engine.listInstalled() }) else {
+                return refs
+            }
+            for package in listed { present.insert(Key(engine: id, kind: package.id.kind, name: package.id.name.lowercased())) }
+        }
+        return refs.filter { !present.contains(Key(engine: $0.engine, kind: $0.kind, name: $0.name.lowercased())) }
     }
 
     // MARK: Lists

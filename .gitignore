@@ -16,3 +16,4 @@ DerivedData/
 build/
 .build/
 .swiftpm/
+__pycache__/

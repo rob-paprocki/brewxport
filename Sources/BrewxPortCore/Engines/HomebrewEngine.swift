@@ -1,7 +1,7 @@
 import Foundation
 
 /// Homebrew (formulae and casks), driven through `brew` and its `--json=v2` output.
-public struct HomebrewEngine: Engine, TapListing {
+public struct HomebrewEngine: Engine, TapListing, DependentsListing {
     public let id: EngineID = .homebrew
     public let capabilities: EngineCapabilities = [.casks, .jsonOutput]
 
@@ -161,6 +161,19 @@ public struct HomebrewEngine: Engine, TapListing {
         return taps
     }
 
+    /// Installed formulae that directly depend on `name`: `brew uses --installed <name>`, one name per line, nothing
+    /// when there are none. An unknown name is a warning on stderr with exit 0, so it reads as no dependents.
+    public func installedDependents(of name: String) async throws -> Set<String> {
+        let name = try packageNameArguments([PackageRef(engine: .homebrew, kind: .formula, name: name)],
+                                            engine: .homebrew)[0]
+        let exe = try requireExecutable()
+        let args = ["uses", "--installed", name]
+        let result = try await query(exe, args, options: RunOptions(timeout: BrewxPortTimeouts.engineQuery))
+        guard result.exitCode == 0 else { throw failure("brew \(args.joined(separator: " ")) failed", result) }
+        return Set(result.stdout.split(whereSeparator: \.isNewline)
+            .map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty })
+    }
+
     // MARK: outdated
 
     /// `installed_versions` is an array for formulae; casks may report an array or a single string.
@@ -267,7 +280,7 @@ public struct HomebrewEngine: Engine, TapListing {
                 installedVersion: nonBlank(c.installed), latestVersion: nonBlank(c.version),
                 installerNeedsRoot: c.artifacts.map { list in
                     list.contains { !$0.keys.isDisjoint(with: ["pkg", "installer"]) }
-                })
+                }, reportedName: c.token)
         }
         let formulae = doc.formulae ?? []
         guard let f = formulae.first(where: { $0.name == name || $0.full_name == name })
@@ -275,13 +288,14 @@ public struct HomebrewEngine: Engine, TapListing {
         return PackageDetails(
             ref: ref, summary: nonBlank(f.desc), homepage: webURL(f.homepage),
             installedVersion: f.installed?.last?.version, latestVersion: nonBlank(f.versions?.stable),
-            dependencies: f.dependencies)
+            dependencies: f.dependencies, reportedName: f.name)
     }
 
     // MARK: commands
 
     public func privilege(for op: PackageOperation, _ ref: PackageRef) -> Privilege {
-        ref.kind == .cask ? .sometimes : .never
+        if op == .markRequested || op == .markDependency { return .never }
+        return ref.kind == .cask ? .sometimes : .never
     }
 
     public func command(for op: PackageOperation, _ refs: [PackageRef], options: InstallOptions) throws -> CommandSpec {
@@ -290,6 +304,9 @@ public struct HomebrewEngine: Engine, TapListing {
         }
         guard refs.allSatisfy({ $0.engine == .homebrew }) else {
             throw EngineError(engine: .homebrew, message: "Package belongs to a different engine")
+        }
+        if op == .markRequested || op == .markDependency {
+            return try markCommand(for: op, refs, options: options)
         }
         // Taps first, before the formula/cask check: a tap is added with `brew tap`, one per command, never installed.
         if refs.contains(where: { $0.kind == .tap }) {
@@ -311,6 +328,7 @@ public struct HomebrewEngine: Engine, TapListing {
         case .install: verb = "install"
         case .upgrade: verb = "upgrade"
         case .remove: verb = "uninstall"
+        case .markRequested, .markDependency: preconditionFailure("handled by markCommand")
         }
         var args = [verb]
         if first.kind == .cask {
@@ -322,6 +340,22 @@ public struct HomebrewEngine: Engine, TapListing {
         args += options.extraArgs
         args += names
         return CommandSpec(executable: exe, arguments: args, needsRoot: false, arch: arch(for: exe))
+    }
+
+    /// `brew tab --installed-on-request <formula>` or `--no-installed-on-request`: flips the flag Homebrew keeps
+    /// for "asked for" versus "installed as a dependency". Formulae only, no options, never root.
+    private func markCommand(for op: PackageOperation, _ refs: [PackageRef], options: InstallOptions) throws
+        -> CommandSpec {
+        guard refs.allSatisfy({ $0.kind == .formula }) else {
+            throw EngineError(engine: .homebrew, message: "Homebrew can only mark formulae")
+        }
+        guard options == InstallOptions() else {
+            throw EngineError(engine: .homebrew, message: "Marking a package takes no options")
+        }
+        let names = try packageNameArguments(refs, engine: .homebrew)
+        let exe = try requireExecutable()
+        let flag = op == .markRequested ? "--installed-on-request" : "--no-installed-on-request"
+        return CommandSpec(executable: exe, arguments: ["tab", flag] + names, needsRoot: false, arch: arch(for: exe))
     }
 
     /// `brew tap <user/repo>`: exactly one third-party tap, install only, no options.

@@ -14,17 +14,22 @@ public struct RunLog: Sendable, Equatable {
     public private(set) var openStep: Int?
     private let titles: [String]
     private let operations: [PackageOperation]
+    /// Which steps are check steps. Their titles say what they do, so they're logged without a verb.
+    private let checks: [Bool]
 
     /// Every step is worded as an update.
     public init(titles: [String] = []) {
         self.titles = titles
         self.operations = titles.map { _ in .upgrade }
+        self.checks = titles.map { _ in false }
     }
 
-    /// Each step is worded by its operation: "Installing", "Updating" or "Removing".
+    /// Each step is worded by its operation: "Installing", "Updating" or "Removing". A check step is logged by its
+    /// title alone.
     public init(steps: [RunStep]) {
         self.titles = steps.map(\.title)
         self.operations = steps.map(\.operation)
+        self.checks = steps.map { $0.verifyInstalled != nil }
     }
 
     public mutating func note(_ text: String, isError: Bool = false) {
@@ -40,6 +45,7 @@ public struct RunLog: Sendable, Equatable {
         case .install: "Installing"
         case .upgrade: "Updating"
         case .remove: "Removing"
+        case .markRequested, .markDependency: "Marking"
         }
     }
 
@@ -54,7 +60,8 @@ public struct RunLog: Sendable, Equatable {
             note("Nothing was changed.", isError: true)
         case .started(let index):
             openStep = index
-            note("\(verb(index)) \(title(index))")
+            let isCheck = checks.indices.contains(index) && checks[index]
+            note(isCheck ? title(index) : "\(verb(index)) \(title(index))")
         case .output(_, .stdout(let line)):
             note(line)
         case .output(_, .stderr(let line)):

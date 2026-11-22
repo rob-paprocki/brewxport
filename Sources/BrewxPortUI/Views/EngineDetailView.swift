@@ -2,7 +2,7 @@ import BrewxPortCore
 import BrewxPortRun
 import SwiftUI
 
-/// One engine's page: path, version, what's wrong with it, what it can do, and (for MacPorts) BrewxPort's helper.
+/// One engine's page: path, version, what's wrong with it, and what it can do. BrewxPort's helper has its own page.
 struct EngineDetailView: View {
     @Bindable var model: BrewxPortAppModel
     let engine: EngineID
@@ -37,35 +37,8 @@ struct EngineDetailView: View {
                 }
             }
 
-            if engine == .macports {
-                helperSection
-            }
         }
         .formStyle(.grouped)
-    }
-
-    private var helperSection: some View {
-        Section("BrewxPort's helper") {
-            HStack {
-                if model.checkingHelper { ProgressView().controlSize(.small).accessibilityLabel("Checking the helper") }
-                Text(model.helperText).fixedSize(horizontal: false, vertical: true)
-            }
-            if model.hasHelper {
-                HStack {
-                    Spacer()
-                    if HelperStateDisplay.offersLoginItems(model.helperState) {
-                        Button("Open Login Items", action: model.openLoginItems)
-                            .disabled(model.run.isRunning)
-                    }
-                    if HelperStateDisplay.offersReinstall(model.helperState) {
-                        Button("Reinstall helper", action: model.reinstallHelper)
-                            .disabled(model.checkingHelper || model.run.isRunning)
-                    }
-                    Button("Check again", action: model.checkHelper)
-                        .disabled(model.checkingHelper || model.run.isRunning)
-                }
-            }
-        }
     }
 
     private var status: EngineStatus? { model.engineStatuses[engine] }

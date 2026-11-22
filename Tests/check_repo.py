@@ -46,11 +46,15 @@ ALLOWED_IPS = {ipaddress.ip_address(a) for a in (
     "0.0.0.0", "255.255.255.255", "1.1.1.1", "8.8.8.8", "::", "::1")}
 
 
+# Homebrew's versioned formula files (`python@3.15.rb`, `node@22.11.rb`) match the email pattern.
+VERSIONED_FORMULA = re.compile(r"\d+(?:\.\d+)*\.rb")
+
+
 def email_ok(addr):
     a = addr.lower()
     domain = a.split("@", 1)[1]
     return (a in ALLOWED_EMAILS or domain == "example.com" or domain.endswith(".example.com")
-            or domain.endswith(".invalid"))
+            or domain.endswith(".invalid") or VERSIONED_FORMULA.fullmatch(domain) is not None)
 
 
 def ip_ok(ip):

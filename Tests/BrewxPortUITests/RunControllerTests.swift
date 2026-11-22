@@ -38,7 +38,7 @@ final class StuckExecutor: RunExecuting, @unchecked Sendable {
     private var held: [AsyncStream<RunEvent>.Continuation] = []
     var cancelCount: Int { lock.withLock { _cancelCount } }
 
-    func run(_ steps: [RunStep], reason: String) -> AsyncStream<RunEvent> {
+    func run(_ steps: [RunStep], reason: String, verify: @escaping InstalledVerifier) -> AsyncStream<RunEvent> {
         AsyncStream { continuation in
             continuation.yield(.started(0))
             lock.withLock { held.append(continuation) }
@@ -68,19 +68,50 @@ final class PromptingExecutor: RunExecuting, @unchecked Sendable {
 
     init(passwords: any PasswordProviding) { self.passwords = passwords }
 
-    func run(_ steps: [RunStep], reason: String) -> AsyncStream<RunEvent> {
+    func run(_ steps: [RunStep], reason: String, verify: @escaping InstalledVerifier) -> AsyncStream<RunEvent> {
         lock.withLock { _runs += 1 }
         return AsyncStream { continuation in
             Task {
                 continuation.yield(.needsPassword)
                 self.lock.withLock { self._prompts += 1 }
-                let secret = await self.passwords.password(reason: reason)
+                let secret = await self.passwords.password(reason: reason, previousAttemptFailed: false)
                 secret?.wipe()
                 for index in steps.indices {
                     continuation.yield(.started(index))
                     continuation.yield(.finished(index, 0))
                 }
                 continuation.yield(.done)
+                continuation.finish()
+            }
+        }
+    }
+
+    func cancel() {}
+}
+
+/// `RunExecuting` that plays one script per run, in order: asks for the password once per flag in `asks` (the flag
+/// is `previousAttemptFailed`), stopping when the answer is nil, then yields `events`. Records what each ask returned.
+final class AskingExecutor: RunExecuting, @unchecked Sendable {
+    struct Script { var asks: [Bool]; var events: [RunEvent] }
+    private let passwords: any PasswordProviding
+    private let lock = NSLock()
+    private var scripts: [Script]
+    init(passwords: any PasswordProviding, scripts: [Script]) {
+        self.passwords = passwords
+        self.scripts = scripts
+    }
+
+    func run(_ steps: [RunStep], reason: String, verify: @escaping InstalledVerifier) -> AsyncStream<RunEvent> {
+        let script = lock.withLock { scripts.isEmpty ? Script(asks: [], events: [.done]) : scripts.removeFirst() }
+        return AsyncStream { continuation in
+            Task {
+                continuation.yield(.needsPassword)
+                for retry in script.asks {
+                    guard let secret = await self.passwords.password(reason: reason, previousAttemptFailed: retry)
+                    else { break }
+                    secret.wipe()
+                }
+                for event in script.events { continuation.yield(event) }
                 continuation.finish()
             }
         }
@@ -343,6 +374,81 @@ extension RunController {
         })
     }
 
+    @Test func retryPromptSaysTryAgain() async {
+        let run = Self.controller(FakeRunExecutor())
+        let first = Task { await run.askForPassword(reason: "r", previousAttemptFailed: false) }
+        #expect(await waitUntil { run.showingPasswordSheet })
+        #expect(!run.passwordRetry)
+        run.finishPassword(SecretBuffer(copying: Array("wrong".utf8)))
+        _ = await first.value
+        let second = Task { await run.askForPassword(reason: "r", previousAttemptFailed: true) }
+        #expect(await waitUntil { run.showingPasswordSheet })
+        #expect(run.passwordRetry)
+        #expect(PasswordSheet.retryLine == "That password didn't work. Try again.")
+        run.finishPassword(nil)
+        #expect(await second.value == nil)
+    }
+
+    @Test func providerPassesTheRetryFlag() async {
+        let prompter = FakePrompter(password: "pw")
+        let provider = PromptPasswordProvider()
+        provider.prompter = prompter
+        _ = await provider.password(reason: "a", previousAttemptFailed: false)
+        _ = await provider.password(reason: "b", previousAttemptFailed: true)
+        #expect(prompter.retries == [false, true])
+    }
+
+    @Test func newRunPasswordSheetStartsClean() async {
+        let provider = PromptPasswordProvider()
+        let executor = AskingExecutor(passwords: provider, scripts: [
+            .init(asks: [false, true, true], events: [.passwordRejected, .done]),
+            .init(asks: [false], events: [.started(0), .finished(0, 0), .done]),
+        ])
+        let run = Self.controller(executor)
+        provider.prompter = run
+        #expect(run.start(Self.plan([F.cask()]), ensureHelper: Self.enabled))
+        for attempt in 0..<3 {
+            #expect(await waitUntil { run.showingPasswordSheet })
+            #expect(run.passwordRetry == (attempt > 0))
+            run.finishPassword(SecretBuffer(copying: Array("wrong".utf8)))
+        }
+        #expect(await waitUntil { !run.isRunning })
+        #expect(run.passwordRejected)
+
+        #expect(run.start(Self.plan([F.cask()]), ensureHelper: Self.enabled))
+        // The panel and the headline drop the last run's rejection as soon as the new run starts.
+        #expect(!run.passwordRejected)
+        #expect(await waitUntil { run.showingPasswordSheet })
+        #expect(!run.passwordRetry)
+        #expect(!run.passwordRejected)
+        run.finishPassword(SecretBuffer(copying: Array("right".utf8)))
+        #expect(await waitUntil { !run.isRunning })
+        #expect(run.headline == "Finished")
+    }
+
+    @Test func lateSheetDismissalDoesNotCancelTheRetry() async {
+        let run = Self.controller(FakeRunExecutor())
+        let first = Task { await run.askForPassword(reason: "r", previousAttemptFailed: false) }
+        #expect(await waitUntil { run.showingPasswordSheet })
+        run.finishPassword(SecretBuffer(copying: Array("wrong".utf8)))
+        _ = await first.value
+        let second = Task { await run.askForPassword(reason: "r", previousAttemptFailed: true) }
+        #expect(await waitUntil { run.showingPasswordSheet })
+        // The first sheet's dismissal finishes after the retry's sheet was asked for: it must not end the retry.
+        run.sheetDismissed()
+        #expect(run.showingPasswordSheet)
+        let secret = SecretBuffer(copying: Array("right".utf8))
+        run.finishPassword(secret)
+        #expect(await second.value === secret)
+
+        // Esc on a showing sheet: SwiftUI clears the binding, then the dismissal cancels the prompt.
+        let third = Task { await run.askForPassword(reason: "r", previousAttemptFailed: false) }
+        #expect(await waitUntil { run.showingPasswordSheet })
+        run.showingPasswordSheet = false
+        run.sheetDismissed()
+        #expect(await third.value == nil)
+    }
+
     // MARK: Helper and finish
 
     @Test func ensureHelperOnlyForHelperSteps() async {
@@ -359,6 +465,29 @@ extension RunController {
         #expect(await waitUntil { !run.isRunning })
         #expect(gate.calls == 1)
         #expect(executor.runs.last?.steps == [F.formula(), F.port()])
+    }
+
+    @Test func verifierReachesTheExecutor() async {
+        let missing: InstalledVerifier = { refs in refs.filter { $0.name == "gone" } }
+        let refs = [PackageRef(engine: .homebrew, kind: .formula, name: "gone"),
+                    PackageRef(engine: .homebrew, kind: .formula, name: "here")]
+        // Without the helper.
+        let executor = FakeRunExecutor()
+        let run = Self.controller(executor)
+        #expect(run.start(Self.plan([F.formula()]), verify: missing, ensureHelper: Self.enabled))
+        #expect(await waitUntil { !run.isRunning })
+        // Through the helper check (a MacPorts step).
+        #expect(run.start(Self.plan([F.port()]), verify: missing, ensureHelper: Self.enabled))
+        #expect(await waitUntil { !run.isRunning })
+        #expect(executor.verifiers.count == 2)
+        for verify in executor.verifiers {
+            #expect(await verify(refs).map(\.name) == ["gone"])
+        }
+        // No verifier passed: fail closed.
+        #expect(run.start(Self.plan([F.formula()]), ensureHelper: Self.enabled))
+        #expect(await waitUntil { !run.isRunning })
+        let last = executor.verifiers.last
+        #expect(await last?(refs).map(\.name) == ["gone", "here"])
     }
 
     @Test func onRunEndedFiresOnce() async {

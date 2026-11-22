@@ -15,7 +15,7 @@ public enum HelperRequestValidator {
     public static let maxTokenBytes = 256
 
     /// The only `port` actions the helper runs.
-    public static let verbs: Set<String> = ["install", "upgrade", "uninstall", "selfupdate"]
+    public static let verbs: Set<String> = ["install", "upgrade", "uninstall", "selfupdate", "setrequested", "unsetrequested"]
 
     /// Refuses anything but `["-N", verb] + extraArgs + names + variants`, where extraArgs come from
     /// `RootArguments.macPortsExtraArgs`, names pass `RootArguments.isValidPortName`, variants pass
@@ -48,6 +48,9 @@ public enum HelperRequestValidator {
         // Anything left is out of place or classifies as nothing allowed.
         if i < rest.endIndex { throw HelperError.notAllowed(printable(rest[i])) }
 
+        if verb == "setrequested" || verb == "unsetrequested", let flag = extraArgs.first {
+            throw HelperError.notAllowed(printable(flag))
+        }
         if verb == "selfupdate" {
             if let name = names.first { throw HelperError.notAllowed(printable(name)) }
         } else if names.isEmpty {

@@ -85,6 +85,24 @@ import Testing
         #expect(runner.calls.count == 1)
     }
 
+    @Test func forgetAsksAgain() async {
+        let runner = Self.runner(stdout: "__BREWXPORT_PATH_BEGIN__/usr/bin__BREWXPORT_PATH_END__\n")
+        let resolver = Self.resolver(runner)
+        _ = await resolver.resolve()
+        await resolver.forget()
+        _ = await resolver.resolve()
+        #expect(runner.calls.count == 2)
+    }
+
+    /// The PATH fix uses the shell this resolver asks, and only one listed in /etc/shells; nothing is run to find it.
+    @Test func loginShellIsTheListedShell() {
+        let runner = Self.runner(stdout: "")
+        #expect(Self.resolver(runner).loginShell == "/bin/zsh")
+        #expect(Self.resolver(runner, shell: "/usr/local/bin/fish", allowed: ["/bin/zsh"]).loginShell == nil)
+        #expect(Self.resolver(runner, shell: nil).loginShell == nil)
+        #expect(runner.calls.isEmpty)
+    }
+
     @Test func unlistedShellFallsBack() async {
         let runner = Self.runner(stdout: "__BREWXPORT_PATH_BEGIN__/usr/bin__BREWXPORT_PATH_END__\n")
         let unlisted = await Self.resolver(runner, shell: "/usr/local/bin/fish", allowed: ["/bin/zsh", "/bin/bash"]).resolve()

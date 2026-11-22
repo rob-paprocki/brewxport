@@ -112,6 +112,10 @@ public struct PackageDetails: Sendable, Equatable {
     public var variants: [String]
     /// Casks: true when a pkg or installer artifact is present. nil means unknown.
     public var installerNeedsRoot: Bool?
+    /// The name the engine itself gave the package it answered with, which can differ from `ref.name`: Homebrew
+    /// answers an alias (`python3`) with the formula it stands for (`python@3.15`), and MacPorts gives a port's own
+    /// capitals (`ImageMagick` for `imagemagick`). nil means the answer didn't say.
+    public var reportedName: String?
 
     public init(
         ref: PackageRef,
@@ -121,8 +125,10 @@ public struct PackageDetails: Sendable, Equatable {
         latestVersion: String? = nil,
         dependencies: [String]? = nil,
         variants: [String] = [],
-        installerNeedsRoot: Bool? = nil
+        installerNeedsRoot: Bool? = nil,
+        reportedName: String? = nil
     ) {
+        self.reportedName = reportedName
         self.ref = ref
         self.summary = summary
         self.homepage = homepage

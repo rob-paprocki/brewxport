@@ -12,8 +12,9 @@
 #      "Set up Homebrew", visible and ticked only when isArm() (sysctl hw.optional.arm64 == 1; the key is undefined
 #      on Intel), and setup-engine-macports, "Set up MacPorts", the opposite. start_selected is the same
 #      expression as visible, so the hidden twin is never ticked and unticking the visible one really skips the
-#      marker. One identifier, so the app's receipt check works the same on both. The app choice is hidden and
-#      always installed.
+#      marker. One identifier, so the app's receipt check works the same on both. The list is flat: the app is
+#      its own row, "BrewxPort", ticked and greyed out, so it's always installed (0.3.0 nested everything under an
+#      untitled choice, which Installer showed as a nameless row with a mixed checkbox).
 #   2. builds a distribution package with productbuild (title BrewxPort, macOS 15 or later, x86_64 and arm64),
 #      signed with the Developer ID Installer identity and a secure timestamp, and checks it with
 #      `pkgutil --check-signature`
@@ -74,8 +75,8 @@ if [ "$UNNOTARIZED" -eq 1 ]; then PKG="$OUT/BrewxPort-$VERSION-unnotarized.pkg";
 MARKER_ID="com.brewxport.setup-engine.pkg"
 HOMEBREW_CHOICE="setup-engine-homebrew"
 MACPORTS_CHOICE="setup-engine-macports"
-HOMEBREW_DESCRIPTION="Installs nothing now. BrewxPort offers to set up Homebrew the first time you open it."
-MACPORTS_DESCRIPTION="Installs nothing now. BrewxPort offers to set up MacPorts the first time you open it."
+HOMEBREW_DESCRIPTION="Nothing is downloaded now, so this shows Zero KB. The next time BrewxPort opens, it downloads Homebrew's official installer and sets it up, after asking for your administrator password. Skipped if Homebrew is already installed."
+MACPORTS_DESCRIPTION="Nothing is downloaded now, so this shows Zero KB. The next time BrewxPort opens, it downloads MacPorts' official installer and sets it up, after asking for your administrator password. If Apple's Command Line Tools are missing, it installs them first (about 1.3 GB). Skipped if MacPorts is already installed."
 # Text that goes into the distribution's XML attributes is escaped here, so editing the copy can't break the XML.
 xml_escape() { printf '%s' "$1" | sed -e 's/&/\&amp;/g' -e 's/</\&lt;/g' -e 's/>/\&gt;/g' -e 's/"/\&quot;/g' -e "s/'/\&apos;/g"; }
 HOMEBREW_TITLE="$(xml_escape "Set up Homebrew")"
@@ -130,14 +131,11 @@ cat >"$WORK/distribution.xml" <<XML
     </allowed-os-versions>
     <script>function isArm(){ var v = system.sysctl('hw.optional.arm64'); return v == 1; }</script>
     <choices-outline>
-        <line choice="default">
-            <line choice="$PKG_ID"/>
-            <line choice="$HOMEBREW_CHOICE"/>
-            <line choice="$MACPORTS_CHOICE"/>
-        </line>
+        <line choice="$PKG_ID"/>
+        <line choice="$HOMEBREW_CHOICE"/>
+        <line choice="$MACPORTS_CHOICE"/>
     </choices-outline>
-    <choice id="default"/>
-    <choice id="$PKG_ID" visible="false">
+    <choice id="$PKG_ID" title="BrewxPort" start_selected="true" enabled="false">
         <pkg-ref id="$PKG_ID"/>
     </choice>
     <choice id="$HOMEBREW_CHOICE" title="$HOMEBREW_TITLE" description="$HOMEBREW_DESCRIPTION"

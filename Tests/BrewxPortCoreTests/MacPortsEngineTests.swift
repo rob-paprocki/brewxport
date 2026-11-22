@@ -280,7 +280,7 @@ private func ref(_ name: String, engine: EngineID = .macports, kind: PackageKind
 
 // MARK: info
 
-private let infoArgs = ["info", "--description", "--homepage", "--version", "--variants", "--depends_lib", "--depends_run"]
+private let infoArgs = ["info", "--name", "--description", "--homepage", "--version", "--variants", "--depends_lib", "--depends_run"]
 
 @Suite struct MacPortsInfoTests {
     private func engine(_ name: String, _ output: String) -> (MacPortsEngine, FakeRunner) {

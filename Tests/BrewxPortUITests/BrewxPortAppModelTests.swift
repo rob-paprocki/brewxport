@@ -19,14 +19,17 @@ import BrewxPortRun
                          setupProblem: String? = nil, isAdministrator: Bool? = true,
                          hostInfo: HostInfo = HostInfo(appleSilicon: true, macOSMajor: 15), cltPresent: Bool = true,
                          receipts: any InstallerReceiptReading = NoReceipts(),
-                         store: MemoryStore = MemoryStore()) -> Services {
+                         store: MemoryStore = MemoryStore(),
+                         engines: [any Engine] = PlanFixtures.engines, path: any PathResolving = NoPath(),
+                         shellPath: ShellPathEditor? = nil) -> Services {
         // The model loads Installed and Updates on its own; a test that doesn't script them gets empty lists.
         catalog.scriptEmpty(.installed)
         catalog.scriptEmpty(.outdated)
-        return Services(engines: PlanFixtures.engines, catalog: catalog, executor: executor, helper: helper,
+        return Services(engines: engines, catalog: catalog, executor: executor, helper: helper,
                  passwords: PromptPasswordProvider(), isAdministrator: { isAdministrator }, store: store,
-                 path: NoPath(), fileExists: { _ in true }, host: host, hostInfo: hostInfo,
-                 cltPresent: { cltPresent }, receipts: receipts, setupProblem: setupProblem, isDemo: isDemo)
+                 path: path, fileExists: { _ in true }, host: host, hostInfo: hostInfo,
+                 cltPresent: { cltPresent }, receipts: receipts, setupProblem: setupProblem, isDemo: isDemo,
+                 shellPath: shellPath)
     }
 
     static func package(_ engine: EngineID, _ kind: PackageKind, _ name: String,
@@ -596,12 +599,108 @@ import BrewxPortRun
         let model = await waitingForApproval(helper: helper, notifications: center, pollSleep: { _ in
             try? await Task.sleep(for: .seconds(30))
         })
-        center.post(name: NSApplication.didBecomeActiveNotification, object: nil)
-        #expect(helper.refreshCount == 0)
         model.setup.setUp(.homebrew)
+        #expect(await waitUntil { model.setup.stage == .needsHelperApproval })
+        let before = helper.refreshCount
         center.post(name: NSApplication.didBecomeActiveNotification, object: nil)
-        #expect(await waitUntil { helper.refreshCount == 1 })
+        #expect(await waitUntil { helper.refreshCount == before + 1 })
         model.setup.notNow()
+    }
+
+    /// A model past launch with the helper in `state` (from `ensure`), engines checked, and no poll that ever ticks
+    /// unless `pollSleep` says so.
+    private func helperModel(_ helper: FakeHelperManager, state: HelperState, notifications: NotificationCenter,
+                             pollSleep: @escaping @Sendable (Duration) async -> Void = { _ in
+                                 try? await Task.sleep(for: .seconds(30))
+                             }) async -> BrewxPortAppModel {
+        let model = BrewxPortAppModel(services: F.services(catalog: FakeCatalog(engines: [.homebrew: .missing]),
+                                                           helper: helper), notifications: notifications)
+        model.pollSleep = pollSleep
+        model.start()
+        _ = await waitUntil { model.helperState == state && !model.engineStatuses.isEmpty && !model.checkingHelper }
+        return model
+    }
+
+    @Test func becomingActiveRereadsTheHelperWhenItNeedsApproval() async {
+        for waiting in [HelperState.requiresApproval, .notRegistered] {
+            let helper = FakeHelperManager(refresh: [.enabled], ensure: [waiting])
+            let center = NotificationCenter()
+            let model = await helperModel(helper, state: waiting, notifications: center)
+            #expect(model.setup.stage != .needsHelperApproval)
+            #expect(helper.refreshCount == 0)
+            center.post(name: NSApplication.didBecomeActiveNotification, object: nil)
+            #expect(await waitUntil { model.helperState == .enabled }, "\(waiting)")
+            #expect(helper.refreshCount == 1)
+            // Once it's ready, coming back to the app reads nothing more.
+            center.post(name: NSApplication.didBecomeActiveNotification, object: nil)
+            try? await Task.sleep(for: .milliseconds(50))
+            #expect(helper.refreshCount == 1)
+            #expect(helper.ensureCount == 1)
+            #expect(helper.reinstallCount == 0)
+        }
+    }
+
+    @Test func becomingActiveLeavesAReadyHelperAlone() async {
+        for state in [HelperState.enabled, .outdated, .failed("x")] {
+            let helper = FakeHelperManager(refresh: [state], ensure: [state])
+            let center = NotificationCenter()
+            let model = await helperModel(helper, state: state, notifications: center)
+            center.post(name: NSApplication.didBecomeActiveNotification, object: nil)
+            try? await Task.sleep(for: .milliseconds(50))
+            #expect(helper.refreshCount == 0, "\(state)")
+            _ = model
+        }
+    }
+
+    @Test func helperPageOpenLoginItemsPollsUntilApproved() async {
+        let helper = FakeHelperManager(refresh: [.requiresApproval, .requiresApproval, .enabled],
+                                       ensure: [.requiresApproval])
+        let model = await helperModel(helper, state: .requiresApproval, notifications: NotificationCenter(),
+                                      pollSleep: Self.shortSleep)
+        model.sidebar = .helper
+        model.openLoginItems()
+        #expect(helper.openCount == 1)
+        #expect(await waitUntil { model.helperState == .enabled })
+        #expect(helper.refreshCount == 3)
+        // The poll stopped once the helper was approved, and it never registers anything.
+        try? await Task.sleep(for: .milliseconds(100))
+        #expect(helper.refreshCount == 3)
+        #expect(helper.ensureCount == 1)
+        #expect(helper.reinstallCount == 0)
+    }
+
+    @Test func leavingTheHelperPageStopsThePoll() async {
+        let helper = FakeHelperManager(refresh: [.requiresApproval], ensure: [.requiresApproval])
+        let model = await helperModel(helper, state: .requiresApproval, notifications: NotificationCenter(),
+                                      pollSleep: Self.shortSleep)
+        model.sidebar = .helper
+        model.openLoginItems()
+        #expect(await waitUntil { helper.refreshCount >= 2 })
+        model.sidebar = .updates
+        try? await Task.sleep(for: .milliseconds(100))
+        let reads = helper.refreshCount
+        try? await Task.sleep(for: .milliseconds(100))
+        #expect(helper.refreshCount == reads)
+    }
+
+    @Test func openLoginItemsElsewhereStartsNoPagePoll() async {
+        // The setup sheet's button has its own poll (while the setup waits); from any other page nothing polls.
+        let helper = FakeHelperManager(refresh: [.requiresApproval], ensure: [.requiresApproval])
+        let model = await helperModel(helper, state: .requiresApproval, notifications: NotificationCenter(),
+                                      pollSleep: Self.shortSleep)
+        model.sidebar = .updates
+        model.openLoginItems()
+        #expect(helper.openCount == 1)
+        try? await Task.sleep(for: .milliseconds(100))
+        #expect(helper.refreshCount == 0)
+        // Nor on the Helper page once the helper is ready.
+        let ready = FakeHelperManager(refresh: [.enabled], ensure: [.enabled])
+        let other = await helperModel(ready, state: .enabled, notifications: NotificationCenter(),
+                                      pollSleep: Self.shortSleep)
+        other.sidebar = .helper
+        other.openLoginItems()
+        try? await Task.sleep(for: .milliseconds(100))
+        #expect(ready.refreshCount == 0)
     }
 
     @Test func demoSetUpIsNoOp() async {
@@ -708,7 +807,9 @@ import BrewxPortRun
     @Test func promptRoutedToRunController() async {
         let services = F.services()
         let model = BrewxPortAppModel(services: services)
-        let answer = Task { await services.passwords.password(reason: "BrewxPort needs it.") }
+        let answer = Task {
+            await services.passwords.password(reason: "BrewxPort needs it.", previousAttemptFailed: false)
+        }
         #expect(await waitUntil { model.run.showingPasswordSheet })
         #expect(model.run.passwordReason == "BrewxPort needs it.")
         model.run.finishPassword(nil)

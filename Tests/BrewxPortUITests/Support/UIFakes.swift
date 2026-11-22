@@ -63,6 +63,7 @@ final class FakeRunExecutor: RunExecuting, @unchecked Sendable {
     private var _hang: Bool
     private var _cancelCount = 0
     private var _runs: [(steps: [RunStep], reason: String)] = []
+    private var _verifiers: [InstalledVerifier] = []
     private var continuation: AsyncStream<RunEvent>.Continuation?
 
     /// `hang`: after the scripted events the stream stays open until `cancel()` (which ends it with
@@ -82,11 +83,31 @@ final class FakeRunExecutor: RunExecuting, @unchecked Sendable {
     }
     var cancelCount: Int { lock.withLock { _cancelCount } }
     var runs: [(steps: [RunStep], reason: String)] { lock.withLock { _runs } }
+    /// The verifier each run got, in the order of `runs`.
+    var verifiers: [InstalledVerifier] { lock.withLock { _verifiers } }
 
-    func run(_ steps: [RunStep], reason: String) -> AsyncStream<RunEvent> {
-        let (events, hang) = lock.withLock { () -> ([RunEvent], Bool) in
+    /// When set, each run first asks its verifier about every check step, as a real run would, then replays the events.
+    var asksVerifier: Bool {
+        get { lock.withLock { _asksVerifier } }
+        set { lock.withLock { _asksVerifier = newValue } }
+    }
+    private var _asksVerifier = false
+
+    func run(_ steps: [RunStep], reason: String, verify: @escaping InstalledVerifier) -> AsyncStream<RunEvent> {
+        let (events, hang, asks) = lock.withLock { () -> ([RunEvent], Bool, Bool) in
             _runs.append((steps, reason))
-            return (_events, _hang)
+            _verifiers.append(verify)
+            return (_events, _hang, _asksVerifier)
+        }
+        if asks {
+            let checks = steps.compactMap(\.verifyInstalled)
+            return AsyncStream { continuation in
+                Task {
+                    for refs in checks { _ = await verify(refs) }
+                    for event in events { continuation.yield(event) }
+                    continuation.finish()
+                }
+            }
         }
         return AsyncStream { continuation in
             for event in events { continuation.yield(event) }
@@ -317,11 +338,13 @@ final class FakeHelperManager: HelperManaging, @unchecked Sendable {
 @MainActor final class FakePrompter: PasswordPrompting {
     var password: String?
     private(set) var reasons: [String] = []
+    private(set) var retries: [Bool] = []
 
     init(password: String? = nil) { self.password = password }
 
-    func askForPassword(reason: String) async -> SecretBuffer? {
+    func askForPassword(reason: String, previousAttemptFailed: Bool) async -> SecretBuffer? {
         reasons.append(reason)
+        retries.append(previousAttemptFailed)
         guard let password else { return nil }
         return SecretBuffer(copying: Array(password.utf8))
     }

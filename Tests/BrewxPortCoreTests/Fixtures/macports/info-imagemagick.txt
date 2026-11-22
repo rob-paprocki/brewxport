@@ -1,0 +1,7 @@
+name: ImageMagick
+description: Tools and libraries to manipulate images in many formats
+homepage: https://legacy.imagemagick.org
+version: 6.9.13-59
+variants: graphviz, lqr, openexr, pango, rsvg, wmf, x11, universal
+depends_lib: bzip2, djvulibre, xz, jbigkit, libjpeg-turbo, lcms2, libpng, libraw, tiff, webp, zlib, fftw-3, freetype, fontconfig, ghostscript, libiconv, libtool, openjpeg, expat, libxml2, libheif, pkgconfig, openexr, xorg-libX11, xorg-libXext, xorg-libXt
+depends_run: jxrlib, libbpg, urw-fonts, xdg-utils

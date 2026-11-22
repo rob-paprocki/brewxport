@@ -93,6 +93,8 @@ public actor DemoInventory {
         case .remove:
             installed[engine]?.removeAll { names.contains($0.id.name) }
             outdated[engine]?.removeAll { names.contains($0.id.name) }
+        case .markRequested, .markDependency:
+            break
         }
     }
 
@@ -107,7 +109,7 @@ public actor DemoInventory {
 ///
 /// Searches go through the real engine's parser on the captured search and keep the rows whose name contains the
 /// query. Commands and privileges are the real engine's, so the steps a demo run shows are the ones BrewxPort would run.
-public final class DemoEngine: Engine, TapListing {
+public final class DemoEngine: Engine, TapListing, DependentsListing {
     public let runner: FixtureRunner
     let wrapped: any Engine
     let inventory: DemoInventory
@@ -143,6 +145,12 @@ public final class DemoEngine: Engine, TapListing {
     public func listTaps() async throws -> [String] {
         guard wrapped is any TapListing else { return [] }
         return await inventory.installedTaps()
+    }
+
+    /// Forwards to the real engine's parser on the demo's captured output; `[]` for an engine that can't list dependents.
+    public func installedDependents(of name: String) async throws -> Set<String> {
+        guard let listing = wrapped as? any DependentsListing else { return [] }
+        return try await listing.installedDependents(of: name)
     }
 
     /// The captured details when there are some, otherwise the row's own fields. The installed version always

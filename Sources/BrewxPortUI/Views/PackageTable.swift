@@ -68,18 +68,54 @@ extension View {
     }
 
     /// The right-click menu (`BrewxPortAppModel.rowMenuItems`, from `RowActions`) and double-click for details, both
-    /// through `BrewxPortAppModel.perform`. Shared by every package table, Bundles' included.
+    /// through `BrewxPortAppModel.perform`. Shared by every package table, Bundles' included. The Move items
+    /// (always next to each other) show as one "Move to" submenu where the first of them is.
     func packageRowMenu(model: BrewxPortAppModel, view: PackageView) -> some View {
         contextMenu(forSelectionType: PackageRef.self) { refs in
             let items = model.rowMenuItems(for: refs, in: view)
-            ForEach(items, id: \.self) { item in
-                Button(item.title, systemImage: item.systemImage) {
-                    model.perform(item.action, on: refs)
-                }
-                .disabled(!item.isEnabled)
+            let firstMove = items.firstIndex(where: \.isMove) ?? items.endIndex
+            let moves = items.filter(\.isMove)
+            ForEach(items[..<firstMove].filter { !$0.isMove }, id: \.self) { item in
+                RowActionButton(item: item) { model.perform(item.action, on: refs) }
+            }
+            if !moves.isEmpty {
+                MoveToMenu(items: moves) { model.perform($0, on: refs) }
+            }
+            ForEach(items[firstMove...].filter { !$0.isMove }, id: \.self) { item in
+                RowActionButton(item: item) { model.perform(item.action, on: refs) }
             }
         } primaryAction: { refs in
             model.perform(.showDetails, on: refs)
         }
+    }
+}
+
+/// One menu item from `RowActions`, off when it says so, with its tooltip.
+struct RowActionButton: View {
+    let item: RowActionItem
+    let action: () -> Void
+
+    var body: some View {
+        Button(item.title, systemImage: item.systemImage, action: action)
+            .disabled(!item.isEnabled)
+            .optionalHelp(item.help)
+    }
+}
+
+/// "Move to", with one item per package manager: in the right-click menu and the Package menu. Items that can't be
+/// used still show, off (in demo mode with a tooltip); with no items at all the submenu is off.
+struct MoveToMenu: View {
+    let items: [RowActionItem]
+    let perform: (RowAction) -> Void
+
+    var body: some View {
+        Menu("Move to") {
+            ForEach(items, id: \.self) { item in
+                Button(item.title) { perform(item.action) }
+                    .disabled(!item.isEnabled)
+                    .optionalHelp(item.help)
+            }
+        }
+        .disabled(items.isEmpty)
     }
 }

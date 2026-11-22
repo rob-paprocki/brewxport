@@ -120,6 +120,14 @@ class PatternTests(unittest.TestCase):
                      "12345+someone" + "@users.noreply.github.com"):
             self.assertEqual(self.kinds(addr), ["email address"], addr)
 
+    def test_versioned_formula_names_are_not_emails(self):
+        # Homebrew's versioned formulae: `python@3.15.rb`, `openssl@3`, in real captured output.
+        self.assertEqual(self.kinds('"ruby_source_path": "Formula/p/python' + '@3.15.rb"'), [])
+        self.assertEqual(self.kinds("node" + "@22.11.rb icu4c" + "@76.1.rb"), [])
+        # A real-looking domain with a digit-only label still counts.
+        for addr in ("a" + "@1.2.com", "a" + "@123.example.org", "me" + "@mail2.net"):
+            self.assertEqual(self.kinds(addr), ["email address"], addr)
+
     def test_ip_allow_list_is_exact(self):
         self.assertEqual(self.kinds("1.1.1.1 8.8.8.8 0.0.0.0"), [])
         for ip in (IP("9", "9", "9", "9"), IP("1", "0", "0", "1"), IP("8", "8", "4", "4")):
@@ -235,7 +243,7 @@ class PatternTests(unittest.TestCase):
     def test_this_repos_approved_binaries_are_its_only_binaries(self):
         approved, problems = check_repo.load_approved(ROOT)
         self.assertEqual(problems, [])
-        self.assertEqual(sorted(approved), ["docs/images/bundles-dark.png", "docs/images/bundles-light.png",
+        self.assertEqual(sorted(approved), ["Resources/bundle/AppIcon.icns", "docs/images/bundles-dark.png", "docs/images/bundles-light.png",
                                     "docs/images/setup-dark.png", "docs/images/setup-light.png",
                                     "docs/images/updates-dark.png", "docs/images/updates-light.png"])
 

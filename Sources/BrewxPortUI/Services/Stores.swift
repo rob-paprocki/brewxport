@@ -46,4 +46,12 @@ public struct ResolvedPath: Sendable, Equatable {
     }
 }
 
-public protocol PathResolving: Sendable { func resolve() async -> ResolvedPath }
+public protocol PathResolving: Sendable {
+    func resolve() async -> ResolvedPath
+    /// Drops a cached answer, so the next `resolve()` asks again (after BrewxPort changed a shell startup file).
+    func forget() async
+}
+
+extension PathResolving {
+    public func forget() async {}
+}

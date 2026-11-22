@@ -80,8 +80,8 @@ public final class FixtureRunner: CommandRunning {
                 return x86 ? "macports/x86_64/installed.txt" : "macports/installed.txt"
             // No x86_64 capture of `port outdated` has rows; the text format is the same on both.
             case ["-q", "outdated"]: return "macports/outdated.txt"
-            case ["info", "--description", "--homepage", "--version", "--variants", "--depends_lib", "--depends_run",
-                  "ripgrep"]:
+            case ["info", "--name", "--description", "--homepage", "--version", "--variants", "--depends_lib",
+                  "--depends_run", "ripgrep"]:
                 return "macports/info-ripgrep.txt"
             default: return nil
             }

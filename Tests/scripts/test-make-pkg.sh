@@ -89,8 +89,17 @@ grep -E '<choice id="setup-engine-macports"' <<<"$dist" | grep 'title="Set up Ma
     pass "MacPorts choice on Intel" || fail "no MacPorts choice shown by !isArm()"
 [ "$(grep -c 'start_selected="isArm()"\|start_selected="!isArm()"' <<<"$dist" | tr -d ' ')" = 2 ] &&
     pass "each setup choice starts ticked only on its own architecture" || fail "start_selected isn't tied to isArm()"
-grep -E '<choice id="com\.brewxport\.app\.pkg"' <<<"$dist" | grep -q 'visible="false"' &&
-    pass "the app choice is hidden, so always installed" || fail "the app choice isn't hidden"
+grep -E '<choice id="com\.brewxport\.app\.pkg"' <<<"$dist" | grep 'title="BrewxPort"' | grep 'enabled="false"' |
+    grep -q 'start_selected="true"' &&
+    pass "the app is its own row, ticked and greyed out, so always installed" ||
+    fail "the app choice isn't a titled, ticked, disabled row"
+grep -E '<choice id="setup-engine-macports"' <<<"$dist" | grep 'Zero KB' | grep -q '1.3 GB' &&
+    pass "MacPorts description explains Zero KB and the later download" || fail "MacPorts description doesn't explain the download"
+grep -E '<choice id="setup-engine-homebrew"' <<<"$dist" | grep -q 'Zero KB' &&
+    pass "Homebrew description explains Zero KB" || fail "Homebrew description doesn't explain Zero KB"
+# A flat outline: no untitled parent row (Installer showed one, with a mixed checkbox, on 0.3.0).
+! grep -q '<line choice="default">' <<<"$dist" && ! grep -q '<choice id="default"' <<<"$dist" &&
+    pass "the choice list is flat, with no untitled group" || fail "choices are nested under an untitled group"
 [ "$(grep -c '<pkg-ref id="com.brewxport.setup-engine.pkg"[^>]*>[^<]' <<<"$dist" | tr -d ' ')" = 1 ] &&
     pass "one marker package file" || fail "the marker package isn't referenced exactly once"
 

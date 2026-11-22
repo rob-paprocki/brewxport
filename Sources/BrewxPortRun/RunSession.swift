@@ -4,8 +4,9 @@ import Synchronization
 
 /// Asks the user for the administrator password.
 public protocol PasswordProviding: Sendable {
-    /// Nil means the user cancelled. The session takes ownership of the buffer and wipes it when the run ends.
-    func password(reason: String) async -> SecretBuffer?
+    /// Nil means the user cancelled. The session takes ownership of the buffer and wipes it when the run ends, or as
+    /// soon as it's rejected. `previousAttemptFailed` is true when the same run's last password was rejected.
+    func password(reason: String, previousAttemptFailed: Bool) async -> SecretBuffer?
 }
 
 /// The app's side of BrewxPortHelper. Task 11 provides the live one (XPC plus `AppAuthorization`).
@@ -45,6 +46,9 @@ public enum RunEvent: Sendable, Equatable {
     case done
 }
 
+/// Answers a check step: given packages that should now be installed, returns the ones that are missing.
+public typealias InstalledVerifier = @Sendable ([PackageRef]) async -> [PackageRef]
+
 /// The askpass server as RunSession uses it, so tests can count `stop()`.
 protocol AskpassServing: AnyObject, Sendable {
     var environment: [String: String] { get }
@@ -55,14 +59,21 @@ extension AskpassServer: AskpassServing {}
 
 typealias AskpassServerFactory = @Sendable (_ secret: SecretBuffer, _ askpassPath: String) throws -> any AskpassServing
 
-/// Runs a list of steps (an "Update all") with at most one password prompt.
+/// Runs a list of steps (an "Update all") with one password for the whole run.
 ///
 /// 1. If any step's route isn't `.user`, it first checks that the user is in the admin group (a standard user gets
-///    `.privilegeUnavailable` and no prompt), then emits `.needsPassword` and asks once.
+///    `.privilegeUnavailable` and no prompt), then emits `.needsPassword` once and asks.
 /// 2. Before the first step it checks the password: helper steps through `helper.authorize`, askpass steps through
-///    `/usr/bin/sudo -A -k -v` with the askpass server. A wrong password gives `.passwordRejected` and nothing runs.
-///    The askpass server answers each sudo once, so a wrong password fails at once instead of after sudo's retries.
-/// 3. It runs the steps in order through `spec.launchCommand()`. A failed step doesn't stop the rest.
+///    `/usr/bin/sudo -A -k -v` with the askpass server. A wrong password is wiped, its askpass server stopped, and the
+///    password asked for again (`previousAttemptFailed`), up to `passwordAttempts` times in all, like sudo. After the
+///    last wrong one it gives `.passwordRejected` and nothing runs. Nothing runs until a password is verified; a
+///    cancel at any ask ends the run, and a failure other than the password isn't retried. The askpass server answers
+///    each sudo once, so a wrong password fails at once instead of after sudo's retries.
+/// 3. It runs the steps in order through `spec.launchCommand()`. A failed step doesn't stop the rest, but it does
+///    stop a later step that `dependsOnPrevious` (right after it) or `requiresAllEarlier`. A check step
+///    (`verifyInstalled`) launches nothing: the run's verifier says which packages are missing. A step that
+///    `requiresPassedCheck` runs only after a check passed and none failed. A step's `userEnvironment` is added only
+///    on the user routes.
 /// 4. On every exit (done, rejected, cancelled) it wipes the password, stops the askpass server and calls
 ///    `helper.endAuthorization()`, then emits `.done`.
 ///
@@ -72,6 +83,8 @@ typealias AskpassServerFactory = @Sendable (_ secret: SecretBuffer, _ askpassPat
 public final class RunSession: Sendable {
     static let sudoPath = "/usr/bin/sudo"
     static let verifyArguments = ["-A", "-k", "-v"]
+    /// How many passwords a run asks for before it gives up, counting the first.
+    static let passwordAttempts = 3
     static let passwordReason = "BrewxPort needs an administrator password to install these updates."
 
     private let runner: any CommandRunning
@@ -119,14 +132,21 @@ public final class RunSession: Sendable {
         run(steps, reason: Self.passwordReason)
     }
 
-    /// `reason` is what the password prompt says the password is for.
+    /// The verifier a run gets when none is passed: it reports every package missing, so a check step fails.
+    public static let failClosed: InstalledVerifier = { $0 }
+
     public func run(_ steps: [RunStep], reason: String) -> AsyncStream<RunEvent> {
+        run(steps, reason: reason, verify: Self.failClosed)
+    }
+
+    /// `reason` is what the password prompt says the password is for. `verify` answers the check steps.
+    public func run(_ steps: [RunStep], reason: String, verify: @escaping InstalledVerifier) -> AsyncStream<RunEvent> {
         let (stream, continuation) = AsyncStream<RunEvent>.makeStream()
         let id = UUID()
         // Created under the lock, so the task's own removal can't run before it's recorded.
         let task = runs.withLock { runs in
             let task = Task { [self] in
-                await execute(steps, reason: reason) { continuation.yield($0) }
+                await execute(steps, reason: reason, verify: verify) { continuation.yield($0) }
                 continuation.finish()
                 removeRun(id)
             }
@@ -164,10 +184,10 @@ public final class RunSession: Sendable {
 
     private struct StepFailure: Error { let message: String }
 
-    private func execute(_ steps: [RunStep], reason: String,
+    private func execute(_ steps: [RunStep], reason: String, verify: @escaping InstalledVerifier,
                          emit: @escaping @Sendable (RunEvent) -> Void) async {
         var state = State()
-        let ending = await perform(steps, reason: reason, &state, emit)
+        let ending = await perform(steps, reason: reason, verify: verify, &state, emit)
         state.secret?.wipe()
         state.server?.stop()
         await helper.endAuthorization()
@@ -180,26 +200,38 @@ public final class RunSession: Sendable {
         emit(.done)
     }
 
-    private func perform(_ steps: [RunStep], reason: String, _ state: inout State,
-                         _ emit: @escaping @Sendable (RunEvent) -> Void) async -> Ending {
+    private func perform(_ steps: [RunStep], reason: String, verify: @escaping InstalledVerifier,
+                         _ state: inout State, _ emit: @escaping @Sendable (RunEvent) -> Void) async -> Ending {
         let routes = steps.map(RunRouting.route(for:))
         if routes.contains(where: { $0 != .user }) {
             // Checked before prompting: authd can't tell a standard user's right password from a wrong one.
             if isAdministrator() == false { return .unavailable(Self.notAnAdministrator) }
             if let early = await acquireAndVerify(routes, reason: reason, &state, emit) { return early }
         }
-        // Whether the step before the current one finished with exit code 0. A skipped step counts as not.
+        // Whether the step before the current one finished with exit code 0, and whether every earlier step did. A
+        // skipped step counts as not.
         var previousSucceeded = true
+        var allEarlierSucceeded = true
+        // Nil until a check step runs; false once any check step failed or was skipped.
+        var checksPassed: Bool?
         for (index, step) in steps.enumerated() {
             if Task.isCancelled { return .cancelled }
-            if step.dependsOnPrevious && !previousSucceeded {
+            if (step.dependsOnPrevious && !previousSucceeded) || (step.requiresAllEarlier && !allEarlierSucceeded)
+                || (step.requiresPassedCheck && checksPassed != true) {
                 // Left unstarted, which the UI shows as skipped. Later steps that depend on it are skipped too.
+                previousSucceeded = false
+                allEarlierSucceeded = false
+                if step.verifyInstalled != nil { checksPassed = false }
                 continue
             }
             emit(.started(index))
             let code: Int32
             do {
-                code = try await run(step, index: index, route: routes[index], &state, emit)
+                if let refs = step.verifyInstalled {
+                    code = try await check(refs, on: step.engine, index: index, verify: verify, emit)
+                } else {
+                    code = try await run(step, index: index, route: routes[index], &state, emit)
+                }
             } catch is CancellationError {
                 return .cancelled
             } catch {
@@ -210,15 +242,35 @@ public final class RunSession: Sendable {
             // threw CancellationError is left open; the check at the top of the loop stops the next one.
             emit(.finished(index, code))
             previousSucceeded = code == 0
+            if code != 0 { allEarlierSucceeded = false }
+            if step.verifyInstalled != nil { checksPassed = code == 0 && checksPassed != false }
         }
         return .done
     }
 
-    /// Asks once, then checks the password. Returns an ending when the run must stop before its first step.
+    /// Asks for the password and checks it, asking again after a wrong one, up to `passwordAttempts` in all. Returns
+    /// an ending when the run must stop before its first step.
     private func acquireAndVerify(_ routes: [RunRoute], reason: String, _ state: inout State,
                                   _ emit: @escaping @Sendable (RunEvent) -> Void) async -> Ending? {
         emit(.needsPassword)
-        guard let secret = await passwords.password(reason: reason) else { return .cancelled }
+        for attempt in 1...Self.passwordAttempts {
+            let ending = await verifyOnce(routes, reason: reason, previousAttemptFailed: attempt > 1, &state)
+            guard case .rejected? = ending, attempt < Self.passwordAttempts else { return ending }
+            // Nothing of the wrong password outlives its attempt: the buffer, the server that held it, and anything
+            // the attempt found out.
+            state.secret?.wipe()
+            state.server?.stop()
+            state = State()
+            if Task.isCancelled { return .cancelled }
+        }
+        return .rejected
+    }
+
+    /// One ask and its check.
+    private func verifyOnce(_ routes: [RunRoute], reason: String, previousAttemptFailed: Bool,
+                            _ state: inout State) async -> Ending? {
+        guard let secret = await passwords.password(reason: reason, previousAttemptFailed: previousAttemptFailed)
+        else { return .cancelled }
         state.secret = secret
         if Task.isCancelled { return .cancelled }
 
@@ -259,23 +311,47 @@ public final class RunSession: Sendable {
         return nil
     }
 
+    /// A check step: 0 when the verifier finds nothing missing, 1 (with one stderr line naming the missing packages)
+    /// otherwise. A check over no packages fails: it would pass without checking anything. A run cancelled while the
+    /// verifier works leaves the step open, whatever the verifier said.
+    private func check(_ refs: [PackageRef], on engine: EngineID, index: Int, verify: InstalledVerifier,
+                       _ emit: @escaping @Sendable (RunEvent) -> Void) async throws -> Int32 {
+        guard !refs.isEmpty else {
+            emit(.output(index, .stderr("There was nothing to check on \(engine.displayName).")))
+            return 1
+        }
+        let missing = await verify(refs)
+        try Task.checkCancellation()
+        guard !missing.isEmpty else { return 0 }
+        let names = missing.map(\.name).joined(separator: ", ")
+        emit(.output(index, .stderr("Not found on \(engine.displayName): \(names)")))
+        return 1
+    }
+
     private func run(_ step: RunStep, index: Int, route: RunRoute, _ state: inout State,
                      _ emit: @escaping @Sendable (RunEvent) -> Void) async throws -> Int32 {
         let onOutput: @Sendable (OutputEvent) -> Void = { emit(.output(index, $0)) }
         let launch = step.spec.launchCommand(host: host)
         switch route {
         case .user:
-            return try await runner.stream(launch.executable, launch.arguments, options: RunOptions(),
+            // No extra variables: the runner's own base environment.
+            let options = step.userEnvironment.isEmpty
+                ? RunOptions() : RunOptions(environment: baseEnvironment.merging(step.userEnvironment) { $1 })
+            return try await runner.stream(launch.executable, launch.arguments, options: options,
                                            onOutput: onOutput)
         case .userWithAskpass, .sudoAskpass:
             guard state.askpassFailure == nil, let server = state.server else {
                 throw StepFailure(message: state.askpassFailure ?? "BrewxPort couldn't pass the password to sudo.")
             }
-            let options = RunOptions(environment: askpassEnvironment(server))
             if route == .userWithAskpass {
-                return try await runner.stream(launch.executable, launch.arguments, options: options,
-                                               onOutput: onOutput)
+                // The step's own variables never override the askpass ones.
+                let environment = baseEnvironment.merging(step.userEnvironment) { $1 }
+                    .merging(server.environment) { $1 }
+                return try await runner.stream(launch.executable, launch.arguments,
+                                               options: RunOptions(environment: environment), onOutput: onOutput)
             }
+            // sudo: never the step's own variables.
+            let options = RunOptions(environment: askpassEnvironment(server))
             return try await runner.stream(URL(fileURLWithPath: Self.sudoPath),
                                            ["-A", launch.executable.path] + launch.arguments,
                                            options: options, onOutput: onOutput)

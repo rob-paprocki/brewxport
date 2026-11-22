@@ -31,7 +31,7 @@ public final class RunController: PasswordPrompting {
     public private(set) var isRunning = false
     public private(set) var log = RunLog()
     public private(set) var steps: [RunStepRow] = []
-    /// The last run ended with `.passwordRejected`. Cleared when a run gets past the password.
+    /// The last run ended with `.passwordRejected`. Cleared when a run starts.
     public private(set) var passwordRejected = false
     /// Why the last run couldn't make admin changes for a reason other than the password, or nil.
     public private(set) var privilegeProblem: String?
@@ -42,6 +42,9 @@ public final class RunController: PasswordPrompting {
     /// Called when the password sheet goes away. The app model opens a file the Finder sent meanwhile.
     @ObservationIgnored public var onPasswordSheetClosed: (@MainActor () -> Void)?
     public private(set) var passwordReason = ""
+    /// The open prompt follows a rejected password in the same run, so the sheet says to try again. Set by each
+    /// prompt, so a new run's first prompt never shows it.
+    public private(set) var passwordRetry = false
 
     /// Why something the user asked for won't run: the plan's problems and the preflight's notes. The panel shows
     /// these without the log being opened.
@@ -109,15 +112,18 @@ public final class RunController: PasswordPrompting {
     ///
     /// `ensureHelper` is called only when a step routes to the helper. `helperUnavailableReason` replaces the
     /// helper-state text in the preflight's note (Task 6 passes `services.setupProblem` when there's no helper).
-    /// When the helper check leaves nothing to run, the run ends with the preflight's note in the log.
+    /// When the helper check leaves nothing to run, the run ends with the preflight's note in the log. `verify`
+    /// answers the plan's check steps; without one they fail, so nothing gated behind them runs.
     @discardableResult
     public func start(_ plan: ActionPlan, helperUnavailableReason: String? = nil,
+                      verify: @escaping InstalledVerifier = RunSession.failClosed,
                       ensureHelper: @escaping @MainActor () async -> HelperState?) -> Bool {
         guard !isRunning, let executor else { return false }
         // Before any await, so a second click can't start a second run.
         isRunning = true
         panelVisible = true
         cancelRequested = false
+        passwordRejected = false
         privilegeProblem = nil
         generation += 1
         let run = generation
@@ -133,7 +139,7 @@ public final class RunController: PasswordPrompting {
         prepare(runnable, plan: plan, notes: adminNotes)
 
         guard runnable.contains(where: RunPreflight.usesHelper) else {
-            launch(runnable, reason: plan.reason, executor: executor, run: run)
+            launch(runnable, reason: plan.reason, verify: verify, executor: executor, run: run)
             return true
         }
         runTask = Task {
@@ -149,7 +155,7 @@ public final class RunController: PasswordPrompting {
             } else if kept.isEmpty {
                 endRun()
             } else {
-                launch(kept, reason: plan.reason, executor: executor, run: run)
+                launch(kept, reason: plan.reason, verify: verify, executor: executor, run: run)
             }
         }
         return true
@@ -175,8 +181,9 @@ public final class RunController: PasswordPrompting {
     }
 
     /// Starts the executor at once (so a `cancel()` right after reaches it) and follows its events.
-    private func launch(_ steps: [RunStep], reason: String, executor: any RunExecuting, run: Int) {
-        let events = executor.run(steps, reason: reason)
+    private func launch(_ steps: [RunStep], reason: String, verify: @escaping InstalledVerifier,
+                        executor: any RunExecuting, run: Int) {
+        let events = executor.run(steps, reason: reason, verify: verify)
         runTask = Task {
             for await event in events {
                 guard run == generation else { return }
@@ -234,7 +241,7 @@ public final class RunController: PasswordPrompting {
 
     // MARK: Password
 
-    public func askForPassword(reason: String) async -> SecretBuffer? {
+    public func askForPassword(reason: String, previousAttemptFailed: Bool = false) async -> SecretBuffer? {
         finishPassword(nil)  // never two prompts at once
         promptToken += 1
         let token = promptToken
@@ -242,6 +249,7 @@ public final class RunController: PasswordPrompting {
             await withCheckedContinuation { continuation in
                 pendingPassword = (token, continuation)
                 passwordReason = reason
+                passwordRetry = previousAttemptFailed
                 showingPasswordSheet = true
             }
         } onCancel: {
@@ -258,6 +266,15 @@ public final class RunController: PasswordPrompting {
         }
         pendingPassword = nil
         pending.continuation.resume(returning: secret)
+    }
+
+    /// The password sheet finished going away (its `onDismiss`): Esc, the close button or anything else ends the
+    /// prompt as cancelled, so the run never waits on a sheet that's gone. A no-op once the secret was handed over,
+    /// and while the sheet is meant to be showing: after a wrong password the retry's sheet is asked for before the
+    /// first one has finished going away, and that late dismissal must not cancel the retry.
+    public func sheetDismissed() {
+        guard !showingPasswordSheet else { return }
+        finishPassword(nil)
     }
 
     /// Cancels the prompt with `token`, and only that one: a late cancellation never ends a newer prompt.

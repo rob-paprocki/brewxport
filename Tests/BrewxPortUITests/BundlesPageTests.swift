@@ -59,7 +59,7 @@ import BrewxPortCore
         #expect(model.rowMenuItems(for: [Self.jq], in: .discover).isEmpty)
         await model.installed.settled()
         #expect(model.rowMenuItems(for: [Self.wget], in: .installed).map(\.action) ==
-                    [.uninstall, .showDetails, .copyName])
+                    [.uninstall, .moveTo(.macports), .showDetails, .copyName])
     }
 
     // MARK: Opening

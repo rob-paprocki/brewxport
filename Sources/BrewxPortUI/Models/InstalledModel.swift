@@ -56,6 +56,19 @@ import BrewxPortCore
         binDirs = dirs
     }
 
+    /// After BrewxPort added a directory to the person's PATH: the cached login-shell PATH is dropped, and once
+    /// Installed has loaded, the shell is asked again and the Runs column worked out from its answer. The package
+    /// lists aren't reloaded.
+    func pathChanged() {
+        Task { [weak self, path] in
+            await path.forget()
+            guard let self, self.hasLoaded else { return }
+            await self.list.settled()
+            let resolved = await path.resolve()
+            self.findWinners(resolved)
+        }
+    }
+
     /// Asks every engine for its installed packages again, then works out the duplicates and which copy runs.
     public func reload() {
         reloadCount += 1

@@ -14,7 +14,8 @@ import SwiftUI
 /// The Package menu lists what the tables' plain keys do, with ⌘ shortcuts so they never fire while someone types in
 /// the search field or the password sheet: Return installs or updates the selection (⌘↩), Space checks or unchecks
 /// it, and Delete removes it after a confirmation (⌘⌫, as in Finder). While that confirmation is up, Find, Refresh
-/// and the Package items are off, so nothing changes the page or the refs it names behind it.
+/// and the Package items are off, so nothing changes the page or the refs it names behind it. "Move to" lists the
+/// package managers the one selected Installed row can move to (`moveMenuItems`), and is off anywhere else.
 public struct BrewxPortCommands: Commands {
     let model: BrewxPortAppModel?
 
@@ -61,6 +62,7 @@ public struct BrewxPortCommands: Commands {
             Button("Check or Uncheck Selected") { model?.toggleChecks() }
                 .disabled(model?.canToggleChecks != true)
             Divider()
+            MoveToMenu(items: model?.moveMenuItems ?? []) { model?.moveSelection($0) }
             Button("Remove Selected…") { model?.removeSelection() }
                 .keyboardShortcut(.delete)
                 .disabled(model?.canRemoveSelection != true)

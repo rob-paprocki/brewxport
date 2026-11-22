@@ -62,7 +62,46 @@ enum Steps {
                 title: "Run nb init", dependsOnPrevious: true)
     }
 
+    static func remove(_ name: String = "wget") -> RunStep {
+        RunStep(engine: .homebrew, operation: .remove,
+                spec: CommandSpec(executable: URL(fileURLWithPath: brewPath), arguments: ["uninstall", name],
+                                  needsRoot: false),
+                title: "Remove \(name)", requiresAllEarlier: true)
+    }
+
+    static func ref(_ name: String, on engine: EngineID = .nanobrew) -> PackageRef {
+        PackageRef(engine: engine, kind: .formula, name: name)
+    }
+
+    static func check(_ names: [String] = ["jq", "fd"], on engine: EngineID = .nanobrew) -> RunStep {
+        RunStep.check(names.map { ref($0, on: engine) }, on: engine,
+                      title: "Check \(engine.displayName) has the packages")
+    }
+
     static let sudoVerify = ["/usr/bin/sudo", "-A", "-k", "-v"]
+}
+
+/// Records what a verifier was asked and answers with a fixed list of missing names.
+final class VerifierProbe: @unchecked Sendable {
+    private let lock = NSLock()
+    private var _asked: [[PackageRef]] = []
+    private let missing: Set<String>
+    private let before: (@Sendable () -> Void)?
+
+    init(missing: Set<String> = [], before: (@Sendable () -> Void)? = nil) {
+        self.missing = missing
+        self.before = before
+    }
+
+    var asked: [[PackageRef]] { lock.withLock { _asked } }
+
+    var verify: InstalledVerifier {
+        { [self] refs in
+            lock.withLock { _asked.append(refs) }
+            before?()
+            return refs.filter { missing.contains($0.name) }
+        }
+    }
 }
 
 @Suite struct RunRoutingTests {
@@ -131,6 +170,21 @@ enum Steps {
     @Test func stepKindDefaultsToFormula() {
         #expect(Steps.formula().kind == .formula)
     }
+
+    @Test func checkStepRoutesToUserWhateverItsEngineOrSpec() {
+        // A MacPorts check with a spec that claims root (and even a setup target) still runs as the user.
+        let step = RunStep(engine: .macports, kind: .port, operation: .install,
+                           spec: CommandSpec(executable: URL(fileURLWithPath: Steps.portPath), arguments: ["x"],
+                                             needsRoot: true),
+                           title: "", setupTarget: .macports, verifyInstalled: [Steps.ref("x", on: .macports)])
+        #expect(RunRouting.route(for: step) == .user)
+        #expect(RunRouting.route(for: Steps.check(on: .macports)) == .user)
+    }
+
+    @Test func newStepFieldsDefaultOff() {
+        #expect(Steps.formula().requiresAllEarlier == false)
+        #expect(Steps.formula().verifyInstalled == nil)
+    }
 }
 
 @Suite struct RunSessionTests {
@@ -152,6 +206,10 @@ enum Steps {
 
         init(password: String? = RunSessionTests.password) {
             passwords = FakePasswords(password)
+        }
+
+        init(answers: [String?]) {
+            passwords = FakePasswords(answers: answers)
         }
 
         func session(host: Arch = .arm64, isAdministrator: Bool? = true) -> RunSession {
@@ -199,30 +257,130 @@ enum Steps {
                            .done])
     }
 
+    static let rejected: [Error?] = Array(repeating: HelperError.notAuthorized, count: RunSession.passwordAttempts)
+
     @Test func wrongPasswordStopsBeforeFirstCommand() async {
-        // Rejected by the helper's authorization.
+        // Rejected by the helper's authorization, every time.
         let h = Harness()
-        h.helper.authorizeResults = [HelperError.notAuthorized]
+        h.helper.authorizeResults = Self.rejected
         let start = ContinuousClock.now
         let events = await collect(h.session().run([Steps.port(), Steps.cask(), Steps.formula()]))
         #expect(ContinuousClock.now - start < .seconds(2))
         #expect(events == [.needsPassword, .passwordRejected, .done])
+        #expect(h.passwords.calls == 3)
         #expect(h.runner.streamedCalls.isEmpty)
         #expect(h.helper.runCalls.isEmpty)
         #expect(h.passwords.given.allSatisfy { $0.isWiped })
         #expect(h.servers.allSatisfy { $0.stops >= 1 })
 
-        // Rejected by sudo.
+        // Rejected by sudo, every time: one askpass server per attempt, each stopped once.
         let s = Harness()
         s.runner.respond(Steps.sudoVerify, code: 1)
         let sudoEvents = await collect(s.session().run([Steps.port(), Steps.mas(), Steps.formula()]))
         #expect(sudoEvents == [.needsPassword, .passwordRejected, .done])
         #expect(s.runner.streamedCalls.isEmpty)
         #expect(s.helper.runCalls.isEmpty)
+        #expect(s.passwords.given.count == 3)
         #expect(s.passwords.given.allSatisfy { $0.isWiped })
-        #expect(s.servers.count == 1)
-        #expect(s.servers.first?.stops == 1)
+        #expect(s.servers.count == 3)
+        #expect(s.servers.allSatisfy { $0.stops == 1 })
         #expect(s.helper.endCalls == 1)
+    }
+
+    // MARK: Password retry
+
+    @Test func wrongPasswordAsksAgain() async {
+        let h = Harness()
+        h.helper.authorizeResults = [HelperError.notAuthorized]
+        let events = await collect(h.session().run([Steps.port()]))
+        #expect(h.passwords.calls == 2)
+        #expect(h.passwords.retries == [false, true])
+        #expect(h.passwords.reasons == [RunSession.passwordReason, RunSession.passwordReason])
+        // The rejected password was wiped before the second ask.
+        #expect(h.passwords.earlierWiped == [true, true])
+        #expect(h.passwords.given.first?.isWiped == true)
+        // One `.needsPassword` for the run; a rejection that's retried isn't an event.
+        #expect(events == [.needsPassword, .started(0), .output(0, .stdout("port -N upgrade wget")),
+                           .finished(0, 0), .done])
+
+        // The same through sudo: the first attempt's askpass server is stopped before the second ask.
+        let s = Harness(answers: ["wrong", Self.password])
+        s.runner.respondOnce(Steps.sudoVerify, code: 1, stderr: Self.wrongPasswordStderr)
+        s.passwords.onAsk = { [s] in s.servers.allSatisfy { $0.stops >= 1 } }
+        let sudoEvents = await collect(s.session().run([Steps.mas()]))
+        #expect(s.passwords.retries == [false, true])
+        #expect(s.passwords.earlierWiped == [true, true])
+        #expect(s.passwords.onAskResults == [true, true])
+        #expect(s.servers.count == 2)
+        #expect(s.servers.allSatisfy { $0.stops == 1 })
+        #expect(sudoEvents == [.needsPassword, .started(0), .finished(0, 0), .done])
+        #expect(s.runner.streamedCalls.count == 1)
+        #expect(s.runner.calls.filter { [$0.executable.path] + $0.arguments == Steps.sudoVerify }.count == 2)
+    }
+
+    @Test func thirdWrongPasswordEndsRun() async {
+        #expect(RunSession.passwordAttempts == 3)
+        let h = Harness(answers: ["one", "two", "three", "never asked"])
+        h.helper.authorizeResults = Self.rejected + [nil]
+        let events = await collect(h.session().run([Steps.port(), Steps.formula()]))
+        #expect(events == [.needsPassword, .passwordRejected, .done])
+        #expect(h.passwords.calls == 3)
+        #expect(h.passwords.retries == [false, true, true])
+        #expect(h.passwords.earlierWiped == [true, true, true])
+        #expect(h.helper.authorizeCalls == 3)
+        #expect(h.helper.secretsSeen == [Array("one".utf8), Array("two".utf8), Array("three".utf8)])
+        #expect(h.helper.runCalls.isEmpty)
+        #expect(h.runner.calls.isEmpty)
+        #expect(h.passwords.given.allSatisfy { $0.isWiped })
+        #expect(h.helper.endCalls == 1)
+    }
+
+    @Test func cancelOnRetryEndsRun() async {
+        let h = Harness(answers: ["wrong", nil])
+        h.helper.authorizeResults = [HelperError.notAuthorized]
+        let events = await collect(h.session().run([Steps.port(), Steps.cask(), Steps.formula()]))
+        #expect(events == [.needsPassword, .cancelled, .done])
+        #expect(h.passwords.calls == 2)
+        #expect(h.passwords.retries == [false, true])
+        #expect(h.helper.authorizeCalls == 1)
+        #expect(h.helper.runCalls.isEmpty)
+        #expect(h.runner.calls.isEmpty)
+        #expect(h.servers.isEmpty)
+        #expect(h.passwords.given.allSatisfy { $0.isWiped })
+        #expect(h.helper.endCalls == 1)
+    }
+
+    @Test func rightPasswordOnSecondTryRunsSteps() async throws {
+        let h = Harness(answers: ["wrong", Self.password])
+        h.helper.authorizeResults = [HelperError.notAuthorized]
+        let events = await collect(h.session().run([Steps.port(), Steps.cask(), Steps.mas()]))
+        #expect(h.passwords.calls == 2)
+        #expect(h.helper.secretsSeen == [Array("wrong".utf8), Array(Self.password.utf8)])
+        #expect(events.first == .needsPassword)
+        #expect(events.filter { $0 == .needsPassword }.count == 1)
+        #expect(!events.contains(.passwordRejected))
+        for i in 0..<3 { #expect(events.contains(.finished(i, 0))) }
+        #expect(events.last == .done)
+        #expect(h.helper.runCalls.first?.authorization == FakeHelper.token)
+        // The first attempt stopped at the helper, so only the second made an askpass server and checked sudo.
+        #expect(h.servers.count == 1)
+        #expect(h.runner.calls.filter { [$0.executable.path] + $0.arguments == Steps.sudoVerify }.count == 1)
+        #expect(h.passwords.given.allSatisfy { $0.isWiped })
+        #expect(h.servers.first?.stops == 1)
+        #expect(h.helper.endCalls == 1)
+    }
+
+    @Test func otherFailuresOnRetryAreNotRetried() async {
+        // A retry that turns out to be "not an administrator" ends the run as that, with no third ask.
+        let h = Harness(answers: ["wrong", Self.password])
+        h.runner.respondOnce(Steps.sudoVerify, code: 1, stderr: Self.wrongPasswordStderr)
+        h.runner.respond(Steps.sudoVerify, code: 1, stderr: Self.notInSudoersStderr)
+        let events = await collect(h.session().run([Steps.mas()]))
+        #expect(events == [.needsPassword, .privilegeUnavailable(RunSession.notAnAdministrator), .done])
+        #expect(h.passwords.calls == 2)
+        #expect(h.runner.streamedCalls.isEmpty)
+        #expect(h.passwords.given.allSatisfy { $0.isWiped })
+        #expect(h.servers.allSatisfy { $0.stops == 1 })
     }
 
     @Test func masRunsUnderSudoA() async throws {
@@ -426,7 +584,7 @@ enum Steps {
         #expect(rootless.helper.endCalls == 1)
 
         let rejected = Harness()
-        rejected.helper.authorizeResults = [HelperError.notAuthorized]
+        rejected.helper.authorizeResults = Self.rejected
         _ = await collect(rejected.session().run([Steps.port()]))
         #expect(rejected.helper.endCalls == 1)
 
@@ -614,6 +772,120 @@ enum Steps {
         #expect(!events.contains(.started(1)))
     }
 
+    // MARK: Gates and check steps
+
+    @Test func allEarlierSkipsAfterAnyFailure() async {
+        let h = Harness()
+        h.runner.respond([Steps.brewPath, "upgrade", "b"], code: 1)
+        let steps = [Steps.formula("a"), Steps.formula("b"), Steps.formula("c"), Steps.remove("x")]
+        let events = await collect(h.session().run(steps))
+        #expect(events == [.started(0), .finished(0, 0), .started(1), .finished(1, 1), .started(2), .finished(2, 0),
+                           .done])
+        #expect(!h.runner.calls.contains { $0.arguments == ["uninstall", "x"] })
+    }
+
+    @Test func allEarlierRunsWhenEverythingSucceeded() async {
+        let h = Harness()
+        let events = await collect(h.session().run([Steps.formula("a"), Steps.remove("x"), Steps.remove("y")]))
+        #expect(events.contains(.finished(1, 0)))
+        #expect(events.contains(.finished(2, 0)))
+    }
+
+    @Test func allEarlierSkipsAfterSkipped() async {
+        // Step 1 is skipped (its own dependency failed); a later gated step counts that as a failure, even though
+        // the step right before it succeeded.
+        let h = Harness()
+        h.runner.respond([Steps.brewPath, "upgrade", "a"], code: 1)
+        let dependent = RunStep(engine: .homebrew, operation: .upgrade,
+                                spec: CommandSpec(executable: URL(fileURLWithPath: Steps.brewPath),
+                                                  arguments: ["upgrade", "b"], needsRoot: false),
+                                title: "b", dependsOnPrevious: true)
+        let steps = [Steps.formula("a"), dependent, Steps.formula("c"), Steps.remove("x")]
+        let events = await collect(h.session().run(steps))
+        #expect(!events.contains(.started(1)))
+        #expect(events.contains(.finished(2, 0)))
+        #expect(!events.contains(.started(3)))
+    }
+
+    @Test func stepAfterGatedSkipCountsItAsNotSucceeded() async {
+        // ok, fail, ok, gated (skipped), then a step that depends on the gated one: it must not run either.
+        let h = Harness()
+        h.runner.respond([Steps.brewPath, "upgrade", "b"], code: 1)
+        let afterGate = RunStep(engine: .homebrew, operation: .upgrade,
+                                spec: CommandSpec(executable: URL(fileURLWithPath: Steps.brewPath),
+                                                  arguments: ["upgrade", "d"], needsRoot: false),
+                                title: "d", dependsOnPrevious: true)
+        let steps = [Steps.formula("a"), Steps.formula("b"), Steps.formula("c"), Steps.remove("x"), afterGate]
+        let events = await collect(h.session().run(steps))
+        #expect(!events.contains(.started(3)))
+        #expect(!events.contains(.started(4)))
+        #expect(!h.runner.calls.contains { $0.arguments == ["upgrade", "d"] })
+    }
+
+    @Test func checkStepPassesWhenNothingMissing() async {
+        let h = Harness()
+        let probe = VerifierProbe()
+        let check = Steps.check(["jq", "fd"])
+        let events = await collect(h.session().run([Steps.nanobrew("jq"), check, Steps.remove("jq")], reason: "R",
+                                                   verify: probe.verify))
+        #expect(probe.asked == [[Steps.ref("jq"), Steps.ref("fd")]])
+        #expect(events == [.started(0), .finished(0, 0), .started(1), .finished(1, 0), .started(2), .finished(2, 0),
+                           .done])
+        // The check's spec is never launched.
+        #expect(!h.runner.calls.contains { $0.executable.path == "/usr/bin/false" })
+        #expect(h.runner.calls.count == 2)
+    }
+
+    @Test func checkStepFailsAndNamesMissing() async {
+        let h = Harness()
+        let probe = VerifierProbe(missing: ["fd", "rg"])
+        let check = Steps.check(["jq", "fd", "rg"])
+        let events = await collect(h.session().run([check, Steps.remove("jq")], reason: "R", verify: probe.verify))
+        let stderr = events.compactMap { event -> String? in
+            if case .output(0, .stderr(let line)) = event { line } else { nil }
+        }
+        #expect(stderr == ["Not found on nanobrew: fd, rg"])
+        #expect(events.contains(.finished(0, 1)))
+        #expect(!events.contains(.started(1)))
+        #expect(h.runner.calls.isEmpty)
+    }
+
+    @Test func checkStepNeedsNoPassword() async {
+        let h = Harness()
+        let events = await collect(h.session().run([Steps.formula(), Steps.check(on: .macports), Steps.nanobrew()],
+                                                   reason: "R", verify: VerifierProbe().verify))
+        #expect(!events.contains(.needsPassword))
+        #expect(h.passwords.calls == 0)
+        #expect(h.helper.authorizeCalls == 0)
+        #expect(events.contains(.finished(1, 0)))
+    }
+
+    @Test func defaultVerifierFailsClosed() async {
+        let h = Harness()
+        let events = await collect(h.session().run([Steps.check(["jq"]), Steps.remove("jq")]))
+        #expect(events.contains(.finished(0, 1)))
+        #expect(!events.contains(.started(1)))
+        let r = Harness()
+        let viaReason = await collect(r.session().run([Steps.check(["jq"])], reason: "R"))
+        #expect(viaReason.contains(.finished(0, 1)))
+        #expect(await RunSession.failClosed([Steps.ref("jq")]) == [Steps.ref("jq")])
+    }
+
+    @Test func cancelAfterInstallsRemovesNothing() async {
+        // Worst case: the run is cancelled while the check runs, and the check then says everything is there.
+        let h = Harness()
+        let session = h.session()
+        let probe = VerifierProbe(before: { session.cancel() })
+        let steps = [Steps.nanobrew("jq"), Steps.check(["jq"]), Steps.remove("jq"), Steps.remove("fd")]
+        let events = await collect(session.run(steps, reason: "R", verify: probe.verify))
+        #expect(probe.asked.count == 1)
+        #expect(Array(events.suffix(2)) == [.cancelled, .done])
+        #expect(!events.contains(.finished(1, 0)))
+        #expect(!events.contains(.started(2)))
+        #expect(!events.contains(.started(3)))
+        #expect(!h.runner.calls.contains { $0.arguments.first == "uninstall" })
+    }
+
     @Test func customReasonReachesPasswordPrompt() async {
         let h = Harness()
         _ = await collect(h.session().run([Steps.port()], reason: "R"))
@@ -621,5 +893,90 @@ enum Steps {
         let d = Harness()
         _ = await collect(d.session().run([Steps.port()]))
         #expect(d.passwords.reasons == [RunSession.passwordReason])
+    }
+
+    // MARK: Step environment and the passed-check gate
+
+    static let noAutoremove = ["HOMEBREW_NO_AUTOREMOVE": "1"]
+
+    static func withEnvironment(_ step: RunStep, _ environment: [String: String]) -> RunStep {
+        RunStep(engine: step.engine, kind: step.kind, operation: step.operation, spec: step.spec, title: step.title,
+                requiresAllEarlier: step.requiresAllEarlier, userEnvironment: environment)
+    }
+
+    static func mark(_ name: String = "jq") -> RunStep {
+        RunStep(engine: .homebrew, operation: .markRequested,
+                spec: CommandSpec(executable: URL(fileURLWithPath: Steps.brewPath),
+                                  arguments: ["tab", "--installed-on-request", name], needsRoot: false),
+                title: "Mark \(name)", requiresPassedCheck: true)
+    }
+
+    @Test func userStepGetsItsEnvironmentOnTopOfTheBase() async throws {
+        let h = Harness()
+        _ = await collect(h.session().run([Self.withEnvironment(Steps.remove("jq"), Self.noAutoremove), Steps.formula()]))
+        let calls = h.runner.streamedCalls
+        #expect(calls.count == 2)
+        #expect(calls.first?.environment == Self.base.merging(Self.noAutoremove) { $1 })
+        #expect(calls.last?.environment == nil)  // no variables of its own: the runner's base environment
+    }
+
+    @Test func caskStepGetsItsEnvironmentWithTheAskpassOnes() async throws {
+        let h = Harness()
+        _ = await collect(h.session().run([Self.withEnvironment(Steps.cask("firefox"), Self.noAutoremove)]))
+        let call = try #require(h.runner.streamedCalls.first)
+        let server = try #require(h.servers.first)
+        #expect(call.environment == Self.base.merging(Self.noAutoremove) { $1 }.merging(server.environment) { $1 })
+    }
+
+    @Test func stepEnvironmentNeverReachesSudoOrTheHelper() async throws {
+        let h = Harness()
+        let mas = Self.withEnvironment(Steps.mas(), ["EXTRA": "1"])
+        let port = Self.withEnvironment(Steps.port(), ["EXTRA": "1"])
+        _ = await collect(h.session().run([mas, port]))
+        let sudo = try #require(h.runner.streamedCalls.first { $0.executable.path == "/usr/bin/sudo" })
+        #expect(sudo.environment?["EXTRA"] == nil)
+        #expect(h.helper.runCalls.count == 1)
+        #expect(!h.runner.calls.contains { $0.environment?["EXTRA"] != nil })
+    }
+
+    @Test func passedCheckGateSkipsAfterAFailedCheck() async {
+        let h = Harness()
+        let probe = VerifierProbe(missing: ["jq"])
+        let events = await collect(h.session().run([Steps.check(["jq"]), Self.mark()], reason: "R",
+                                                   verify: probe.verify))
+        #expect(events.contains(.finished(0, 1)))
+        #expect(!events.contains(.started(1)))
+        #expect(h.runner.calls.isEmpty)
+    }
+
+    @Test func passedCheckGateRunsAfterAFailedRemoval() async {
+        // The check passed, so the target has the packages: a failed removal doesn't stop the marks.
+        let h = Harness()
+        h.runner.respond([Steps.brewPath, "uninstall", "jq"], code: 1)
+        let steps = [Steps.check(["jq"]), Steps.remove("jq"), Self.mark()]
+        let events = await collect(h.session().run(steps, reason: "R", verify: VerifierProbe().verify))
+        #expect(events.contains(.finished(1, 1)))
+        #expect(events.contains(.finished(2, 0)))
+    }
+
+    @Test func passedCheckGateNeedsACheck() async {
+        let h = Harness()
+        let events = await collect(h.session().run([Steps.formula(), Self.mark()]))
+        #expect(events.contains(.finished(0, 0)))
+        #expect(!events.contains(.started(1)))
+    }
+
+    @Test func emptyCheckFails() async {
+        let h = Harness()
+        let probe = VerifierProbe()
+        let events = await collect(h.session().run([Steps.check([]), Steps.remove("jq")], reason: "R",
+                                                   verify: probe.verify))
+        #expect(events.contains(.finished(0, 1)))
+        #expect(!events.contains(.started(1)))
+        #expect(probe.asked.isEmpty)
+    }
+
+    @Test func checkPlaceholderFailsClosed() {
+        #expect(Steps.check().spec.executable.path == "/usr/bin/false")
     }
 }

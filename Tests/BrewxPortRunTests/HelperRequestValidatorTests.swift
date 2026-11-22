@@ -33,6 +33,29 @@ private func expectNotAllowed(_ arguments: [String], sourceLocation: SourceLocat
         try HelperRequestValidator.validate(arguments: ["-N", "selfupdate", "-c"])
     }
 
+    @Test func setrequestedAllowed() throws {
+        try HelperRequestValidator.validate(arguments: ["-N", "setrequested", "wget"])
+        try HelperRequestValidator.validate(arguments: ["-N", "setrequested", "a", "b"])
+    }
+
+    @Test func unsetrequestedAllowed() throws {
+        try HelperRequestValidator.validate(arguments: ["-N", "unsetrequested", "wget"])
+    }
+
+    @Test func setrequestedRefusesVariant() {
+        expectNotAllowed(["-N", "setrequested", "wget", "+ssl"])
+        expectNotAllowed(["-N", "unsetrequested", "wget", "+ssl"])
+    }
+
+    @Test func setrequestedRefusesNoName() {
+        expectNotAllowed(["-N", "setrequested"])
+        expectNotAllowed(["-N", "unsetrequested"])
+    }
+
+    @Test func setrequestedRefusesFlags() {
+        expectNotAllowed(["-N", "setrequested", "-s", "wget"])
+    }
+
     @Test func rejectsUnknownVerb() {
         for verb in ["sync", "load", "unload", "activate", "deactivate", "clean", "-f", "", "Install", "INSTALL",
                      "install ", "shell", "edit"] {

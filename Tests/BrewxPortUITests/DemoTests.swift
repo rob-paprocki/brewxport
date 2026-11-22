@@ -12,7 +12,7 @@ import BrewxPortRun
 
     init(password: String?) { self.password = password }
 
-    func askForPassword(reason: String) async -> SecretBuffer? {
+    func askForPassword(reason: String, previousAttemptFailed: Bool) async -> SecretBuffer? {
         reasons.append(reason)
         guard let password else { return nil }
         let buffer = SecretBuffer(copying: Array(password.utf8))
@@ -248,6 +248,45 @@ import BrewxPortRun
         #expect(prompter.reasons == ["r"])
         let outdated = await Self.merged(services, .outdated)
         #expect(outdated.packages.contains { $0.id == Self.figlet })
+    }
+
+    @Test func demoCheckStepAsksTheVerifierAndGatesRemovals() async throws {
+        let services = try Self.services()
+        let executor = try #require(services.executor)
+        let upgrade = try Self.step(services, .upgrade, Self.adaURL)
+        let remove = RunStep(engine: .homebrew, operation: .remove, spec: upgrade.spec, title: "Remove ada-url",
+                             requiresAllEarlier: true)
+        let check = RunStep.check([Self.adaURL], on: .homebrew, title: "Check Homebrew has the packages")
+
+        let failed = await Self.collect(executor.run([check, remove], reason: "r"))
+        #expect(failed == [.started(0), .output(0, .stderr("Not found on Homebrew: ada-url")), .finished(0, 1), .done])
+
+        let passed = await Self.collect(executor.run([check, remove], reason: "r", verify: { _ in [] }))
+        #expect(passed.first == .started(0))
+        #expect(passed.contains(.finished(0, 0)))
+        #expect(!passed.contains { if case .output(0, _) = $0 { true } else { false } })
+        #expect(passed.contains(.finished(1, 0)))
+    }
+
+    @Test func demoMarksWaitForAPassedCheckAndEmptyChecksFail() async throws {
+        let services = try Self.services()
+        let executor = try #require(services.executor)
+        let upgrade = try Self.step(services, .upgrade, Self.adaURL)
+        let mark = RunStep(engine: .homebrew, operation: .markRequested, spec: upgrade.spec, title: "Mark ada-url",
+                           requiresPassedCheck: true)
+        let check = RunStep.check([Self.adaURL], on: .homebrew, title: "Check Homebrew has the packages")
+
+        let failed = await Self.collect(executor.run([check, mark], reason: "r"))
+        #expect(failed.contains(.finished(0, 1)))
+        #expect(!failed.contains(.started(1)))
+
+        let passed = await Self.collect(executor.run([check, mark], reason: "r", verify: { _ in [] }))
+        #expect(passed.contains(.finished(1, 0)))
+
+        let empty = RunStep.check([], on: .homebrew, title: "Check nothing")
+        let vacuous = await Self.collect(executor.run([empty, mark], reason: "r", verify: { _ in [] }))
+        #expect(vacuous.contains(.finished(0, 1)))
+        #expect(!vacuous.contains(.started(1)))
     }
 
     @Test func demoUpgradeRemovesFromOutdated() async throws {

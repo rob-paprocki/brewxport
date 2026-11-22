@@ -1,0 +1,29 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+<!-- BrewxPort's app icon: containers on a ship. scripts/make-icon.sh renders it to Resources/bundle/AppIcon.icns. -->
+<defs>
+<linearGradient id="bg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#3CCBBB"/><stop offset="1" stop-color="#0E6E8C"/></linearGradient>
+<linearGradient id="sea" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#0B4F6C"/><stop offset="1" stop-color="#062F42"/></linearGradient>
+<linearGradient id="hull" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#22354A"/><stop offset="1" stop-color="#15222F"/></linearGradient>
+<pattern id="ribs" width="26" height="10" patternUnits="userSpaceOnUse"><rect x="0" y="0" width="7" height="10" fill="#000" opacity="0.13"/></pattern>
+<clipPath id="sq"><rect x="100" y="100" width="824" height="824" rx="185"/></clipPath>
+</defs>
+<rect x="100" y="100" width="824" height="824" rx="185" fill="url(#bg)"/>
+<g clip-path="url(#sq)">
+<g>
+<rect x="340" y="255" width="160" height="150" rx="16" fill="#4A90D9"/>
+<rect x="520" y="255" width="160" height="150" rx="16" fill="#4FB286"/>
+<rect x="250" y="420" width="160" height="150" rx="16" fill="#F2A93B"/>
+<rect x="430" y="420" width="160" height="150" rx="16" fill="#ECEFF4"/>
+<rect x="610" y="420" width="160" height="150" rx="16" fill="#E5604D"/>
+<rect x="352" y="270" width="136" height="120" fill="url(#ribs)"/>
+<rect x="532" y="270" width="136" height="120" fill="url(#ribs)"/>
+<rect x="262" y="435" width="136" height="120" fill="url(#ribs)"/>
+<rect x="442" y="435" width="136" height="120" fill="url(#ribs)"/>
+<rect x="622" y="435" width="136" height="120" fill="url(#ribs)"/>
+</g>
+<path d="M196 585 H828 L766 705 H258 Z" fill="url(#hull)"/>
+<rect x="222" y="605" width="580" height="14" rx="7" fill="#E5604D" opacity="0.9"/>
+<path d="M100 735 q 70 -40 140 0 t 140 0 t 140 0 t 140 0 t 140 0 t 140 0 V930 H100 Z" fill="url(#sea)"/>
+<path d="M100 735 q 70 -40 140 0 t 140 0 t 140 0 t 140 0 t 140 0 t 140 0" fill="none" stroke="#FFFFFF" stroke-opacity="0.35" stroke-width="10"/>
+</g>
+</svg>

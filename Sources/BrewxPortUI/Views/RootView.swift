@@ -2,8 +2,8 @@ import BrewxPortCore
 import BrewxPortRun
 import SwiftUI
 
-/// The window: sidebar, the selected page, the run panel along the bottom, the inspector, the password sheet,
-/// the uninstall confirmation, and Bundles' open and save panels.
+/// The window: sidebar, the selected page, the run panel along the bottom, the inspector, the password sheet, the
+/// setup and move sheets, the uninstall confirmation, and Bundles' open and save panels.
 public struct RootView: View {
     @Bindable var model: BrewxPortAppModel
 
@@ -30,16 +30,18 @@ public struct RootView: View {
         }
         .modifier(BundlesFilePanels(model: model))
         .task { model.start() }
-        // Esc, the close button or anything else that dismisses the sheet ends the prompt as cancelled, so the run
-        // never waits on a sheet that's gone. A secret that was already handed over makes this a no-op.
-        .sheet(isPresented: $run.showingPasswordSheet, onDismiss: { model.run.finishPassword(nil) }) {
-            PasswordSheet(reason: run.passwordReason, previousAttemptFailed: run.passwordRejected,
+        // Dismissing the sheet ends the prompt as cancelled; see `RunController.sheetDismissed()`.
+        .sheet(isPresented: $run.showingPasswordSheet, onDismiss: { model.run.sheetDismissed() }) {
+            PasswordSheet(reason: run.passwordReason, previousAttemptFailed: run.passwordRetry,
                           note: model.passwordNote) {
                 model.run.finishPassword($0)
             }
         }
         // The setup sheet shows while a screen has something to say; while a setup runs, the run panel shows it.
         .sheet(isPresented: setupShown) { SetupView(model: model) }
+        // The move preview, while it checks, shows a plan or says why there's none. Esc or anything else that
+        // dismisses it cancels; once the move runs the sheet is gone and the run panel shows it.
+        .sheet(isPresented: moveShown) { MoveSheet(model: model.move) }
         .confirmationDialog(model.uninstallTitle, isPresented: uninstallShown, presenting: model.pendingUninstall) { refs in
             // Sets the refs again first, so the order SwiftUI clears the binding and runs the action in doesn't matter.
             // They are the refs the title names: nothing can replace `pendingUninstall` while it's set
@@ -59,6 +61,11 @@ public struct RootView: View {
                 set: { shown in if !shown { model.setup.dismiss() } })
     }
 
+    private var moveShown: Binding<Bool> {
+        Binding(get: { model.move.sheetShown },
+                set: { shown in if !shown { model.move.cancel() } })
+    }
+
     private var uninstallShown: Binding<Bool> {
         Binding(get: { model.pendingUninstall != nil },
                 set: { shown in if !shown { model.cancelUninstall() } })
@@ -76,6 +83,8 @@ public struct RootView: View {
             BundlesView(model: model)
         case .engine(let id):
             EngineDetailView(model: model, engine: id)
+        case .helper:
+            HelperView(model: model)
         }
     }
 }

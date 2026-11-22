@@ -23,6 +23,7 @@ final class FakeRunner: CommandRunning, @unchecked Sendable {
 
     private let lock = NSLock()
     private var responses: [[String]: Response] = [:]
+    private var onceResponses: [[String]: [Response]] = [:]
     private var blocking: Set<[String]> = []
     private var _calls: [RunnerCall] = []
     private var startedBlocking: [CheckedContinuation<Void, Never>] = []
@@ -39,6 +40,11 @@ final class FakeRunner: CommandRunning, @unchecked Sendable {
     func respond(_ argv: [String], code: Int32 = 0, stdout: [String] = [], stderr: String = "",
                  error: CommandRunnerError? = nil) {
         lock.withLock { responses[argv] = Response(code: code, stdout: stdout, stderr: stderr, error: error) }
+    }
+
+    /// A response used once, before any `respond` one for the same argv. Several queue up in order.
+    func respondOnce(_ argv: [String], code: Int32 = 0, stdout: [String] = [], stderr: String = "") {
+        lock.withLock { onceResponses[argv, default: []].append(Response(code: code, stdout: stdout, stderr: stderr)) }
     }
 
     func block(_ argv: [String]) { _ = lock.withLock { blocking.insert(argv) } }
@@ -93,7 +99,13 @@ final class FakeRunner: CommandRunning, @unchecked Sendable {
         lock.withLock {
             _calls.append(RunnerCall(executable: executable, arguments: arguments,
                                      environment: options.environment, streamed: streamed))
-            return responses[[executable.path] + arguments] ?? Response()
+            let argv = [executable.path] + arguments
+            if var queued = onceResponses[argv], !queued.isEmpty {
+                let first = queued.removeFirst()
+                onceResponses[argv] = queued
+                return first
+            }
+            return responses[argv] ?? Response()
         }
     }
 }
@@ -177,26 +189,49 @@ final class FakeHelper: HelperConnecting, @unchecked Sendable {
     }
 }
 
-/// Hands out the given password, or nil (the user cancelled). Counts calls.
+/// Hands out scripted answers in order, the last one again once they run out (nil: the user cancelled). Counts
+/// calls and records each call's `previousAttemptFailed`.
 final class FakePasswords: PasswordProviding, @unchecked Sendable {
     private let lock = NSLock()
-    private let password: String?
+    private var answers: [String?]
     private var _calls = 0
     private var _given: [SecretBuffer] = []
     private var _reasons: [String] = []
+    private var _retries: [Bool] = []
+    private var _earlierWiped: [Bool] = []
+    private var _onAsk: (@Sendable () -> Bool)?
 
-    init(_ password: String?) { self.password = password }
+    init(_ password: String?) { answers = [password] }
+    init(answers: [String?]) { self.answers = answers }
 
     var calls: Int { lock.withLock { _calls } }
     /// Every `reason` the session asked with, in order.
     var reasons: [String] { lock.withLock { _reasons } }
     /// Every buffer handed to the session, so tests can check it was wiped.
     var given: [SecretBuffer] { lock.withLock { _given } }
+    /// Each call's `previousAttemptFailed`, in order.
+    var retries: [Bool] { lock.withLock { _retries } }
+    /// For each call: whether every buffer handed out before it had been wiped by then.
+    var earlierWiped: [Bool] { lock.withLock { _earlierWiped } }
+    /// Called at the start of each ask; its answers are kept in `onAskResults`.
+    var onAsk: (@Sendable () -> Bool)? {
+        get { lock.withLock { _onAsk } }
+        set { lock.withLock { _onAsk = newValue } }
+    }
+    private var _onAskResults: [Bool] = []
+    var onAskResults: [Bool] { lock.withLock { _onAskResults } }
 
-    func password(reason: String) async -> SecretBuffer? {
-        lock.withLock {
+    func password(reason: String, previousAttemptFailed: Bool) async -> SecretBuffer? {
+        if let hook = onAsk {
+            let result = hook()
+            lock.withLock { _onAskResults.append(result) }
+        }
+        return lock.withLock {
             _calls += 1
             _reasons.append(reason)
+            _retries.append(previousAttemptFailed)
+            _earlierWiped.append(_given.allSatisfy(\.isWiped))
+            let password = answers.count > 1 ? answers.removeFirst() : answers.first ?? nil
             guard let password else { return nil }
             let buffer = SecretBuffer(copying: Array(password.utf8))
             _given.append(buffer)

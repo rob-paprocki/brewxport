@@ -179,6 +179,7 @@ public enum ActionPlanner {
             case .install: what = "install these packages"
             case .upgrade: what = "update these packages"
             case .remove: what = "remove these packages"
+            case .markRequested, .markDependency: what = "change how these packages are marked"
             }
         } else {
             what = "make these changes"

@@ -31,13 +31,16 @@ enum LiveServices {
         } else {
             setupProblem = unsignedProblem
         }
+        let path = loginShellPath(runner)
         return Services(
             engines: engines, catalog: catalog, executor: executor, helper: helper, passwords: passwords,
-            isAdministrator: AdminMembership.currentUserIsAdmin, store: DefaultsStore(), path: loginShellPath(runner),
+            isAdministrator: AdminMembership.currentUserIsAdmin, store: DefaultsStore(), path: path,
             fileExists: { FileManager.default.fileExists(atPath: $0) }, host: host, hostInfo: HostInfo.current(),
             cltPresent: { FileManager.default.fileExists(atPath: CommandLineTools.marker) },
             receipts: PkgutilReceipts(runner: runner), setupProblem: setupProblem,
-            isDemo: false)
+            isDemo: false,
+            // The same login shell the PATH resolver asks; nothing extra is run to find it.
+            shellPath: ShellPathEditor(home: FileManager.default.homeDirectoryForCurrentUser, shell: path.loginShell))
     }
 
     /// The login shell's PATH, asked for once, the first time Installed loads (read-only: the shell prints its PATH).

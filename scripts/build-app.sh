@@ -198,11 +198,12 @@ cp "$WORK/BrewxPort" "$APP/Contents/MacOS/BrewxPort"
 cp "$WORK/brewxport-askpass" "$APP/Contents/MacOS/brewxport-askpass"
 cp "$WORK/BrewxPortHelper" "$APP/Contents/Library/HelperTools/BrewxPortHelper"
 cp "$BUNDLE_RES/com.brewxport.helper.plist" "$APP/Contents/Library/LaunchDaemons/com.brewxport.helper.plist"
+mkdir -p "$APP/Contents/Resources"
+cp "$BUNDLE_RES/AppIcon.icns" "$APP/Contents/Resources/AppIcon.icns"
 chmod 755 "$APP/Contents/MacOS/BrewxPort" "$APP/Contents/MacOS/brewxport-askpass" \
     "$APP/Contents/Library/HelperTools/BrewxPortHelper"
 if [ "$DEMO_FIXTURES" -eq 1 ]; then
     echo "==> copying the demo fixtures (not for a release)"
-    mkdir -p "$APP/Contents/Resources"
     cp -R "$ROOT/Tests/BrewxPortCoreTests/Fixtures" "$APP/Contents/Resources/DemoFixtures"
 fi
 

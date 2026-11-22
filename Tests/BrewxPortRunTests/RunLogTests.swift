@@ -66,4 +66,15 @@ import BrewxPortCore
         #expect(log.lines.map(\.text) == ["Installing nanobrew: ripgrep", "Finished nanobrew: ripgrep.",
                                           "Removing nanobrew: fd", "Updating nanobrew: jq"])
     }
+
+    @Test func checkStepIsLoggedByItsTitleAlone() {
+        let check = RunStep.check([PackageRef(engine: .homebrew, kind: .formula, name: "jq")], on: .homebrew,
+                                  title: "Check Homebrew has the packages")
+        var log = RunLog(steps: [check])
+        log.apply(.started(0))
+        log.apply(.output(0, .stderr("Not found on Homebrew: jq")))
+        log.apply(.finished(0, 1))
+        #expect(log.lines.map(\.text) == ["Check Homebrew has the packages", "Not found on Homebrew: jq",
+                                          "Check Homebrew has the packages failed (exit code 1)."])
+    }
 }

@@ -164,12 +164,16 @@ public struct MasEngine: Engine {
     /// Run mas as `sudo -A mas …` from the user's session (it switches back to SUDO_UID), not directly as root
     /// from a daemon.
     public func privilege(for op: PackageOperation, _ ref: PackageRef) -> Privilege {
-        .always
+        if op == .markRequested || op == .markDependency { return .never }
+        return .always
     }
 
     public func command(for op: PackageOperation, _ refs: [PackageRef], options: InstallOptions) throws -> CommandSpec {
         guard refs.allSatisfy({ $0.engine == .mas }) else {
             throw EngineError(engine: .mas, message: "Package belongs to a different engine")
+        }
+        guard op != .markRequested, op != .markDependency else {
+            throw EngineError(engine: .mas, message: "\(EngineID.mas.displayName) can't mark packages")
         }
         guard options.version == nil else {
             throw EngineError(engine: .mas, message: "mas can't install a specific version")
@@ -190,6 +194,7 @@ public struct MasEngine: Engine {
         case .install: verb = "install"
         case .upgrade: verb = "upgrade"
         case .remove: verb = "uninstall"
+        case .markRequested, .markDependency: preconditionFailure("refused above")
         }
         return CommandSpec(executable: exe, arguments: [verb] + ids, needsRoot: true)
     }

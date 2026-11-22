@@ -29,13 +29,17 @@ public enum RunPreflight {
                        + "and it isn't ready: \(why)"])
     }
 
-    /// Splits `steps` into kept and dropped, in order. A step is dropped when `drop` says so, or when it
-    /// `dependsOnPrevious` and the step before it (in the original order) was dropped.
+    /// Splits `steps` into kept and dropped, in order. A step is dropped when `drop` says so, when it
+    /// `dependsOnPrevious` and the step before it (in the original order) was dropped, or when it
+    /// `requiresAllEarlier` and any earlier step was dropped, or when it `requiresPassedCheck` and an earlier check
+    /// step was dropped.
     static func split(_ steps: [RunStep], dropping drop: (RunStep) -> Bool) -> (kept: [RunStep], dropped: [RunStep]) {
         var kept: [RunStep] = [], dropped: [RunStep] = []
         var previousDropped = false
         for step in steps {
             previousDropped = drop(step) || (step.dependsOnPrevious && previousDropped)
+                || (step.requiresAllEarlier && !dropped.isEmpty)
+                || (step.requiresPassedCheck && dropped.contains { $0.verifyInstalled != nil })
             if previousDropped { dropped.append(step) } else { kept.append(step) }
         }
         return (kept, dropped)
@@ -58,6 +62,7 @@ public enum RunPreflight {
         case .install: return "MacPorts installs"
         case .upgrade: return "MacPorts updates"
         case .remove: return "MacPorts removals"
+        case .markRequested, .markDependency: return "MacPorts changes"
         }
     }
 }

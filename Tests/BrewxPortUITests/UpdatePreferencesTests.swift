@@ -98,14 +98,14 @@ struct UpdatePreferencesTests {
 
     @Test func providerWithoutPrompterReturnsNil() async {
         let provider = PromptPasswordProvider()
-        #expect(await provider.password(reason: "test") == nil)
+        #expect(await provider.password(reason: "test", previousAttemptFailed: false) == nil)
     }
 
     @Test func providerForwardsToPrompter() async {
         let provider = PromptPasswordProvider()
         let prompter = FakePrompter(password: "pw")
         provider.prompter = prompter
-        let secret = await provider.password(reason: "Update all")
+        let secret = await provider.password(reason: "Update all", previousAttemptFailed: false)
         #expect(secret != nil)
         #expect(prompter.reasons == ["Update all"])
     }

@@ -136,4 +136,46 @@ import BrewxPortRun
         let all = [Self.setupStep, nbInit]
         #expect(RunPreflight.filter(all, helperState: .enabled, isAdministrator: true).steps == all)
     }
+
+    @Test func gatedStepIsDroppedWhenAnyEarlierStepIs() {
+        let remove = RunStep(engine: .homebrew, operation: .remove,
+                             spec: CommandSpec(executable: URL(fileURLWithPath: "/opt/homebrew/bin/brew"),
+                                               arguments: ["uninstall", "wget"], needsRoot: false),
+                             title: "Remove wget", requiresAllEarlier: true)
+        // The dropped port step is not right before the gated one.
+        let steps = [F.port("curl"), F.formula(), remove]
+        let (kept, notes) = RunPreflight.filter(steps, helperState: .notRegistered, isAdministrator: true)
+        #expect(kept == [F.formula()])
+        #expect(notes.first?.contains("Remove wget") == true)
+        // Same for a standard account.
+        let (userKept, _) = RunPreflight.filter(steps, helperState: .enabled, isAdministrator: false)
+        #expect(userKept == [F.formula()])
+        // Nothing dropped: the gated step stays.
+        #expect(RunPreflight.filter(steps, helperState: .enabled, isAdministrator: true).steps == steps)
+    }
+
+    @Test func checkStepIsNeverDroppedForTheHelper() {
+        let check = RunStep.check([PackageRef(engine: .macports, kind: .port, name: "curl")], on: .macports,
+                                  title: "Check MacPorts has the packages")
+        let (kept, notes) = RunPreflight.filter([F.formula(), check], helperState: .notRegistered,
+                                                isAdministrator: false)
+        #expect(kept == [F.formula(), check])
+        #expect(notes.isEmpty)
+    }
+
+    @Test func passedCheckStepGoesWithItsCheck() {
+        let check = RunStep.check([PackageRef(engine: .homebrew, kind: .formula, name: "wget")], on: .homebrew,
+                                  title: "Check Homebrew has the packages")
+        let mark = RunStep(engine: .homebrew, operation: .markRequested,
+                           spec: CommandSpec(executable: URL(fileURLWithPath: "/opt/homebrew/bin/brew"),
+                                             arguments: ["tab", "--installed-on-request", "wget"], needsRoot: false),
+                           title: "Mark wget", requiresPassedCheck: true)
+        // A dropped check takes the step with it.
+        let (kept, dropped) = RunPreflight.split([check, mark], dropping: { $0.verifyInstalled != nil })
+        #expect(kept.isEmpty)
+        #expect(dropped == [check, mark])
+        // Any other dropped step leaves it: the check decides at run time.
+        let (keptAfterPort, _) = RunPreflight.split([F.port("curl"), check, mark], dropping: RunPreflight.usesHelper)
+        #expect(keptAfterPort == [check, mark])
+    }
 }
