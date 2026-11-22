@@ -791,6 +791,33 @@ final class VerifierProbe: @unchecked Sendable {
         #expect(events.contains(.finished(2, 0)))
     }
 
+    static func dependent(_ name: String) -> RunStep {
+        RunStep(engine: .homebrew, operation: .upgrade,
+                spec: CommandSpec(executable: URL(fileURLWithPath: Steps.brewPath), arguments: ["upgrade", name],
+                                  needsRoot: false),
+                title: name, dependsOnPrevious: true)
+    }
+
+    @Test func dependencyChainOfThreeSkipsEveryLinkAfterAFailure() async {
+        // a fails; b depends on a, c depends on b: both stay unstarted. d depends on nothing and runs.
+        let h = Harness()
+        h.runner.respond([Steps.brewPath, "upgrade", "a"], code: 1)
+        let steps = [Steps.formula("a"), Self.dependent("b"), Self.dependent("c"), Steps.formula("d")]
+        let events = await collect(h.session().run(steps))
+        #expect(events.contains(.finished(0, 1)))
+        #expect(!events.contains(.started(1)))
+        #expect(!events.contains(.started(2)))
+        #expect(events.contains(.finished(3, 0)))
+        #expect(h.runner.calls.map(\.arguments) == [["upgrade", "a"], ["upgrade", "d"]])
+    }
+
+    @Test func dependencyChainOfThreeRunsWhenEachLinkSucceeds() async {
+        let h = Harness()
+        let steps = [Steps.formula("a"), Self.dependent("b"), Self.dependent("c")]
+        let events = await collect(h.session().run(steps))
+        for index in 0..<3 { #expect(events.contains(.finished(index, 0))) }
+    }
+
     @Test func allEarlierSkipsAfterSkipped() async {
         // Step 1 is skipped (its own dependency failed); a later gated step counts that as a failure, even though
         // the step right before it succeeded.
@@ -820,6 +847,49 @@ final class VerifierProbe: @unchecked Sendable {
         #expect(!events.contains(.started(3)))
         #expect(!events.contains(.started(4)))
         #expect(!h.runner.calls.contains { $0.arguments == ["upgrade", "d"] })
+    }
+
+    /// A gated removal on Homebrew (`nanobrew: false`) or nanobrew, scoped to its own engine's group.
+    static func groupedRemove(_ name: String, nanobrew: Bool = false) -> RunStep {
+        let engine: EngineID = nanobrew ? .nanobrew : .homebrew
+        let path = nanobrew ? Steps.nbPath : Steps.brewPath
+        return RunStep(engine: engine, operation: .remove,
+                       spec: CommandSpec(executable: URL(fileURLWithPath: path),
+                                         arguments: [nanobrew ? "remove" : "uninstall", name], needsRoot: false),
+                       title: "Remove \(name)", requiresAllEarlier: true, gateGroup: engine.rawValue)
+    }
+
+    @Test func groupedGateIgnoresOtherGroupsFailures() async {
+        // Homebrew's wget fails: Homebrew's later libidn2 is skipped, nanobrew's jq and fd still run.
+        let h = Harness()
+        h.runner.respond([Steps.brewPath, "uninstall", "wget"], code: 1)
+        let steps = [Self.groupedRemove("wget"), Self.groupedRemove("jq", nanobrew: true),
+                     Self.groupedRemove("libidn2"), Self.groupedRemove("fd", nanobrew: true)]
+        let events = await collect(h.session().run(steps))
+        #expect(events == [.started(0), .finished(0, 1), .started(1), .finished(1, 0), .started(3), .finished(3, 0),
+                           .done])
+        #expect(!h.runner.calls.contains { $0.arguments == ["uninstall", "libidn2"] })
+    }
+
+    @Test func groupedGateCountsASkippedStepInItsGroup() async {
+        // wget fails, libidn2 is skipped, so openssl (after a skip, not a failure) is skipped too.
+        let h = Harness()
+        h.runner.respond([Steps.brewPath, "uninstall", "wget"], code: 1)
+        let steps = [Self.groupedRemove("wget"), Self.groupedRemove("libidn2"), Self.groupedRemove("jq", nanobrew: true),
+                     Self.groupedRemove("openssl")]
+        let events = await collect(h.session().run(steps))
+        #expect(!events.contains(.started(1)))
+        #expect(events.contains(.finished(2, 0)))
+        #expect(!events.contains(.started(3)))
+    }
+
+    @Test func ungroupedGateStillWaitsOnEveryEarlierStep() async {
+        // A grouped failure still stops a gated step without a group: nil keeps the whole-run meaning.
+        let h = Harness()
+        h.runner.respond([Steps.nbPath, "remove", "jq"], code: 1)
+        let events = await collect(h.session().run([Self.groupedRemove("jq", nanobrew: true), Steps.remove("x")]))
+        #expect(events == [.started(0), .finished(0, 1), .done])
+        #expect(Steps.remove().gateGroup == nil)
     }
 
     @Test func checkStepPassesWhenNothingMissing() async {

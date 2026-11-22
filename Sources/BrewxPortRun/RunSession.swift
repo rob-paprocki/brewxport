@@ -70,7 +70,8 @@ typealias AskpassServerFactory = @Sendable (_ secret: SecretBuffer, _ askpassPat
 ///    cancel at any ask ends the run, and a failure other than the password isn't retried. The askpass server answers
 ///    each sudo once, so a wrong password fails at once instead of after sudo's retries.
 /// 3. It runs the steps in order through `spec.launchCommand()`. A failed step doesn't stop the rest, but it does
-///    stop a later step that `dependsOnPrevious` (right after it) or `requiresAllEarlier`. A check step
+///    stop a later step that `dependsOnPrevious` (right after it) or `requiresAllEarlier` (only within its
+///    `gateGroup` when it has one). A check step
 ///    (`verifyInstalled`) launches nothing: the run's verifier says which packages are missing. A step that
 ///    `requiresPassedCheck` runs only after a check passed and none failed. A step's `userEnvironment` is added only
 ///    on the user routes.
@@ -212,15 +213,19 @@ public final class RunSession: Sendable {
         // skipped step counts as not.
         var previousSucceeded = true
         var allEarlierSucceeded = true
+        // The gate groups with a step that failed or was skipped.
+        var failedGroups: Set<String> = []
         // Nil until a check step runs; false once any check step failed or was skipped.
         var checksPassed: Bool?
         for (index, step) in steps.enumerated() {
             if Task.isCancelled { return .cancelled }
-            if (step.dependsOnPrevious && !previousSucceeded) || (step.requiresAllEarlier && !allEarlierSucceeded)
+            let earlierFailed = step.gateGroup.map { failedGroups.contains($0) } ?? !allEarlierSucceeded
+            if (step.dependsOnPrevious && !previousSucceeded) || (step.requiresAllEarlier && earlierFailed)
                 || (step.requiresPassedCheck && checksPassed != true) {
                 // Left unstarted, which the UI shows as skipped. Later steps that depend on it are skipped too.
                 previousSucceeded = false
                 allEarlierSucceeded = false
+                if let group = step.gateGroup { failedGroups.insert(group) }
                 if step.verifyInstalled != nil { checksPassed = false }
                 continue
             }
@@ -242,7 +247,10 @@ public final class RunSession: Sendable {
             // threw CancellationError is left open; the check at the top of the loop stops the next one.
             emit(.finished(index, code))
             previousSucceeded = code == 0
-            if code != 0 { allEarlierSucceeded = false }
+            if code != 0 {
+                allEarlierSucceeded = false
+                if let group = step.gateGroup { failedGroups.insert(group) }
+            }
             if step.verifyInstalled != nil { checksPassed = code == 0 && checksPassed != false }
         }
         return .done

@@ -253,6 +253,9 @@ public struct HomebrewEngine: Engine, TapListing, DependentsListing {
             let version: String?
             let installed: String?
             let artifacts: [ArtifactKeys]?
+            /// `formula` lists the formulae the cask needs; other keys (`macos`, `cask`, `arch`) aren't packages.
+            struct DependsOn: Decodable { let formula: [String]? }
+            let depends_on: DependsOn?
         }
         let formulae: [Formula]?
         let casks: [Cask]?
@@ -278,6 +281,7 @@ public struct HomebrewEngine: Engine, TapListing, DependentsListing {
             return PackageDetails(
                 ref: ref, summary: nonBlank(c.desc), homepage: webURL(c.homepage),
                 installedVersion: nonBlank(c.installed), latestVersion: nonBlank(c.version),
+                dependencies: c.depends_on.map { $0.formula ?? [] },
                 installerNeedsRoot: c.artifacts.map { list in
                     list.contains { !$0.keys.isDisjoint(with: ["pkg", "installer"]) }
                 }, reportedName: c.token)

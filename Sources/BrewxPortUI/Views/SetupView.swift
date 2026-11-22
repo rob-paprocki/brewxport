@@ -1,4 +1,5 @@
 import BrewxPortCore
+import BrewxPortRun
 import SwiftUI
 
 /// The setup sheet: offer the package managers, ask for the helper's approval, report a finished, failed or
@@ -55,10 +56,17 @@ struct SetupView: View {
                     row(engine, isRecommended: engine == recommended, selected: engine == selection)
                 }
             }
+            // The choice is made once Set Up is clicked; it can't change while the helper's answer is awaited.
+            .disabled(setup.waitingForHelper)
             HStack {
+                if setup.waitingForHelper {
+                    ProgressView().controlSize(.small)
+                    Text(HelperStateDisplay.text(for: nil)).foregroundStyle(.secondary)
+                }
                 Spacer()
                 Button("Not now", action: setup.notNow).keyboardShortcut(.cancelAction)
                 Button("Set Up") { setup.setUp(selection) }.keyboardShortcut(.defaultAction)
+                    .disabled(setup.waitingForHelper)
             }
         }
     }

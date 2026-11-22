@@ -499,7 +499,16 @@ private let ripgrepFormula = ref(.formula, "ripgrep")
         #expect(d.homepage == URL(string: "https://existential.audio/blackhole/"))
         #expect(d.latestVersion == "0.7.1")
         #expect(d.installerNeedsRoot == true)
-        #expect(d.dependencies == nil)
+        // `depends_on` names no formula: the cask needs none.
+        #expect(d.dependencies == [])
+    }
+
+    @Test func infoCaskReadsFormulaDependencies() async throws {
+        // Real capture: the droid cask's `depends_on.formula` is ["ripgrep"].
+        let (e, _) = try engine(["info", "--json=v2", "--cask", "droid"], "info-cask-droid.json")
+        let d = try await e.info(ref(.cask, "droid"))
+        #expect(d.dependencies == ["ripgrep"])
+        #expect(d.reportedName == "droid")
     }
 
     @Test func infoCaskAppOnlyDoesntNeedRoot() async throws {

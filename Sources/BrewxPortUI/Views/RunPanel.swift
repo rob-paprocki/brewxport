@@ -45,10 +45,14 @@ struct RunPanel: View {
                     Button("Close", action: run.dismissPanel)
                 }
             }
+            // No `.fixedSize(vertical:)` here: SwiftUI works out the window's minimum height at the column's narrowest
+            // width, where a line forced to show in full wraps a word to a line and asks for over a thousand points.
+            // AppKit keeps the window's size, so the content was laid out taller than the window and centred: the
+            // top slid under the title bar and this panel fell off the bottom. Unforced, a line still wraps to its
+            // full height whenever the window has room for it.
             ForEach(Array(run.problems.enumerated()), id: \.offset) { _, problem in
                 Label(problem, systemImage: "exclamationmark.triangle.fill")
                     .symbolRenderingMode(.multicolor)
-                    .fixedSize(horizontal: false, vertical: true)
             }
             if run.passwordRejected {
                 Label("That password didn't work", systemImage: "exclamationmark.triangle.fill")

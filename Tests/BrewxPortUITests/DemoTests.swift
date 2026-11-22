@@ -268,6 +268,93 @@ import BrewxPortRun
         #expect(passed.contains(.finished(1, 0)))
     }
 
+    @Test func demoGroupedGateWaitsOnlyOnItsGroup() async throws {
+        // As in RunSession: a failed step outside the group doesn't stop a grouped removal; an ungrouped one stops.
+        let services = try Self.services()
+        let executor = try #require(services.executor)
+        let upgrade = try Self.step(services, .upgrade, Self.adaURL)
+        let grouped = RunStep(engine: .homebrew, operation: .remove, spec: upgrade.spec, title: "Remove ada-url",
+                              requiresAllEarlier: true, gateGroup: "homebrew")
+        let ungrouped = RunStep(engine: .homebrew, operation: .remove, spec: upgrade.spec, title: "Remove ada-url too",
+                                requiresAllEarlier: true)
+        let check = RunStep.check([Self.adaURL], on: .homebrew, title: "Check Homebrew has the packages")
+
+        let events = await Self.collect(executor.run([check, grouped, ungrouped], reason: "r"))
+        #expect(events.contains(.finished(0, 1)))
+        #expect(events.contains(.finished(1, 0)))
+        #expect(!events.contains(.started(2)))
+    }
+
+    @Test func demoUninstallStillRemoves() async throws {
+        // Uninstall worked in demo mode before the sheet. Homebrew's pick still goes (its leftovers can't be worked
+        // out from the captures, so there's no box).
+        let model = BrewxPortAppModel(services: try Self.services())
+        model.installed.reload()
+        await model.installed.settled()
+        let rows = model.installed.list.all.map(\.package)
+        let picks = [EngineID.nanobrew, .homebrew].compactMap { engine in rows.first { $0.id.engine == engine } }
+        #expect(picks.map(\.id.name) == ["figlet", "abseil"])
+        model.perform(.uninstall, on: Set(picks.map(\.id)))
+        _ = await waitUntil { if case .checking = model.uninstall.state { false } else { true } }
+        guard case .ready(let plan) = model.uninstall.state else {
+            Issue.record("no plan: \(model.uninstall.state)")
+            return
+        }
+        let homebrew = try #require(plan.sections.first { $0.engine == .homebrew })
+        #expect(homebrew.picks.map(\.id.name) == ["abseil"])
+        #expect(homebrew.note == "Couldn't work out leftovers for Homebrew.")
+        // nanobrew's dependents come from the demo inventory: nothing installed needs figlet, so it goes.
+        let nanobrew = try #require(plan.sections.first { $0.engine == .nanobrew })
+        #expect(nanobrew.blocked.isEmpty)
+        #expect(nanobrew.picks.map(\.id.name) == ["figlet"])
+        model.uninstall.confirm()
+        #expect(await waitUntil { model.uninstall.state == .hidden && !model.run.isRunning })
+        await model.installed.settled()
+        let left = Set(model.installed.list.all.map(\.id))
+        #expect(picks.allSatisfy { !left.contains($0.id) })
+    }
+
+    /// The first installed demo package another installed demo package of the same engine needs (per its captured
+    /// details), with that dependent; nil when the captures have no such pair.
+    static func neededPair(_ services: Services) async -> (needed: Package, by: String)? {
+        for engine in services.engines where engine is any DependentsListing {
+            for package in (try? await engine.listInstalled()) ?? [] {
+                if let user = (try? await (engine as! any DependentsListing).installedDependents(of: package.id.name))?
+                    .sorted().first {
+                    return (package, user)
+                }
+            }
+        }
+        return nil
+    }
+
+    @Test func demoPackageAnotherNeedsIsBlockedOrKept() async throws {
+        let services = try Self.services()
+        guard let (needed, user) = await Self.neededPair(services) else {
+            // The demo captures have no installed package that another installed one lists as a dependency.
+            return
+        }
+        let model = BrewxPortAppModel(services: services)
+        model.installed.reload()
+        await model.installed.settled()
+        model.perform(.uninstall, on: [needed.id])
+        _ = await waitUntil { if case .checking = model.uninstall.state { false } else { true } }
+        guard case .ready(let plan) = model.uninstall.state else {
+            Issue.record("no plan: \(model.uninstall.state)")
+            return
+        }
+        let section = try #require(plan.sections.first)
+        if needed.id.engine == .nanobrew {
+            // nanobrew doesn't refuse, so BrewxPort blocks it and names what needs it.
+            #expect(section.picks.isEmpty)
+            #expect(section.blocked.first?.reason.contains(user) == true)
+        } else {
+            // Homebrew and MacPorts refuse it themselves when the run gets to it; it's never offered as a leftover.
+            #expect(section.picks.map(\.id) == [needed.id])
+            #expect(section.leftovers.allSatisfy { $0.id != needed.id })
+        }
+    }
+
     @Test func demoMarksWaitForAPassedCheckAndEmptyChecksFail() async throws {
         let services = try Self.services()
         let executor = try #require(services.executor)
@@ -323,7 +410,10 @@ import BrewxPortRun
     }
 
     @Test func demoCancelEndsWithCancelledDone() async throws {
-        let services = try Self.services(delay: .milliseconds(100))
+        // The run doesn't wait for the reader, so the pause before each line must outlast any lag in reading the
+        // first one (100 ms didn't on a busy CI runner). The test waits one pause for the first line; cancelling
+        // interrupts the second.
+        let services = try Self.services(delay: .seconds(3))
         let executor = try #require(services.executor)
         var events: [RunEvent] = []
         for await event in executor.run([try Self.step(services, .upgrade, Self.adaURL)], reason: "r") {

@@ -1,7 +1,7 @@
 name: CI
 
-# The release tooling's tests and the personal-value check. The Swift tests need a macOS runner and
-# run in the release workflow's test job, and with `swift test` locally.
+# The release tooling's tests, the personal-value check, and the Swift build and tests on macOS (the
+# same runner image as the release workflow's test job).
 on:
   pull_request:
   push:
@@ -9,6 +9,12 @@ on:
 
 permissions:
   contents: read
+
+# A new push to a pull request cancels that pull request's older run. Each push to main has its own
+# group, so main's runs are never cancelled.
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.sha }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 jobs:
   test:
@@ -19,6 +25,18 @@ jobs:
         run: python3 -I -m unittest discover -s Tests -p 'test_*.py' -v
       - name: Personal-value check (emails, IPs, MACs)
         run: python3 -I Tests/check_repo.py
+
+  swift:
+    runs-on: macos-15
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+        with:
+          persist-credentials: false
+      - name: Swift build
+        run: swift build
+      - name: Swift tests
+        run: swift test
 
   python39:
     # The owner's Mac publishes the first version with Apple's Python 3.9, so test on 3.9 too.

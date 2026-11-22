@@ -511,7 +511,7 @@ import BrewxPortCore
 
         // Uninstall and Update do nothing here.
         model.perform(.uninstall, on: [Self.wget])
-        #expect(model.pendingUninstall == nil)
+        #expect(model.uninstall.state == .hidden)
         model.perform(.update, on: [Self.wget])
         try? await Task.sleep(for: .milliseconds(50))
         #expect(executor.runs.isEmpty)

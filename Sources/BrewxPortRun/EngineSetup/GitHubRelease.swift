@@ -40,7 +40,9 @@ public struct GitHubRelease: Sendable {
         var assets: [Asset]
     }
 
-    /// Assets without a `sha256:` digest are dropped. A download URL that isn't HTTPS on an allowed host is an error.
+    /// Assets without a `sha256:` digest are dropped, and so are assets whose download URL isn't HTTPS on an allowed
+    /// host. One odd asset doesn't spoil the release; choosing an asset still fails (`noAsset`) when the one needed
+    /// was dropped.
     public static func decode(_ data: Data) throws -> GitHubRelease {
         let wire = try JSONDecoder().decode(Wire.self, from: data)
         var assets: [ReleaseAsset] = []
@@ -49,10 +51,7 @@ public struct GitHubRelease: Sendable {
                   url.scheme?.lowercased() == "https",
                   let host = url.host?.lowercased(),
                   allowedHosts.contains(host)
-            else {
-                throw DecodingError.dataCorrupted(.init(
-                    codingPath: [], debugDescription: "Download URL for \(item.name) is not on an allowed host"))
-            }
+            else { continue }
             let prefix = "sha256:"
             guard let digest = item.digest, digest.hasPrefix(prefix) else { continue }
             let hex = String(digest.dropFirst(prefix.count)).lowercased()

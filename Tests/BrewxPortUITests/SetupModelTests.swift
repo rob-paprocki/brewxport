@@ -246,6 +246,44 @@ struct FakeReceipts: InstallerReceiptReading {
         #expect(model.stage == .running)
     }
 
+    @Test func offerSaysItIsCheckingTheHelperUntilItsFirstAnswer() async {
+        let (model, box, _) = make(statuses: Self.none, helper: FakeHelperManager())
+        await model.start()
+        #expect(!model.waitingForHelper)
+        model.setUp(.macports)
+        #expect(model.stage == .offer(recommended: .homebrew, others: [.macports, .nanobrew]))
+        #expect(model.waitingForHelper)
+        #expect(box.started.isEmpty)
+        model.helperStateChanged(.enabled)
+        #expect(!model.waitingForHelper)
+        #expect(box.started == [.macports])
+    }
+
+    @Test func notNowWhileCheckingTheHelperStopsWaiting() async {
+        let (model, box, _) = make(statuses: Self.none, helper: FakeHelperManager())
+        await model.start()
+        model.setUp(.homebrew)
+        model.notNow()
+        #expect(!model.waitingForHelper)
+        model.helperStateChanged(.enabled)
+        #expect(model.stage == .hidden)
+        #expect(box.started.isEmpty)
+    }
+
+    @Test func noFileMenuOfferWhileThePkgChoiceWaitsForTheHelper() async {
+        let (model, box, _) = make(statuses: Self.none, receipts: Self.choice(marker: Self.now),
+                                   helper: FakeHelperManager())
+        await model.start()
+        #expect(model.stage == .hidden)
+        #expect(model.waitingForHelper)
+        #expect(!model.canShowOffer)
+        model.showOffer()
+        #expect(model.stage == .hidden)
+        model.helperStateChanged(.enabled)
+        #expect(box.started == [.homebrew])
+        #expect(!model.waitingForHelper)
+    }
+
     @Test func masIsNotOfferedWithoutHomebrewOrMacPorts() async {
         let (model, _, _) = make(statuses: Self.none)
         await model.start()

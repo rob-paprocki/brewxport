@@ -42,6 +42,8 @@ import BrewxPortRun
     @ObservationIgnored private var helperState: HelperState?
     /// The engine waiting for the helper, and the one the current run is setting up.
     @ObservationIgnored private var pending: EngineID?
+    /// True while a setup waits for the helper's first answer. The offer shows "Checking BrewxPort's helper…".
+    public private(set) var waitingForHelper = false
     @ObservationIgnored private var current: EngineID?
     @ObservationIgnored private var runEndedAwaitingCheck = false
     @ObservationIgnored private var started = false
@@ -132,10 +134,11 @@ import BrewxPortRun
             .filter { status($0) == .missing }
     }
 
-    /// True when File > "Set Up Package Manager…" has something to show: nothing is on screen or running, and a
-    /// package manager is still missing. Never in demo mode.
+    /// True when File > "Set Up Package Manager…" has something to show: nothing is on screen, running or waiting for
+    /// the helper (the installer's choice waits without a screen), and a package manager is still missing. Never in
+    /// demo mode.
     public var canShowOffer: Bool {
-        !services.isDemo && stage == .hidden && !missingOffers.isEmpty
+        !services.isDemo && stage == .hidden && !waitingForHelper && !missingOffers.isEmpty
     }
 
     /// The menu item: shows the offer again, even after "Not now". Doesn't change what "Not now" remembers.
@@ -175,12 +178,14 @@ import BrewxPortRun
     public func notNow() {
         markDismissed()
         pending = nil
+        waitingForHelper = false
         stage = .hidden
     }
 
     /// The app model reports every helper answer here, after the helper call is over.
     public func helperStateChanged(_ state: HelperState?) {
         helperState = state
+        if state != nil { waitingForHelper = false }
         guard let state, let engine = pending else { return }
         switch stage {
         case .needsHelperApproval:
@@ -231,6 +236,7 @@ import BrewxPortRun
         if services.helper != nil {
             guard let state = helperState else {
                 pending = engine
+                waitingForHelper = true
                 return
             }
             if state != .enabled {

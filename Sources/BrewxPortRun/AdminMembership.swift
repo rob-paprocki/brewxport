@@ -28,9 +28,22 @@ public enum AdminMembership {
         return isMember != 0
     }
 
-    /// Setup is for administrators only: the helper's right accepts any admin's password, while the requester may
-    /// be a standard user. A failed check refuses too. Nil means go.
-    public static func setupRefusal(uid: uid_t, isAdmin: (uid_t) -> Bool? = isAdmin(uid:)) -> String? {
-        isAdmin(uid) == true ? nil : "Only an administrator can set up package managers."
+    /// What a root request is for; picks the refusal message.
+    public enum RootAction: Sendable {
+        case setUp
+        case runPort
+
+        var message: String {
+            switch self {
+            case .setUp: "Only an administrator can set up package managers."
+            case .runPort: "Only an administrator can run MacPorts commands with BrewxPort."
+            }
+        }
+    }
+
+    /// Root work is for administrators only: the helper's right accepts any admin's password, while the requester
+    /// may be a standard user. A failed check refuses too. Nil means go.
+    public static func refusal(uid: uid_t, for action: RootAction, isAdmin: (uid_t) -> Bool? = isAdmin(uid:)) -> String? {
+        isAdmin(uid) == true ? nil : action.message
     }
 }

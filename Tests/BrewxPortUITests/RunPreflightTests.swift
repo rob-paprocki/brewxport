@@ -137,6 +137,20 @@ import BrewxPortRun
         #expect(RunPreflight.filter(all, helperState: .enabled, isAdministrator: true).steps == all)
     }
 
+    @Test func dependencyChainOfThreeIsDroppedLinkByLink() {
+        // The helper's port step is dropped; the two user steps chained behind it go with it, the free one stays.
+        func dependent(_ name: String) -> RunStep {
+            RunStep(engine: .homebrew, operation: .upgrade,
+                    spec: CommandSpec(executable: URL(fileURLWithPath: "/opt/homebrew/bin/brew"),
+                                      arguments: ["upgrade", name], needsRoot: false),
+                    title: name, dependsOnPrevious: true)
+        }
+        let steps = [F.port("curl"), dependent("b"), dependent("c"), F.formula()]
+        let (kept, notes) = RunPreflight.filter(steps, helperState: .notRegistered, isAdministrator: true)
+        #expect(kept == [F.formula()])
+        #expect(notes.first?.hasPrefix("Skipped Upgrade curl; b; c.") == true, "\(notes)")
+    }
+
     @Test func gatedStepIsDroppedWhenAnyEarlierStepIs() {
         let remove = RunStep(engine: .homebrew, operation: .remove,
                              spec: CommandSpec(executable: URL(fileURLWithPath: "/opt/homebrew/bin/brew"),
@@ -152,6 +166,35 @@ import BrewxPortRun
         #expect(userKept == [F.formula()])
         // Nothing dropped: the gated step stays.
         #expect(RunPreflight.filter(steps, helperState: .enabled, isAdministrator: true).steps == steps)
+    }
+
+    static func groupedRemove(_ engine: EngineID, _ kind: PackageKind, _ name: String) -> RunStep {
+        let (path, arguments): (String, [String]) = switch engine {
+        case .macports: ("/opt/local/bin/port", ["-N", "uninstall", name])
+        default: ("/opt/homebrew/bin/brew", kind == .cask ? ["uninstall", "--cask", name] : ["uninstall", name])
+        }
+        return RunStep(engine: engine, kind: kind, operation: .remove,
+                       spec: CommandSpec(executable: URL(fileURLWithPath: path), arguments: arguments,
+                                         needsRoot: engine == .macports),
+                       title: "Remove \(name)", requiresAllEarlier: true, gateGroup: engine.rawValue)
+    }
+
+    @Test func groupedGateDropsOnlyWithItsOwnGroup() {
+        // A standard account can't run the droid cask removal (askpass), so its formula leftovers go with it.
+        let droid = Self.groupedRemove(.homebrew, .cask, "droid")
+        let ripgrep = Self.groupedRemove(.homebrew, .formula, "ripgrep")
+        let pcre2 = Self.groupedRemove(.homebrew, .formula, "pcre2")
+        let (kept, _) = RunPreflight.filter([droid, ripgrep, pcre2], helperState: .enabled, isAdministrator: false)
+        #expect(kept.isEmpty)
+
+        // A dropped MacPorts removal leaves the Homebrew removals after it in place.
+        let curl = Self.groupedRemove(.macports, .port, "curl")
+        let wget = Self.groupedRemove(.homebrew, .formula, "wget")
+        let (helperKept, notes) = RunPreflight.filter([curl, wget, ripgrep], helperState: .notRegistered,
+                                                      isAdministrator: true)
+        #expect(helperKept == [wget, ripgrep])
+        #expect(notes.first?.contains("Remove curl") == true)
+        #expect(notes.first?.contains("wget") == false)
     }
 
     @Test func checkStepIsNeverDroppedForTheHelper() {

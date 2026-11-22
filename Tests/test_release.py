@@ -1231,6 +1231,16 @@ class PublicShape(unittest.TestCase):
             self.assertIn("Tests/check_repo.py", jobs[name])
         self.assertNotIn("secrets.", read(".github", "workflows", "ci.yml"))
 
+    def test_ci_swift_job_is_bounded_and_superseded_pr_runs_cancel(self):
+        text = read(".github", "workflows", "ci.yml")
+        # A hung `swift test` stops at 30 minutes instead of GitHub's 6-hour default.
+        self.assertIn("    timeout-minutes: 30\n", workflow_jobs(text)["swift"])
+        # A new push to a pull request cancels its older run; pushes to main each get their own group.
+        head = text.split("\njobs:\n", 1)[0]
+        self.assertIn("\nconcurrency:\n", head)
+        self.assertIn("cancel-in-progress: ${{ github.event_name == 'pull_request' }}", head)
+        self.assertIn("github.event.pull_request.number || github.sha", head)
+
     @unittest.skipUnless(HAS_PRIVATE, "private/ is not in the public copy")
     def test_wordlist_is_git_ignored(self):
         r = subprocess.run(["git", "-C", ROOT, "check-ignore", "-q", "wordlist.local"])

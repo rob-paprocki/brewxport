@@ -64,6 +64,13 @@ final class HelperService: NSObject, BrewxPortHelperProtocol, Sendable {
     }
 
     func runPort(authorization: Data, arguments: [String], reply: @escaping @Sendable (Int32, String?) -> Void) {
+        // Defense in depth: the app already refuses standard users, but the helper's right accepts any admin's
+        // password, so check the requester here, before the authorization or the arguments are looked at.
+        if let refusal = AdminMembership.refusal(uid: requester, for: .runPort) {
+            helperLog.error("pid \(self.peer): refused, uid \(self.requester) isn't an administrator")
+            reply(-1, refusal)
+            return
+        }
         guard gate.tryEnter() else {
             helperLog.notice("pid \(self.peer): refused, another run is in progress")
             reply(-1, "BrewxPort's helper is busy with another run. Try again when it finishes.")
@@ -108,7 +115,7 @@ final class HelperService: NSObject, BrewxPortHelperProtocol, Sendable {
             reply(-1, "BrewxPort's helper doesn't know how to set that up.")
             return
         }
-        if let refusal = AdminMembership.setupRefusal(uid: requester) {
+        if let refusal = AdminMembership.refusal(uid: requester, for: .setUp) {
             gate.leave()
             helperLog.error("pid \(self.peer): refused setup, uid \(self.requester) isn't an administrator")
             reply(-1, refusal)

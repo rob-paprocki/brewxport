@@ -77,30 +77,38 @@ VERSION="$(plutil -extract CFBundleShortVersionString raw -o - "$TMP/app/BrewxPo
 pkgutil --expand-full "$PKG" "$TMP/expanded" >/dev/null
 dist="$(cat "$TMP/expanded/Distribution")"
 has() { [[ "$dist" == *"$1"* ]]; } # $1 is literal text
+# Per-choice checks read the distribution as XML, so they don't depend on how productbuild lays out attributes.
+xml() { xmllint --xpath "$1" - <<<"$dist" 2>/dev/null || true; } # XPath expression; prints its string value
+attr() { xml "string(//choice[@id='$1']/@$2)"; }                  # choice id, attribute name
 
 has 'customize="allow"' && pass "Customize is offered" || fail "no customize=\"allow\""
 has '<pkg-ref id="com.brewxport.app.pkg"' && pass "app pkg-ref" || fail "no com.brewxport.app.pkg pkg-ref"
 has '<pkg-ref id="com.brewxport.setup-engine.pkg"' && pass "marker pkg-ref" || fail "no com.brewxport.setup-engine.pkg pkg-ref"
 has "function isArm(){ var v = system.sysctl('hw.optional.arm64'); return v == 1; }" &&
     pass "isArm() script" || fail "no isArm() script"
-grep -E '<choice id="setup-engine-homebrew"' <<<"$dist" | grep 'title="Set up Homebrew"' | grep -q 'visible="isArm()"' &&
+[ "$(xml 'count(/installer-gui-script)')" = 1 ] && pass "the distribution parses as XML" ||
+    fail "xmllint couldn't read the distribution"
+[ "$(attr setup-engine-homebrew title)" = "Set up Homebrew" ] && [ "$(attr setup-engine-homebrew visible)" = "isArm()" ] &&
     pass "Homebrew choice on Apple silicon" || fail "no Homebrew choice shown by isArm()"
-grep -E '<choice id="setup-engine-macports"' <<<"$dist" | grep 'title="Set up MacPorts"' | grep -q 'visible="!isArm()"' &&
+[ "$(attr setup-engine-macports title)" = "Set up MacPorts" ] && [ "$(attr setup-engine-macports visible)" = "!isArm()" ] &&
     pass "MacPorts choice on Intel" || fail "no MacPorts choice shown by !isArm()"
-[ "$(grep -c 'start_selected="isArm()"\|start_selected="!isArm()"' <<<"$dist" | tr -d ' ')" = 2 ] &&
+[ "$(attr setup-engine-homebrew start_selected)" = "isArm()" ] &&
+    [ "$(attr setup-engine-macports start_selected)" = "!isArm()" ] &&
     pass "each setup choice starts ticked only on its own architecture" || fail "start_selected isn't tied to isArm()"
-grep -E '<choice id="com\.brewxport\.app\.pkg"' <<<"$dist" | grep 'title="BrewxPort"' | grep 'enabled="false"' |
-    grep -q 'start_selected="true"' &&
+[ "$(attr com.brewxport.app.pkg title)" = BrewxPort ] && [ "$(attr com.brewxport.app.pkg enabled)" = false ] &&
+    [ "$(attr com.brewxport.app.pkg start_selected)" = true ] &&
     pass "the app is its own row, ticked and greyed out, so always installed" ||
     fail "the app choice isn't a titled, ticked, disabled row"
-grep -E '<choice id="setup-engine-macports"' <<<"$dist" | grep 'Zero KB' | grep -q '1.3 GB' &&
+macports_description="$(attr setup-engine-macports description)"
+[[ "$macports_description" == *"Zero KB"* && "$macports_description" == *"1.3 GB"* ]] &&
     pass "MacPorts description explains Zero KB and the later download" || fail "MacPorts description doesn't explain the download"
-grep -E '<choice id="setup-engine-homebrew"' <<<"$dist" | grep -q 'Zero KB' &&
+[[ "$(attr setup-engine-homebrew description)" == *"Zero KB"* ]] &&
     pass "Homebrew description explains Zero KB" || fail "Homebrew description doesn't explain Zero KB"
 # A flat outline: no untitled parent row (Installer showed one, with a mixed checkbox, on 0.3.0).
-! grep -q '<line choice="default">' <<<"$dist" && ! grep -q '<choice id="default"' <<<"$dist" &&
+[ "$(xml "count(//line[@choice='default'])")" = 0 ] && [ "$(xml "count(//choice[@id='default'])")" = 0 ] &&
+    [ "$(xml 'count(//choices-outline/line/line)')" = 0 ] &&
     pass "the choice list is flat, with no untitled group" || fail "choices are nested under an untitled group"
-[ "$(grep -c '<pkg-ref id="com.brewxport.setup-engine.pkg"[^>]*>[^<]' <<<"$dist" | tr -d ' ')" = 1 ] &&
+[ "$(xml "count(//pkg-ref[@id='com.brewxport.setup-engine.pkg'][normalize-space(text()) != ''])")" = 1 ] &&
     pass "one marker package file" || fail "the marker package isn't referenced exactly once"
 
 MARKER="$TMP/expanded/BrewxPort-setup-engine.pkg"

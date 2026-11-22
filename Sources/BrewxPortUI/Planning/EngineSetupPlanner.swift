@@ -46,7 +46,7 @@ public enum EngineSetupPlanner {
                                    placeholder: "/opt/local/bin/port", dependsOnPrevious: !cltPresent))
             return result(steps)
         case .nanobrew:
-            let nb = "/opt/nanobrew/prefix/bin/nb"
+            let nb = EngineLocator.nanobrewPath
             let initStep = RunStep(
                 engine: .nanobrew, operation: .install,
                 spec: CommandSpec(executable: URL(fileURLWithPath: nb), arguments: ["init"], needsRoot: true),

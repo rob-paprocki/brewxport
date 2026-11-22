@@ -100,6 +100,15 @@ Add `--notarize PROFILE` to have Apple notarize it as well. `PROFILE` is a keych
 > [!WARNING]
 > A normal launch of `BrewxPort.app` registers its admin helper. Try it in a virtual machine, or use `scripts/demo.sh`.
 
+## Uninstall a package
+
+Choose Uninstall… from a package's right-click menu or the Package menu, or press Delete on Installed or Updates. BrewxPort works out what goes before anything runs:
+
+- The sheet lists the packages you picked. Libraries that only those packages used are listed under Also remove leftovers from <package manager>, ticked. Untick it and only your picks go. Uninstalling Homebrew's `wget`, for example, offers `openssl@4`, `libidn2` and `libunistring` when nothing else uses them.
+- Nothing else is removed. Homebrew normally removes unused libraries on its own after an uninstall; BrewxPort turns that off, so what goes is what the sheet lists.
+- nanobrew doesn't record which packages you asked for, so nanobrew uninstalls don't offer leftovers. nanobrew also removes a package even when another one needs it, so BrewxPort checks first and keeps it if something still does.
+- If one removal fails, BrewxPort stops removing from that package manager and says what stayed.
+
 ## Move a package to another package manager
 
 Right-click a command-line tool on the Installed page, or choose Package > Move to, and pick Homebrew, nanobrew or MacPorts. BrewxPort works out the move and shows it to you before anything runs:

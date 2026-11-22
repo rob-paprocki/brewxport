@@ -31,14 +31,15 @@ public enum RunPreflight {
 
     /// Splits `steps` into kept and dropped, in order. A step is dropped when `drop` says so, when it
     /// `dependsOnPrevious` and the step before it (in the original order) was dropped, or when it
-    /// `requiresAllEarlier` and any earlier step was dropped, or when it `requiresPassedCheck` and an earlier check
-    /// step was dropped.
+    /// `requiresAllEarlier` and any earlier step was dropped (any earlier step of its `gateGroup`, when it has one),
+    /// or when it `requiresPassedCheck` and an earlier check step was dropped.
     static func split(_ steps: [RunStep], dropping drop: (RunStep) -> Bool) -> (kept: [RunStep], dropped: [RunStep]) {
         var kept: [RunStep] = [], dropped: [RunStep] = []
         var previousDropped = false
         for step in steps {
             previousDropped = drop(step) || (step.dependsOnPrevious && previousDropped)
-                || (step.requiresAllEarlier && !dropped.isEmpty)
+                || (step.requiresAllEarlier
+                    && dropped.contains { step.gateGroup == nil || $0.gateGroup == step.gateGroup })
                 || (step.requiresPassedCheck && dropped.contains { $0.verifyInstalled != nil })
             if previousDropped { dropped.append(step) } else { kept.append(step) }
         }

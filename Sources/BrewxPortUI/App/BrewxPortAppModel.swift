@@ -32,17 +32,13 @@ import BrewxPortRun
     public let bundles: BundlesModel
     public let setup: SetupModel
     public let move: MoveModel
+    public let uninstall: UninstallModel
     public var inspectorOpen = false
     /// Bumped by Find (Cmd-F); DiscoverView maps it to `.searchFocused`.
     public var focusSearchRequest = 0
     @ObservationIgnored private var searchFocusPending = false
     /// nanobrew cask route lookups in flight before `run.start`.
     public private(set) var preparing = false
-    /// Non-nil shows the uninstall confirmation.
-    public var pendingUninstall: Set<PackageRef>? {
-        didSet { openPendingFile() }
-    }
-
     @ObservationIgnored public let services: Services
 
     public var engineOrder: [EngineID] { PackageCatalog.defaultOrder(for: services.host) }
@@ -106,6 +102,7 @@ import BrewxPortRun
                                host: host, appVersion: BundleFile.appVersion(Bundle.main.infoDictionary))
         setup = SetupModel(services: services)
         move = MoveModel(services: services, installed: installed)
+        uninstall = UninstallModel(services: services, installed: installed)
         // Updates and Installed come ahead of Discover: their rows carry installed versions. Bundles' rows are
         // built from a file and never looked up from here (see `listRow(for:)`).
         packageSources = [updatesList, installedList, discoverList]
@@ -125,6 +122,7 @@ import BrewxPortRun
         run.onPasswordSheetClosed = { [weak self] in self?.openPendingFile() }
         bundles.connect(self)
         move.connect(self)
+        uninstall.connect(self)
         setup.stageChanged = { [weak self] in self?.setupStageChanged($0) }
         activeObserver = NotificationToken(center: notifications, name: NSApplication.didBecomeActiveNotification) {
             [weak self] in MainActor.assumeIsolated { self?.appBecameActive() }
@@ -310,12 +308,13 @@ import BrewxPortRun
 
     /// The one entry for actions. Install, Update and Uninstall do nothing when this copy can't run anything
     /// (`canRun`), while `run.isRunning` or `preparing` (no dialog, no lookup) or while anything modal is up
-    /// (`modalUp`: the remove confirmation, so the refs it names never change under it, and the password sheet,
+    /// (`modalUp`: the uninstall sheet, so the plan it shows never changes under it, and the password sheet,
     /// open panel, export review and save panel, so nothing starts behind them). Ignore, Skip, Show details and
     /// Copy name don't start a run and always work.
     ///
     /// On Bundles, Install builds its requests from the preview (`BundlesModel.install`), and Update and Uninstall do
-    /// nothing. Move to starts the move check for one row (`MoveModel.start`) under the same conditions as Install.
+    /// nothing. Uninstall opens the uninstall sheet for the rows the lists know (`UninstallModel.start`). Move to starts
+    /// the move check for one row (`MoveModel.start`). Both under the same conditions as Install.
     public func perform(_ action: RowAction, on refs: Set<PackageRef>) {
         switch action {
         case .install where currentView == .bundles:
@@ -330,7 +329,7 @@ import BrewxPortRun
             guard canRun, !busy, !modalUp else { return }
             let known = refs.filter { row(for: $0) != nil }
             guard !known.isEmpty else { return }
-            pendingUninstall = known
+            uninstall.start(known)
         case .moveTo(let target):
             guard canRun, !busy, !modalUp, refs.count == 1, let ref = refs.first, let row = row(for: ref) else { return }
             move.start(row.package, to: target)
@@ -394,7 +393,7 @@ import BrewxPortRun
         perform(.update, on: Set(requests.map(\.package.id)))
     }
 
-    /// The toolbar's "Remove N" in Installed: the checked rows on screen, after the confirmation.
+    /// The toolbar's "Remove N" in Installed: the checked rows on screen, through the uninstall sheet.
     public var canRemoveChecked: Bool {
         canRun && !busy && !installed.checkedRefs.isEmpty
     }
@@ -403,7 +402,7 @@ import BrewxPortRun
         perform(.uninstall, on: installed.checkedRefs)
     }
 
-    /// Delete in Installed: the selected rows on screen, after the confirmation.
+    /// Delete in Installed: the selected rows on screen, through the uninstall sheet.
     public func removeSelected() {
         let list = installed.list
         perform(.uninstall, on: list.onScreen(list.selection.selected))
@@ -626,38 +625,10 @@ import BrewxPortRun
         perform(.update, on: [row.id])
     }
 
-    /// The confirmation's title, naming what goes: "Remove figlet (nanobrew)?", "Remove jq (Homebrew) and wget
-    /// (Homebrew)?", or the first five in name order and "and 3 more".
-    public var uninstallTitle: String {
-        let names = (pendingUninstall ?? []).map { ref in
-            (name: row(for: ref)?.name ?? ref.name, engine: ref.engine.displayName)
-        }
-        .sorted { a, b in
-            let order = a.name.localizedStandardCompare(b.name)
-            return order == .orderedSame ? a.engine < b.engine : order == .orderedAscending
-        }
-        .map { "\($0.name) (\($0.engine))" }
-        guard let last = names.last else { return "Remove?" }
-        if names.count == 1 { return "Remove \(last)?" }
-        if names.count <= 5 { return "Remove \(names.dropLast().joined(separator: ", ")) and \(last)?" }
-        return "Remove \(names.prefix(5).joined(separator: ", ")) and \(names.count - 5) more?"
-    }
-
-    public func confirmUninstall() {
-        guard let refs = pendingUninstall else { return }
-        pendingUninstall = nil
-        guard !busy else { return }
-        startChange(.remove, on: refs)
-    }
-
-    public func cancelUninstall() {
-        pendingUninstall = nil
-    }
-
     /// A run is going, or nanobrew cask routes are being looked up before one.
     var busy: Bool { run.isRunning || preparing }
 
-    /// Something modal is up: the password sheet, the remove confirmation, the open panel, the export review sheet,
+    /// Something modal is up: the password sheet, the uninstall sheet, the open panel, the export review sheet,
     /// the save panel or the move sheet. The menu's Open Bundle, exports and package items are off meanwhile, and a
     /// file the Finder opens waits until it's gone (`openFromFinder`). The move sheet's own Move button doesn't check
     /// this (`MoveModel.confirm`), and the sheet is gone once the move runs.
@@ -666,9 +637,9 @@ import BrewxPortRun
             || exportToSave != nil || move.sheetShown
     }
 
-    /// True while the remove confirmation is up. The menu's Find, Refresh and package items are off then, and
-    /// nothing else can start a run or replace the refs the confirmation names.
-    public var confirmingRemoval: Bool { pendingUninstall != nil }
+    /// True while the uninstall sheet is up (checking or showing its plan). The menu's Find, Refresh and package items
+    /// are off then, and nothing else can start a run or replace the packages the sheet names.
+    public var confirmingRemoval: Bool { uninstall.sheetShown }
 
     /// Discover, Updates, Installed and the inspector: requests from the rows the lists know.
     private func startChange(_ operation: PackageOperation, on refs: Set<PackageRef>,
@@ -685,7 +656,7 @@ import BrewxPortRun
 
     /// The one way a run starts from a page: nanobrew cask installs get their routes looked up first (`preparing`),
     /// then the plan runs. Does nothing when this copy can't run anything, while a run or a lookup is going, or while
-    /// the remove confirmation is up (a confirmed uninstall clears it before calling this).
+    /// anything modal is up.
     public func installRequests(_ requests: [ActionRequest]) {
         guard canRun, !busy, !modalUp, !requests.isEmpty else { return }
         let casks = requests.filter { $0.operation == .install }.map(\.package.id)
@@ -768,6 +739,16 @@ import BrewxPortRun
         }
     }
 
+    // MARK: Uninstall
+
+    /// `UninstallModel.confirm`'s way into the one run path. The run's end reloads Installed like every other run.
+    /// False when nothing started.
+    func startUninstall(_ plan: ActionPlan) -> Bool {
+        guard canRun, !busy else { return false }
+        requestedUpgrades = []
+        return start(plan)
+    }
+
     // MARK: Move to
 
     /// `MoveModel.confirm`'s way into the one run path, with `missingOnTarget` answering the check step. The run's end
@@ -814,9 +795,13 @@ import BrewxPortRun
         reloadListsNow()
     }
 
+    /// How the lists wait before their one retry after Homebrew's lock. Tests replace it.
+    @ObservationIgnored var listLockRetrySleep: @Sendable (Duration) async -> Void = { try? await Task.sleep(for: $0) }
+
     private func runEnded() {
         setup.runEnded()
         reloadListsNow()
+        retryListsAfterHomebrewLock()
         if recheckEnginesAfterRun {
             recheckEnginesAfterRun = false
             checkEnginesAgain()
@@ -844,6 +829,27 @@ import BrewxPortRun
             guard !names.isEmpty else { return }
             self.run.addProblem("Still out of date after the update: \(names.joined(separator: ", ")).", run: runNumber)
         }
+    }
+
+    /// Right after an install, Homebrew's own post-install can still hold its lock, and the reload that follows the
+    /// run fails with "already locked". When either list did, wait 2 seconds and reload once more (unless another
+    /// run started meanwhile; its end reloads them anyway). Only once: a lock that stays is shown as it is.
+    private func retryListsAfterHomebrewLock() {
+        Task { [weak self] in
+            guard let self else { return }
+            await self.updates.list.settled()
+            await self.installed.list.settled()
+            guard [self.updates.list, self.installed.list].contains(where: Self.hitHomebrewLock) else { return }
+            await self.listLockRetrySleep(.seconds(2))
+            guard !self.run.isRunning else { return }
+            self.reloadListsNow()
+        }
+    }
+
+    private static func hitHomebrewLock(_ list: PackageListState) -> Bool {
+        let name = EngineID.homebrew.displayName
+        return list.failedEngines.contains(.homebrew)
+            && list.errors.contains { $0.hasPrefix(name) && $0.contains("already locked") }
     }
 
     private func reloadListsNow() {

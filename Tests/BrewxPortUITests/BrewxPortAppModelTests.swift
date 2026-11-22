@@ -127,7 +127,7 @@ import BrewxPortRun
         for action in [RowAction.install, .update, .uninstall] {
             model.perform(action, on: [wget])
         }
-        #expect(model.pendingUninstall == nil)
+        #expect(model.uninstall.state == .hidden)
         #expect(!model.preparing)
         #expect(!model.run.isRunning)
         #expect(!model.run.panelVisible)
@@ -179,20 +179,19 @@ import BrewxPortRun
                             F.package(.homebrew, .formula, "jq", installed: "1")], in: model)
 
         model.perform(.uninstall, on: [F.wget, F.jq])
-        #expect(model.pendingUninstall == [F.wget, F.jq])
-        #expect(model.uninstallTitle == "Remove jq (Homebrew) and wget (Homebrew)?")
+        #expect(await Self.uninstallPicks(model) == ["jq", "wget"])
         try? await Task.sleep(for: .milliseconds(50))
         #expect(executor.runs.isEmpty)
         #expect(!model.run.isRunning)
 
-        model.cancelUninstall()
-        #expect(model.pendingUninstall == nil)
+        model.uninstall.cancel()
+        #expect(model.uninstall.state == .hidden)
         #expect(executor.runs.isEmpty)
 
         model.perform(.uninstall, on: [F.wget])
-        #expect(model.uninstallTitle == "Remove wget (Homebrew)?")
-        model.confirmUninstall()
-        #expect(model.pendingUninstall == nil)
+        #expect(await Self.uninstallPicks(model) == ["wget"])
+        model.uninstall.confirm()
+        #expect(!model.uninstall.sheetShown)
         #expect(await waitUntil { executor.runs.count == 1 })
         #expect(executor.runs[0].steps.map(\.operation) == [.remove])
         #expect(executor.runs[0].steps[0].spec.arguments.contains("wget"))
@@ -210,7 +209,7 @@ import BrewxPortRun
         #expect(await waitUntil { model.run.isRunning && executor.runs.count == 1 })
 
         model.perform(.uninstall, on: [F.jq])
-        #expect(model.pendingUninstall == nil)
+        #expect(model.uninstall.state == .hidden)
         model.perform(.install, on: [F.firefox])
         #expect(!model.preparing)
         try? await Task.sleep(for: .milliseconds(50))
@@ -774,13 +773,14 @@ import BrewxPortRun
         #expect(executor.runs.count == 1)
         model.run.cancel()
         #expect(await waitUntil { !model.run.isRunning })
-        // ...or while the remove confirmation is up, which a confirmed uninstall clears before it starts.
+        // ...or while the uninstall sheet is up, which a confirmed uninstall closes before it starts.
         model.perform(.uninstall, on: [tree])
         #expect(model.confirmingRemoval)
         model.installRequests([request])
         try? await Task.sleep(for: .milliseconds(50))
         #expect(executor.runs.count == 1)
-        model.confirmUninstall()
+        #expect(await Self.uninstallPicks(model) == ["tree"])
+        model.uninstall.confirm()
         #expect(await waitUntil { executor.runs.count == 2 })
         #expect(executor.runs[1].steps.map(\.operation) == [.remove])
         model.run.cancel()
@@ -800,7 +800,7 @@ import BrewxPortRun
         model.perform(.uninstall, on: [F.jq])
         #expect(model.confirmingRemoval)
         #expect(!model.canInstallChecked)
-        model.cancelUninstall()
+        model.uninstall.cancel()
         #expect(model.canInstallChecked)
     }
 
@@ -826,6 +826,70 @@ import BrewxPortRun
         #expect(await waitUntil { !model.run.isRunning && model.listReloadCount == 1 })
         try? await Task.sleep(for: .milliseconds(50))
         #expect(model.listReloadCount == 1)
+    }
+
+    /// What `brew outdated` gives right after an install while Homebrew's own post-install still holds its lock.
+    static let homebrewLocked = EngineError(engine: .homebrew,
+                                            message: "brew outdated failed (exit 1): lockf: 200: already locked")
+
+    final class Sleeps: @unchecked Sendable {
+        private let lock = NSLock()
+        private var _all: [Duration] = []
+        var all: [Duration] { lock.withLock { _all } }
+        func add(_ duration: Duration) { lock.withLock { _all.append(duration) } }
+    }
+
+    /// A model whose Updates answers with Homebrew's lock error, after an install run that ended.
+    func lockedAfterARun(sleep: @escaping @Sendable (FakeCatalog, Duration) async -> Void) async
+        -> (BrewxPortAppModel, FakeCatalog) {
+        let catalog = FakeCatalog()
+        let executor = FakeRunExecutor(events: [.started(0), .finished(0, 0), .done])
+        let model = BrewxPortAppModel(services: F.services(catalog: catalog, executor: executor))
+        catalog.script(.outdated, .homebrew, FakeCatalog.Script(result: .failure(Self.homebrewLocked)))
+        model.listLockRetrySleep = { await sleep(catalog, $0) }
+        _ = await F.source([F.package(.homebrew, .formula, "wget")], in: model)
+        model.perform(.install, on: [F.wget])
+        return (model, catalog)
+    }
+
+    @Test func homebrewLockRightAfterARunRetriesTheListsOnceAfterTwoSeconds() async {
+        let sleeps = Sleeps()
+        let (model, _) = await lockedAfterARun { catalog, duration in
+            sleeps.add(duration)
+            // Homebrew's post-install lets go of the lock meanwhile.
+            catalog.script(.outdated, .homebrew, packages: [])
+        }
+        #expect(await waitUntil { model.listReloadCount == 2 && !model.updates.list.loading })
+        #expect(sleeps.all == [.seconds(2)])
+        #expect(model.updates.list.errors.isEmpty)
+        try? await Task.sleep(for: .milliseconds(100))
+        #expect(model.listReloadCount == 2)
+    }
+
+    @Test func homebrewLockThatStaysIsRetriedOnlyOnce() async {
+        let sleeps = Sleeps()
+        let (model, _) = await lockedAfterARun { _, duration in sleeps.add(duration) }
+        #expect(await waitUntil { model.listReloadCount == 2 && !model.updates.list.loading })
+        try? await Task.sleep(for: .milliseconds(100))
+        #expect(model.listReloadCount == 2)
+        #expect(sleeps.all == [.seconds(2)])
+        #expect(model.updates.list.errors == ["Homebrew: brew outdated failed (exit 1): lockf: 200: already locked"])
+    }
+
+    @Test func otherHomebrewErrorsAfterARunAreNotRetried() async {
+        let sleeps = Sleeps()
+        let catalog = FakeCatalog()
+        let executor = FakeRunExecutor(events: [.started(0), .finished(0, 0), .done])
+        let model = BrewxPortAppModel(services: F.services(catalog: catalog, executor: executor))
+        catalog.script(.outdated, .homebrew, FakeCatalog.Script(
+            result: .failure(EngineError(engine: .homebrew, message: "brew outdated failed (exit 1): Error: no network"))))
+        model.listLockRetrySleep = { sleeps.add($0) }
+        _ = await F.source([F.package(.homebrew, .formula, "wget")], in: model)
+        model.perform(.install, on: [F.wget])
+        #expect(await waitUntil { model.listReloadCount == 1 && !model.updates.list.loading })
+        try? await Task.sleep(for: .milliseconds(100))
+        #expect(model.listReloadCount == 1)
+        #expect(sleeps.all.isEmpty)
     }
 
     @Test func refreshDuringARunWaitsAndReloadsOnce() async {
@@ -1118,6 +1182,13 @@ import BrewxPortRun
         return ["jq", "wget"].filter(arguments.contains)
     }
 
+    /// The picks' names once the uninstall sheet has its plan, every manager's, in order; nil when there's no plan.
+    static func uninstallPicks(_ model: BrewxPortAppModel) async -> [String]? {
+        _ = await waitUntil { if case .checking = model.uninstall.state { false } else { true } }
+        guard case .ready(let plan) = model.uninstall.state else { return nil }
+        return plan.sections.flatMap(\.picks).map(\.id.name)
+    }
+
     static func outdatedQueries(_ catalog: FakeCatalog) -> Int {
         catalog.queries.filter { $0 == .outdated }.count
     }
@@ -1302,10 +1373,9 @@ import BrewxPortRun
         list.selection.checked = [F.jq]
         // Delete asks first and acts on the highlighted row, not the checked one.
         model.removeSelected()
-        #expect(model.pendingUninstall == [F.wget])
-        #expect(model.uninstallTitle == "Remove wget (Homebrew)?")
+        #expect(await Self.uninstallPicks(model) == ["wget"])
         #expect(executor.runs.isEmpty)
-        model.confirmUninstall()
+        model.uninstall.confirm()
         #expect(await waitUntil { executor.runs.count == 1 && !model.run.isRunning })
         #expect(executor.runs[0].steps.map(\.operation) == [.remove])
         #expect(Self.names(executor.runs[0].steps) == ["wget"])
@@ -1316,24 +1386,9 @@ import BrewxPortRun
         #expect(model.installed.removeTitle == "Remove 1")
         #expect(model.canRemoveChecked)
         model.removeChecked()
-        #expect(model.pendingUninstall == [F.jq])
-        model.cancelUninstall()
+        #expect(await Self.uninstallPicks(model) == ["jq"])
+        model.uninstall.cancel()
         #expect(executor.runs.count == 1)
-    }
-
-    @Test func uninstallTitleNamesUpToFive() async {
-        let model = BrewxPortAppModel(services: F.services())
-        let names = ["g", "b", "a", "f", "c", "e", "d"]
-        _ = await F.source(names.map { F.package(.homebrew, .formula, $0, installed: "1") }
-                           + [F.package(.macports, .port, "a", installed: "1")], in: model)
-        let refs = Set(names.map { PackageRef(engine: .homebrew, kind: .formula, name: $0) })
-        model.perform(.uninstall, on: refs.union([PackageRef(engine: .macports, kind: .port, name: "a")]))
-        #expect(model.uninstallTitle
-                == "Remove a (Homebrew), a (MacPorts), b (Homebrew), c (Homebrew), d (Homebrew) and 3 more?")
-        // A confirmation that's up can't be replaced; the next one comes after it's dismissed.
-        model.cancelUninstall()
-        model.perform(.uninstall, on: [PackageRef(engine: .macports, kind: .port, name: "a"), F.curl])
-        #expect(model.uninstallTitle == "Remove a (MacPorts)?")
     }
 
     @Test func installedRowMenuActsOnInstalledRows() async {
@@ -1343,8 +1398,8 @@ import BrewxPortRun
         await model.installed.settled()
         #expect(model.package(for: F.wget)?.installedVersion == "1")
         model.perform(.uninstall, on: [F.wget])
-        #expect(model.pendingUninstall == [F.wget])
-        model.cancelUninstall()
+        #expect(await Self.uninstallPicks(model) == ["wget"])
+        model.uninstall.cancel()
         model.perform(.showDetails, on: [F.wget])
         #expect(model.details.row?.id == F.wget)
     }
@@ -1444,22 +1499,22 @@ import BrewxPortRun
         model.updates.list.selection.selected = [F.wget]
         #expect(model.canRemoveSelection)
         model.removeSelection()
-        #expect(model.pendingUninstall == [F.wget])
-        model.cancelUninstall()
+        #expect(await Self.uninstallPicks(model) == ["wget"])
+        model.uninstall.cancel()
 
         model.sidebar = .installed
         model.installed.list.selection.selected = [F.jq]
         #expect(model.canRemoveSelection)
         model.removeSelection()
-        #expect(model.pendingUninstall == [F.jq])
-        model.cancelUninstall()
+        #expect(await Self.uninstallPicks(model) == ["jq"])
+        model.uninstall.cancel()
 
         // Discover offers no removal; a selected Discover row is left alone.
         _ = await F.source([F.package(.homebrew, .formula, "curl")], in: model)
         model.sidebar = .discover
         #expect(!model.canRemoveSelection)
         model.removeSelection()
-        #expect(model.pendingUninstall == nil)
+        #expect(model.uninstall.state == .hidden)
     }
 
     @Test func spaceTogglesTheCurrentPagesChecks() async {
@@ -1482,7 +1537,7 @@ import BrewxPortRun
         model.installed.list.selection.selected = [F.jq]
         model.removeSelection()
         #expect(model.confirmingRemoval)
-        let title = model.uninstallTitle
+        #expect(await Self.uninstallPicks(model) == ["jq"])
 
         // With the dialog up, the menu items are off and the keys and row actions do nothing.
         model.installed.list.selection.selected = [F.wget]
@@ -1501,10 +1556,9 @@ import BrewxPortRun
         #expect(executor.runs.isEmpty)
         #expect(model.installed.list.selection.checked.isEmpty)
 
-        // The dialog still names jq, and Remove removes jq.
-        #expect(model.pendingUninstall == [F.jq])
-        #expect(model.uninstallTitle == title)
-        model.confirmUninstall()
+        // The sheet still names jq, and Uninstall removes jq.
+        #expect(await Self.uninstallPicks(model) == ["jq"])
+        model.uninstall.confirm()
         #expect(await waitUntil { executor.runs.count == 1 && !model.run.isRunning })
         #expect(executor.runs[0].steps.map(\.operation) == [.remove])
         #expect(Self.names(executor.runs[0].steps) == ["jq"])

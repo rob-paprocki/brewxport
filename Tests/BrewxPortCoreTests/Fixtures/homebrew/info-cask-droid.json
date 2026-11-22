@@ -1,0 +1,78 @@
+{
+  "formulae": [],
+  "casks": [
+    {
+      "token": "droid",
+      "full_token": "droid",
+      "old_tokens": [],
+      "tap": "homebrew/cask",
+      "name": [
+        "Droid"
+      ],
+      "desc": "AI-powered software engineering agent by Factory",
+      "homepage": "https://docs.factory.ai/cli/getting-started/overview",
+      "url": "https://downloads.factory.ai/factory-cli/releases/1.12.1/darwin/arm64/droid",
+      "url_specs": {},
+      "version": "1.12.1",
+      "autobump": true,
+      "no_autobump_message": null,
+      "skip_livecheck": false,
+      "installed": "1.12.1",
+      "installed_time": 1795374987,
+      "bundle_version": null,
+      "bundle_short_version": null,
+      "pinned": false,
+      "pinned_version": null,
+      "outdated": false,
+      "sha256": "87b28b77b0bfba75e63102091d4e8795f3bccc7f6cf90262dc1df1319dd5b60d",
+      "artifacts": [
+        {
+          "binary": [
+            "droid"
+          ],
+          "target": "/opt/homebrew/bin/droid"
+        },
+        {
+          "zap": [
+            {
+              "trash": [
+                "~/.factory",
+                "~/.local/bin/droid"
+              ]
+            }
+          ]
+        }
+      ],
+      "caveats": null,
+      "caveats_rosetta": null,
+      "depends_on": {
+        "formula": [
+          "ripgrep"
+        ],
+        "macos": {}
+      },
+      "conflicts_with": null,
+      "container": null,
+      "rename": [],
+      "auto_updates": true,
+      "deprecated": false,
+      "deprecation_date": null,
+      "deprecation_reason": null,
+      "deprecation_replacement_formula": null,
+      "deprecation_replacement_cask": null,
+      "deprecate_args": null,
+      "disabled": false,
+      "disable_date": null,
+      "disable_reason": null,
+      "disable_replacement_formula": null,
+      "disable_replacement_cask": null,
+      "disable_args": null,
+      "tap_git_head": "e08c9e1492e2e32841fea5f53d96d342ea21d82d",
+      "languages": [],
+      "ruby_source_path": "Casks/d/droid.rb",
+      "ruby_source_checksum": {
+        "sha256": "d626ab7e19b3e7929f78456e7388ff0aa130f4ead5104896143bd9ad9f238ad5"
+      }
+    }
+  ]
+}

@@ -64,23 +64,39 @@ import BrewxPortCore
         #expect(x86.name == "nb-x86_64-apple-darwin.tar.gz")
     }
 
-    @Test func foreignHostRejected() throws {
+    @Test func offListHostDropsOnlyThatAsset() throws {
+        let text = try Self.fixtureText("nanobrew")
+        let full = try GitHubRelease.decode(Data(text.utf8))
+        let changed = text.replacingOccurrences(
+            of: "\"https://github.com/justrach/nanobrew/releases/download/v0.1.216/nb-x86_64-linux.tar.gz\"",
+            with: "\"https://example.com/justrach/nanobrew/releases/download/v0.1.216/nb-x86_64-linux.tar.gz\"")
+        #expect(changed != text)
+        let release = try GitHubRelease.decode(Data(changed.utf8))
+        #expect(release.assets.map(\.name) == full.assets.map(\.name).filter { $0 != "nb-x86_64-linux.tar.gz" })
+        #expect(try GitHubRelease.asset(for: .nanobrew, in: release, host: apple).name == "nb-arm64-apple-darwin.tar.gz")
+    }
+
+    @Test func offListHostOnTheNeededAssetFailsClosed() throws {
         let text = try Self.fixtureText("homebrew")
         let changed = text.replacingOccurrences(of: "https://github.com/Homebrew/brew/releases/download/7.0.15/Homebrew.pkg",
                                                 with: "https://example.com/Homebrew/brew/releases/download/7.0.15/Homebrew.pkg")
         #expect(changed != text)
-        #expect(throws: (any Error).self) {
-            try GitHubRelease.decode(Data(changed.utf8))
+        let release = try GitHubRelease.decode(Data(changed.utf8))
+        #expect(release.assets.isEmpty)
+        #expect(throws: SetupError.noAsset("The Homebrew release has no installer package")) {
+            try GitHubRelease.asset(for: .homebrew, in: release, host: apple)
         }
     }
 
-    @Test func plainHttpRejected() throws {
+    @Test func plainHttpAssetDropped() throws {
         let text = try Self.fixtureText("homebrew")
         let changed = text.replacingOccurrences(of: "\"https://github.com/Homebrew/brew/releases/download",
                                                 with: "\"http://github.com/Homebrew/brew/releases/download")
         #expect(changed != text)
-        #expect(throws: (any Error).self) {
-            try GitHubRelease.decode(Data(changed.utf8))
+        let release = try GitHubRelease.decode(Data(changed.utf8))
+        #expect(release.assets.isEmpty)
+        #expect(throws: SetupError.noAsset("The Homebrew release has no installer package")) {
+            try GitHubRelease.asset(for: .homebrew, in: release, host: apple)
         }
     }
 

@@ -2,6 +2,9 @@ import Foundation
 
 /// Finds engine executables at fixed paths. GUI apps don't inherit the shell PATH.
 public struct EngineLocator: Sendable {
+    /// Where BrewxPort sets nanobrew up, and the first place it looks for it.
+    public static let nanobrewPath = "/opt/nanobrew/prefix/bin/nb"
+
     private let isExecutable: @Sendable (String) -> Bool
     private let overrides: [EngineID: String]
 
@@ -18,7 +21,7 @@ public struct EngineLocator: Sendable {
         switch id {
         case .homebrew: return prefixes.map { $0 + "/brew" }
         case .mas: return prefixes.map { $0 + "/mas" }
-        case .nanobrew: return ["/opt/nanobrew/prefix/bin/nb", "/opt/nb/bin/nb"]
+        case .nanobrew: return [Self.nanobrewPath, "/opt/nb/bin/nb"]
         case .macports: return ["/opt/local/bin/port"]
         }
     }

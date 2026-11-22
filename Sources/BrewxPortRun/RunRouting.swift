@@ -19,6 +19,12 @@ public struct RunStep: Sendable, Equatable {
     /// True when the step runs only if every earlier step started and finished with exit code 0 (a removal in a
     /// move). A skipped step counts as not succeeded. The preflight drops it whenever it drops any earlier step.
     public let requiresAllEarlier: Bool
+    /// Narrows `requiresAllEarlier` to the earlier steps with the same group: the step runs only if every earlier step
+    /// in its group started and finished with 0, and steps in other groups (or in none) don't count. An uninstall puts
+    /// each package manager's removals in a group of their own, so one manager's failure stops only its own later
+    /// removals. nil keeps the whole-run meaning. Without `requiresAllEarlier` it gates nothing, but a failed or
+    /// skipped step still counts against its group.
+    public let gateGroup: String?
     /// Set on a check step: it launches nothing (`spec` is never run) and asks the run's verifier whether these
     /// packages are installed. It finishes with 0 when none is missing, 1 otherwise. It always runs as the user.
     public let verifyInstalled: [PackageRef]?
@@ -27,16 +33,17 @@ public struct RunStep: Sendable, Equatable {
     /// install or removal doesn't stop it, and no other step waits on it.
     public let requiresPassedCheck: Bool
     /// Added to the runner's base environment when the step runs as the user (`.user` or `.userWithAskpass`). Never
-    /// passed to a step that runs through sudo or the helper. A move sets `HOMEBREW_NO_AUTOREMOVE` on its Homebrew
-    /// removals here.
+    /// passed to a step that runs through sudo or the helper. A move or an uninstall sets `HOMEBREW_NO_AUTOREMOVE` on
+    /// its Homebrew removals here.
     public let userEnvironment: [String: String]
 
     public init(engine: EngineID, kind: PackageKind = .formula, operation: PackageOperation,
                 spec: CommandSpec, title: String, setupTarget: SetupTarget? = nil, dependsOnPrevious: Bool = false,
                 requiresAllEarlier: Bool = false, verifyInstalled: [PackageRef]? = nil,
-                requiresPassedCheck: Bool = false, userEnvironment: [String: String] = [:]) {
+                requiresPassedCheck: Bool = false, userEnvironment: [String: String] = [:], gateGroup: String? = nil) {
         self.dependsOnPrevious = dependsOnPrevious
         self.requiresAllEarlier = requiresAllEarlier
+        self.gateGroup = gateGroup
         self.verifyInstalled = verifyInstalled
         self.requiresPassedCheck = requiresPassedCheck
         self.userEnvironment = userEnvironment
@@ -88,7 +95,7 @@ public enum RunRouting {
         case .homebrew: step.kind == .cask ? .userWithAskpass : .user
         case .nanobrew:
             step.spec.needsRoot && step.spec.arguments == ["init"]
-                && step.spec.executable.path == "/opt/nanobrew/prefix/bin/nb" ? .sudoAskpass : .user
+                && step.spec.executable.path == EngineLocator.nanobrewPath ? .sudoAskpass : .user
         }
     }
 }

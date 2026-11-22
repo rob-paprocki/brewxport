@@ -23,6 +23,12 @@ import Foundation
         #expect(l.candidates(for: .nanobrew, arch: .x86_64) == ["/opt/nanobrew/prefix/bin/nb", "/opt/nb/bin/nb"])
     }
 
+    /// The one place the path BrewxPort sets nanobrew up at is spelled; setup, routing and the locator all use it.
+    @Test func nanobrewSetupPath() {
+        #expect(EngineLocator.nanobrewPath == "/opt/nanobrew/prefix/bin/nb")
+        #expect(EngineLocator().candidates(for: .nanobrew, arch: .arm64).first == EngineLocator.nanobrewPath)
+    }
+
     @Test func macportsPath() {
         #expect(EngineLocator().candidates(for: .macports, arch: .arm64) == ["/opt/local/bin/port"])
         #expect(EngineLocator().candidates(for: .macports, arch: .x86_64) == ["/opt/local/bin/port"])

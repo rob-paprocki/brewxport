@@ -420,7 +420,7 @@ import BrewxPortCore
         #expect(!model.canRemoveSelection)
         model.sidebar = .installed
         model.removeSelection()
-        #expect(model.pendingUninstall == nil)
+        #expect(model.uninstall.state == .hidden)
     }
 
     @Test func finderOpenWaitsForTheRemoveConfirmation() async throws {
@@ -437,7 +437,7 @@ import BrewxPortCore
         #expect(model.sidebar == .installed)
         #expect(model.bundles.state == .empty)
         #expect(model.pendingOpenURL == url)
-        model.cancelUninstall()
+        model.uninstall.cancel()
         #expect(model.pendingOpenURL == nil)
         #expect(model.sidebar == .bundles)
         #expect(await waitUntil { model.bundles.state.name == "dump-basic.Brewfile" })

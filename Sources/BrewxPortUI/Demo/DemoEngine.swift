@@ -147,10 +147,18 @@ public final class DemoEngine: Engine, TapListing, DependentsListing {
         return await inventory.installedTaps()
     }
 
-    /// Forwards to the real engine's parser on the demo's captured output; `[]` for an engine that can't list dependents.
+    /// From the inventory: the installed packages whose captured details list `name` as a dependency (ignoring case).
+    /// A package without captured details counts as needing nothing. `[]` for an engine that can't list dependents.
+    /// The demo has no captured dependents output, so asking the real engine would fail every uninstall's check.
     public func installedDependents(of name: String) async throws -> Set<String> {
-        guard let listing = wrapped as? any DependentsListing else { return [] }
-        return try await listing.installedDependents(of: name)
+        guard wrapped is any DependentsListing else { return [] }
+        let target = name.lowercased()
+        var found: Set<String> = []
+        for package in await inventory.installed(id) {
+            let needs = (try? await wrapped.info(package.id))?.dependencies ?? []
+            if needs.contains(where: { $0.lowercased() == target }) { found.insert(package.id.name) }
+        }
+        return found
     }
 
     /// The captured details when there are some, otherwise the row's own fields. The installed version always

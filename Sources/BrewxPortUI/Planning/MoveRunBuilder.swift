@@ -127,7 +127,7 @@ public enum MoveRunBuilder {
     /// down). Ties go by name; a dependency cycle (which shouldn't exist) is appended by name. Packages are kept apart
     /// by name and kind, so a formula and a cask of the same name are both removed; the "who uses X" relation is by
     /// name only, so both get the same users.
-    private static func dependentsFirst(_ packages: [Package], dependents: [String: Set<String>]) -> [Package] {
+    static func dependentsFirst(_ packages: [Package], dependents: [String: Set<String>]) -> [Package] {
         struct Key: Hashable, Comparable {
             let name: String
             let kind: String

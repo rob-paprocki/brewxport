@@ -24,12 +24,22 @@ final class SetupWorld: @unchecked Sendable {
     var softwareUpdateCode: Int32 = 0
     /// A file the (fake) installer also puts down, such as Homebrew's /etc/paths.d entry.
     var installerAlsoCreates: String?
+    /// The requester's home as the runner sees it, and the startup files in it (name to text) the fake reader serves.
+    var home = "/Users/alice"
+    var homeFiles: [String: String] = [:]
+    /// Entries in /etc/paths.d (file name to text) the fake reader serves.
+    var pathsD: [String: String] = [:]
+    /// Use the runner's real file reader against `home` on disk instead of `homeFiles`.
+    var useRealStartupReader = false
     var nanobrewDir: PathInfo = .missing
-    var optDir: PathInfo = .directory(owner: 0)
+    var optDir: PathInfo = .directory(owner: 0, mode: 0o755)
     var pkgutilCode: Int32 = 0
     var spctlCode: Int32?
     var failCommand: String?
     var rmdirSucceeds = true
+    /// A path whose mkdir(2) or give fails.
+    var failMake: String?
+    var failGive: String?
     /// Text served for `*.sha256` downloads; nil serves "<payload sha>  <name>".
     var sidecarText: String?
 
@@ -123,12 +133,16 @@ final class SetupWorld: @unchecked Sendable {
                 }
             },
             makeDirectory: { path in
-                self.lock.withLock { self.calls.append(["mkdir(2)", path]) }
-                return true
+                self.lock.withLock {
+                    self.calls.append(["mkdir(2)", path])
+                    return path != self.failMake
+                }
             },
             giveDirectory: { path, uid in
-                self.lock.withLock { self.calls.append(["give", path, "\(uid)"]) }
-                return true
+                self.lock.withLock {
+                    self.calls.append(["give", path, "\(uid)"])
+                    return path != self.failGive
+                }
             },
             removeDirectory: { path in
                 self.lock.withLock {
@@ -138,6 +152,12 @@ final class SetupWorld: @unchecked Sendable {
             },
             host: host,
             downloads: downloads,
+            homeDirectory: { _ in self.home },
+            readStartupFile: { home, name in
+                if self.useRealStartupReader { return EngineSetupRunner.readStartupFile(home: home, name: name) }
+                return self.lock.withLock { self.homeFiles[name] }
+            },
+            readPathsD: { self.lock.withLock { self.pathsD.sorted { $0.key < $1.key }.map { ($0.key, $0.value) } } },
             homebrewPlistPath: plistPath,
             cltPlaceholderPath: placeholderPath)
     }
@@ -320,7 +340,7 @@ final class SetupWorld: @unchecked Sendable {
         world.downloadError = URLError(.networkConnectionLost)
         let error = await Self.outcome(world, .macports)
         guard case .network(let text) = error else { Issue.record("expected network, got \(String(describing: error))"); return }
-        #expect(text.hasPrefix("BrewxPort couldn't reach GitHub to download MacPorts: "))
+        #expect(text == "BrewxPort couldn't reach GitHub to download MacPorts: the connection dropped.")
         #expect(world.calls.isEmpty)
         #expect(world.leftovers.isEmpty)
     }
@@ -349,9 +369,50 @@ final class SetupWorld: @unchecked Sendable {
         world.fetchError = URLError(.notConnectedToInternet)
         let error = await Self.outcome(world, .homebrew)
         guard case .network(let text) = error else { Issue.record("expected network, got \(String(describing: error))"); return }
-        #expect(text.hasPrefix("BrewxPort couldn't reach GitHub to download Homebrew: "))
-        #expect(!text.contains("\n"))
+        #expect(text == "BrewxPort couldn't reach GitHub to download Homebrew: no internet connection.")
         #expect(world.calls.isEmpty)
+    }
+
+    static let urlErrorWords: [(URLError.Code, String)] = [
+        (.notConnectedToInternet, "BrewxPort couldn't reach GitHub to download nanobrew: no internet connection."),
+        (.timedOut, "BrewxPort couldn't reach GitHub to download nanobrew: the connection timed out."),
+        (.cannotFindHost, "BrewxPort couldn't reach GitHub to download nanobrew: couldn't find the server."),
+        (.dnsLookupFailed, "BrewxPort couldn't reach GitHub to download nanobrew: couldn't find the server."),
+        (.networkConnectionLost, "BrewxPort couldn't reach GitHub to download nanobrew: the connection dropped."),
+        (.badURL, "BrewxPort couldn't reach GitHub to download nanobrew."),
+        (.secureConnectionFailed, "BrewxPort couldn't reach GitHub to download nanobrew."),
+    ]
+
+    @Test(arguments: urlErrorWords.indices) func urlErrorsInPlainWords(index: Int) {
+        let (code, sentence) = Self.urlErrorWords[index]
+        #expect(EngineSetupRunner.networkError(URLError(code), name: "nanobrew") == .network(sentence))
+    }
+
+    @Test func cancelledURLErrorIsStillADisconnect() {
+        #expect(EngineSetupRunner.networkError(URLError(.cancelled), name: "nanobrew")
+                == .installFailed("The setup stopped because BrewxPort disconnected. Nothing was installed."))
+    }
+
+    @Test func installerOnAnOffListHostIsNoAsset() async throws {
+        let world = try SetupWorld()
+        world.releaseJSON[.homebrew] = world.releaseJSON[.homebrew]!.replacingOccurrences(
+            of: "https://github.com/Homebrew/", with: "https://example.com/Homebrew/")
+        let error = await Self.outcome(world, .homebrew)
+        #expect(error == .noAsset("The Homebrew release has no installer package"))
+        #expect(world.downloadLimits.isEmpty)
+        #expect(world.calls.isEmpty)
+    }
+
+    @Test func nanobrewChecksumFileOnAnOffListHostFailsClosed() async throws {
+        let world = try SetupWorld()
+        world.releaseJSON[.nanobrew] = world.releaseJSON[.nanobrew]!.replacingOccurrences(
+            of: "\"https://github.com/justrach/nanobrew/releases/download/v0.1.216/nb-arm64-apple-darwin.tar.gz.sha256\"",
+            with: "\"https://example.com/nb-arm64-apple-darwin.tar.gz.sha256\"")
+        let error = await Self.outcome(world, .nanobrew)
+        #expect(error == .verification("The nanobrew release has no checksum file for its download, so nothing was installed."))
+        #expect(world.downloadLimits["nb-arm64-apple-darwin.tar.gz.sha256"] == nil)
+        #expect(world.calls.isEmpty)
+        #expect(world.leftovers.isEmpty)
     }
 
     @Test(arguments: [403, 429]) func rateLimited(status: Int) async throws {
@@ -414,7 +475,7 @@ final class SetupWorld: @unchecked Sendable {
 
     @Test func nanobrewRequesterTreeTouchedOnlyAsRequester() async throws {
         let world = try SetupWorld()
-        world.nanobrewDir = .directory(owner: 502)
+        world.nanobrewDir = .directory(owner: 502, mode: 0o755)
         let error = await Self.outcome(world, .nanobrew)
         #expect(error == nil)
         let calls = world.calls
@@ -424,7 +485,7 @@ final class SetupWorld: @unchecked Sendable {
         for call in calls { #expect(Array(call.prefix(3)) == ["/usr/bin/sudo", "-u", "#502"], "\(call)") }
     }
 
-    @Test(arguments: [PathInfo.directory(owner: 0), .directory(owner: 777), .symlink, .file(owner: 502, mode: 0o644)])
+    @Test(arguments: [PathInfo.directory(owner: 0, mode: 0o755), .directory(owner: 777, mode: 0o755), .symlink, .file(owner: 502, mode: 0o644)])
     func nanobrewFolderNotTheRequestersRefused(existing: PathInfo) async throws {
         let world = try SetupWorld()
         world.nanobrewDir = existing
@@ -460,9 +521,71 @@ final class SetupWorld: @unchecked Sendable {
         #expect(world.logs.contains { $0.hasPrefix("BrewxPort left /opt/nanobrew/prefix/bin, /opt/nanobrew/prefix, /opt/nanobrew in place") })
     }
 
+    static let asUser = ["/usr/bin/sudo", "-u", "#502", "/bin/rmdir"]
+
+    /// Each way the folder preparation can fail, with the cleanup expected after it (`/opt` missing, so root created
+    /// it too). Root removes with rmdir(2) wherever the parent is still root's; a folder whose parent was already
+    /// handed over is removed as the requester. Either way no root-owned /opt/nanobrew is left behind.
+    static let preparationFailures: [(failMake: String?, failGive: String?, cleanup: [[String]])] = [
+        ("/opt/nanobrew", nil, [["rmdir(2)", "/opt"]]),
+        ("/opt/nanobrew/prefix", nil, [["rmdir(2)", "/opt/nanobrew"], ["rmdir(2)", "/opt"]]),
+        ("/opt/nanobrew/prefix/bin", nil,
+         [["rmdir(2)", "/opt/nanobrew/prefix"], ["rmdir(2)", "/opt/nanobrew"], ["rmdir(2)", "/opt"]]),
+        (nil, "/opt/nanobrew/prefix/bin",
+         [["rmdir(2)", "/opt/nanobrew/prefix/bin"], ["rmdir(2)", "/opt/nanobrew/prefix"], ["rmdir(2)", "/opt/nanobrew"],
+          ["rmdir(2)", "/opt"]]),
+        (nil, "/opt/nanobrew/prefix",
+         [["rmdir(2)", "/opt/nanobrew/prefix/bin"], ["rmdir(2)", "/opt/nanobrew/prefix"], ["rmdir(2)", "/opt/nanobrew"],
+          ["rmdir(2)", "/opt"]]),
+        (nil, "/opt/nanobrew",
+         [asUser + ["/opt/nanobrew/prefix/bin"], ["rmdir(2)", "/opt/nanobrew/prefix"], ["rmdir(2)", "/opt/nanobrew"],
+          ["rmdir(2)", "/opt"]]),
+    ]
+
+    @Test(arguments: preparationFailures.indices)
+    func nanobrewPreparationFailureRemovesWhatRootStillHolds(index: Int) async throws {
+        let (failMake, failGive, cleanup) = Self.preparationFailures[index]
+        let world = try SetupWorld()
+        world.optDir = .missing
+        world.failMake = failMake
+        world.failGive = failGive
+        let error = await Self.outcome(world, .nanobrew)
+        guard case .installFailed = error else { Issue.record("expected installFailed, got \(String(describing: error))"); return }
+        let calls = world.calls
+        let failedAt = try #require(calls.lastIndex {
+            $0 == ["mkdir(2)", failMake ?? ""] || $0 == ["give", failGive ?? "", "502"]
+        })
+        #expect(Array(calls[(failedAt + 1)...]) == cleanup)
+        #expect(!world.logs.contains { $0.contains("left") })
+    }
+
+    @Test func nanobrewPreparationFailureNeverRemovesAnExistingOpt() async throws {
+        let world = try SetupWorld()
+        world.failMake = "/opt/nanobrew/prefix/bin"
+        _ = await Self.outcome(world, .nanobrew)
+        #expect(Array(world.calls.suffix(2)) == [["rmdir(2)", "/opt/nanobrew/prefix"], ["rmdir(2)", "/opt/nanobrew"]])
+        #expect(!world.calls.contains(["rmdir(2)", "/opt"]))
+    }
+
+    @Test(arguments: [mode_t(0o775), 0o757, 0o1777, 0o777])
+    func nanobrewRefusesAnOptOthersCanWriteTo(mode: mode_t) async throws {
+        let world = try SetupWorld()
+        world.optDir = .directory(owner: 0, mode: mode)
+        let error = await Self.outcome(world, .nanobrew)
+        #expect(error == .installFailed("/opt is writable by other users, so BrewxPort won't set up nanobrew there."))
+        #expect(world.calls.isEmpty)
+    }
+
+    @Test(arguments: [mode_t(0o755), 0o700, 0o1755])
+    func nanobrewAcceptsAnOptOnlyRootCanWriteTo(mode: mode_t) async throws {
+        let world = try SetupWorld()
+        world.optDir = .directory(owner: 0, mode: mode)
+        #expect(await Self.outcome(world, .nanobrew) == nil)
+    }
+
     @Test func nanobrewRequesterTreeNotRemovedOnFailure() async throws {
         let world = try SetupWorld()
-        world.nanobrewDir = .directory(owner: 502)
+        world.nanobrewDir = .directory(owner: 502, mode: 0o755)
         world.failCommand = "/usr/bin/tar"
         _ = await Self.outcome(world, .nanobrew)
         #expect(!world.calls.contains { $0.contains("/bin/rmdir") || $0[0] == "rmdir(2)" })
@@ -619,11 +742,22 @@ final class SetupWorld: @unchecked Sendable {
     // MARK: Administrators only
 
     @Test func setupNeedsAnAdministrator() {
-        #expect(AdminMembership.setupRefusal(uid: 502, isAdmin: { $0 == 502 ? true : false }) == nil)
-        #expect(AdminMembership.setupRefusal(uid: 503, isAdmin: { $0 == 502 ? true : false })
+        #expect(AdminMembership.refusal(uid: 502, for: .setUp, isAdmin: { $0 == 502 ? true : false }) == nil)
+        #expect(AdminMembership.refusal(uid: 503, for: .setUp, isAdmin: { $0 == 502 ? true : false })
             == "Only an administrator can set up package managers.")
-        #expect(AdminMembership.setupRefusal(uid: 502, isAdmin: { _ in nil })
+        #expect(AdminMembership.refusal(uid: 502, for: .setUp, isAdmin: { _ in nil })
             == "Only an administrator can set up package managers.")
+    }
+
+    @Test func runPortRefusedForStandardUser() {
+        let message = "Only an administrator can run MacPorts commands with BrewxPort."
+        #expect(AdminMembership.refusal(uid: 503, for: .runPort, isAdmin: { $0 == 502 ? true : false }) == message)
+        // A failed membership check refuses too.
+        #expect(AdminMembership.refusal(uid: 502, for: .runPort, isAdmin: { _ in nil }) == message)
+    }
+
+    @Test func runPortAllowedForAdmin() {
+        #expect(AdminMembership.refusal(uid: 502, for: .runPort, isAdmin: { $0 == 502 ? true : false }) == nil)
     }
 
     @Test func membershipByUIDMatchesTheCurrentUserCheck() {
@@ -679,10 +813,70 @@ final class SetupWorld: @unchecked Sendable {
         #expect(world.logs.last == "Homebrew's installer didn't add itself to your PATH.")
     }
 
-    @Test func macportsAndNanobrewLogWhatHappenedToPath() async throws {
-        let ports = try SetupWorld()
-        #expect(await Self.outcome(ports, .macports) == nil)
-        #expect(ports.logs.last == "MacPorts' installer added /opt/local/bin to your shell's startup files.")
+    static let macportsNotOnPath = "MacPorts didn't add itself to your PATH. BrewxPort finds it at /opt/local/bin/port; to use port in Terminal, add /opt/local/bin to your PATH."
+
+    @Test func macportsNoteWhenNotOnPath() async throws {
+        let world = try SetupWorld()
+        world.homeFiles[".zshrc"] = "export EDITOR=vim\n# export PATH=/opt/local/bin:$PATH\n"
+        #expect(await Self.outcome(world, .macports) == nil)
+        #expect(world.logs.last == Self.macportsNotOnPath)
+    }
+
+    @Test func macportsNoteNamesZprofile() async throws {
+        let world = try SetupWorld()
+        world.homeFiles[".zprofile"] = "export PATH=\"/opt/local/bin:/opt/local/sbin:$PATH\"\n"
+        #expect(await Self.outcome(world, .macports) == nil)
+        #expect(world.logs.last == "MacPorts' installer added /opt/local/bin to your PATH (~/.zprofile).")
+    }
+
+    @Test func macportsNoteNamesPathsD() async throws {
+        let world = try SetupWorld()
+        world.pathsD["macports"] = "/opt/local/bin\n"
+        #expect(await Self.outcome(world, .macports) == nil)
+        #expect(world.logs.last == "MacPorts' installer added /opt/local/bin to your PATH (/etc/paths.d/macports).")
+    }
+
+    @Test func macportsNoteIgnoresSymlinkOutsideHome() async throws {
+        let world = try SetupWorld()
+        let fm = FileManager.default
+        let home = world.root.appendingPathComponent("home")
+        let outside = world.root.appendingPathComponent("outside")
+        try fm.createDirectory(at: home, withIntermediateDirectories: true)
+        try fm.createDirectory(at: outside, withIntermediateDirectories: true)
+        try "export PATH=/opt/local/bin:$PATH\n".write(to: outside.appendingPathComponent("secret"), atomically: true, encoding: .utf8)
+        try fm.createSymbolicLink(at: home.appendingPathComponent(".zprofile"), withDestinationURL: outside.appendingPathComponent("secret"))
+        world.home = home.path
+        world.useRealStartupReader = true
+        #expect(await Self.outcome(world, .macports) == nil)
+        #expect(world.logs.last == Self.macportsNotOnPath)
+    }
+
+    @Test func macportsNoteFollowsSymlinkInsideHome() async throws {
+        let world = try SetupWorld()
+        let fm = FileManager.default
+        let home = world.root.appendingPathComponent("home")
+        try fm.createDirectory(at: home.appendingPathComponent("dotfiles"), withIntermediateDirectories: true)
+        try "export PATH=/opt/local/bin:$PATH\n".write(to: home.appendingPathComponent("dotfiles/zprofile"), atomically: true, encoding: .utf8)
+        try fm.createSymbolicLink(at: home.appendingPathComponent(".zprofile"), withDestinationURL: home.appendingPathComponent("dotfiles/zprofile"))
+        world.home = home.path
+        world.useRealStartupReader = true
+        #expect(await Self.outcome(world, .macports) == nil)
+        #expect(world.logs.last == "MacPorts' installer added /opt/local/bin to your PATH (~/.zprofile).")
+    }
+
+    @Test func macportsNoteIgnoresOversizedStartupFile() async throws {
+        let world = try SetupWorld()
+        let home = world.root.appendingPathComponent("home")
+        try FileManager.default.createDirectory(at: home, withIntermediateDirectories: true)
+        let big = String(repeating: "# filler\n", count: 20_000) + "export PATH=/opt/local/bin:$PATH\n"
+        try big.write(to: home.appendingPathComponent(".zshrc"), atomically: true, encoding: .utf8)
+        world.home = home.path
+        world.useRealStartupReader = true
+        #expect(await Self.outcome(world, .macports) == nil)
+        #expect(world.logs.last == Self.macportsNotOnPath)
+    }
+
+    @Test func nanobrewLogsWhatHappenedToPath() async throws {
         let nano = try SetupWorld()
         #expect(await Self.outcome(nano, .nanobrew) == nil)
         #expect(nano.logs.last
@@ -716,5 +910,23 @@ final class SetupWorld: @unchecked Sendable {
         let classes = HelperInterfaces.helper().classes(for: sel, argumentIndex: 1, ofReply: false)
         #expect(classes.count == 1)
         #expect(classes.contains(NSString.self as AnyObject as! AnyHashable))
+    }
+}
+
+@Suite struct RootDirectoriesTests {
+    @Test(.enabled(if: getuid() != 0, "needs fchown to root to fail, so not as root"))
+    func makeRemovesTheFolderItCouldNotFinish() throws {
+        // As a normal user mkdir works and fchown to root fails: the half-made folder mustn't be left behind, or it
+        // blocks the next try.
+        let parent = FileManager.default.temporaryDirectory.appendingPathComponent("rootdirs-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: parent, withIntermediateDirectories: false)
+        defer { try? FileManager.default.removeItem(at: parent) }
+        let path = parent.appendingPathComponent("nanobrew").path
+        #expect(!RootDirectories.make(path))
+        #expect(!FileManager.default.fileExists(atPath: path))
+        // It still never takes over a folder that was already there.
+        try FileManager.default.createDirectory(atPath: path, withIntermediateDirectories: false)
+        #expect(!RootDirectories.make(path))
+        #expect(FileManager.default.fileExists(atPath: path))
     }
 }

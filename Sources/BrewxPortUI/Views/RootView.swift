@@ -42,18 +42,9 @@ public struct RootView: View {
         // The move preview, while it checks, shows a plan or says why there's none. Esc or anything else that
         // dismisses it cancels; once the move runs the sheet is gone and the run panel shows it.
         .sheet(isPresented: moveShown) { MoveSheet(model: model.move) }
-        .confirmationDialog(model.uninstallTitle, isPresented: uninstallShown, presenting: model.pendingUninstall) { refs in
-            // Sets the refs again first, so the order SwiftUI clears the binding and runs the action in doesn't matter.
-            // They are the refs the title names: nothing can replace `pendingUninstall` while it's set
-            // (`BrewxPortAppModel.confirmingRemoval`).
-            Button("Remove", role: .destructive) {
-                model.pendingUninstall = refs
-                model.confirmUninstall()
-            }
-            Button("Cancel", role: .cancel) { model.cancelUninstall() }
-        } message: { _ in
-            Text("Each package is removed with its own engine.")
-        }
+        // The uninstall sheet: checking, then the plan. Esc or anything else that dismisses it cancels; once the
+        // uninstall runs the sheet is gone and the run panel shows it.
+        .sheet(isPresented: uninstallShown) { UninstallSheet(model: model.uninstall) }
     }
 
     private var setupShown: Binding<Bool> {
@@ -67,8 +58,8 @@ public struct RootView: View {
     }
 
     private var uninstallShown: Binding<Bool> {
-        Binding(get: { model.pendingUninstall != nil },
-                set: { shown in if !shown { model.cancelUninstall() } })
+        Binding(get: { model.uninstall.sheetShown },
+                set: { shown in if !shown { model.uninstall.cancel() } })
     }
 
     @ViewBuilder private var page: some View {

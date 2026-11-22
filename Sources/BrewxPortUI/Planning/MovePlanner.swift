@@ -206,7 +206,8 @@ public enum MovePlanner {
         var excluded = movingKeys.union(staying)
         excluded.insert(pickedKey)
         let leftovers = facts.requested.map {
-            findLeftovers(removed: removed, excluded: excluded, requested: $0, facts: facts)
+            LeftoverFinder.leftovers(removed: removed, keep: excluded, requested: $0, dependents: facts.dependents,
+                                     dependencies: facts.dependencies, installed: facts.sourceInstalled)
         } ?? []
 
         return MovePlan(picked: facts.picked, target: facts.target, moving: moving, cantMove: cantMove,
@@ -230,44 +231,6 @@ public enum MovePlanner {
             level = sorted
         }
         return order
-    }
-
-    /// Dependencies (direct or further down) of the removed packages that nothing outside the removed packages and
-    /// the leftovers themselves needs. Starts from every candidate and drops any with a dependent that stays, until
-    /// nothing changes, so leftovers that need each other still go together.
-    private static func findLeftovers(removed: Set<String>, excluded: Set<String>, requested: Set<String>,
-                                      facts: MoveFacts) -> [Package] {
-        var candidates: Set<String> = []
-        var queue = Array(removed)
-        var seen = removed
-        while let name = queue.popLast() {
-            for dependency in facts.dependencies[name] ?? [] where !seen.contains(dependency) {
-                seen.insert(dependency)
-                queue.append(dependency)
-                candidates.insert(dependency)
-            }
-        }
-        candidates = candidates.filter {
-            !excluded.contains($0) && !requested.contains($0) && facts.sourceInstalled[$0] != nil
-        }
-
-        // Who depends on each candidate, from both maps, so a gap in one doesn't remove a shared library.
-        var users: [String: Set<String>] = [:]
-        for name in candidates { users[name] = facts.dependents[name] ?? [] }
-        for (user, needs) in facts.dependencies {
-            for name in needs where candidates.contains(name) { users[name, default: []].insert(user) }
-        }
-
-        var leftovers = candidates
-        var changed = true
-        while changed {
-            changed = false
-            for name in leftovers where !(users[name] ?? []).allSatisfy({ removed.contains($0) || leftovers.contains($0) }) {
-                leftovers.remove(name)
-                changed = true
-            }
-        }
-        return leftovers.sorted().compactMap { facts.sourceInstalled[$0] }
     }
 
     private static func pathWarning(_ facts: MoveFacts) -> String? {

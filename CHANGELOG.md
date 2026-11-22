@@ -7,6 +7,35 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-11-22
+
+**Upgrading:** nothing to do.
+
+### Added
+
+- Uninstall offers leftovers: the Uninstall sheet lists the libraries only your picks used, under a ticked Also remove leftovers box. Untick it and only your picks go. Homebrew and MacPorts, apps included.
+
+### Changed
+
+- Uninstall shows a sheet with everything it will remove instead of a short confirmation.
+- Uninstalling from Homebrew no longer removes unused libraries on its own. What's removed is what the Uninstall sheet lists.
+- While a package manager setup waits for BrewxPort's helper, the setup offer says "Checking BrewxPort's helper…" and its rows and Set Up button are off until the helper answers.
+
+### Fixed
+
+- After setting up MacPorts, the run log says whether MacPorts was added to your PATH. Before, it always said it was.
+- nanobrew packages that another nanobrew package needs are no longer removed by Uninstall. The sheet says what needs them.
+- Network errors while setting up a package manager say what went wrong in plain words, like "no internet connection".
+- When Homebrew reports "already locked" right after an install, the package list waits a moment and tries once more before showing the error.
+- A failed nanobrew setup no longer leaves a folder behind that blocks the next try.
+- When a run can't go ahead, its message shows at the bottom of the window. Before, a long message could push the window's content up under the title bar and the message out of sight.
+- On a standard account, the Uninstall sheet says removing MacPorts or Mac App Store packages needs an administrator account, and only removes what that account can.
+
+### Security
+
+- BrewxPort's helper refuses MacPorts commands from accounts that aren't administrators.
+- BrewxPort won't set up nanobrew in /opt when other users can write to /opt.
+
 ## [0.4.0] - 2026-11-22
 
 **Upgrading:** nothing to do.

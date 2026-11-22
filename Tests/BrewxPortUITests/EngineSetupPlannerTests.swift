@@ -49,14 +49,19 @@ import BrewxPortRun
         #expect(RunRouting.route(for: initStep) == .sudoAskpass)
     }
 
-    @Test func masViaHomebrew() {
+    @Test func masViaHomebrew() throws {
         let statuses: [EngineID: EngineStatus] = [.homebrew: Self.present(P.brewPath),
                                                   .macports: Self.present(P.portPath)]
         let result = plan(.mas, statuses: statuses)
         #expect(result.problems.isEmpty)
         #expect(result.steps.map(\.engine) == [.homebrew])
-        #expect(result.steps[0].spec.arguments == ["install", "--formula", "mas"]
-                || result.steps[0].spec.arguments.contains("mas"))
+        let step = try #require(result.steps.first)
+        #expect(step.kind == .formula)
+        #expect(step.operation == .install)
+        #expect(step.setupTarget == nil)
+        #expect(step.spec.executable.path == P.brewPath)
+        #expect(step.spec.arguments == ["install", "--formula", "mas"])
+        #expect(!step.spec.needsRoot)
     }
 
     @Test func masViaMacPortsWhenNoHomebrew() {

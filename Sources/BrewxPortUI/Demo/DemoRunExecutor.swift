@@ -75,12 +75,18 @@ public final class DemoRunExecutor: RunExecuting {
             if empty { return .rejected }
         }
         var allEarlierSucceeded = true
+        var failedGroups: Set<String> = []
         var checksPassed: Bool?
         for (index, step) in steps.enumerated() {
             if Task.isCancelled { return .cancelled }
-            // Demo steps all succeed, so only a failed check stops a gated step.
-            if step.requiresAllEarlier && !allEarlierSucceeded { continue }
-            if step.requiresPassedCheck && checksPassed != true { continue }
+            // Demo steps all succeed, so only a failed check stops a gated step: a step with a `gateGroup` waits only
+            // on its own group, as in RunSession.
+            let earlierFailed = step.gateGroup.map { failedGroups.contains($0) } ?? !allEarlierSucceeded
+            if (step.requiresAllEarlier && earlierFailed) || (step.requiresPassedCheck && checksPassed != true) {
+                allEarlierSucceeded = false
+                if let group = step.gateGroup { failedGroups.insert(group) }
+                continue
+            }
             emit(.started(index))
             if let refs = step.verifyInstalled {
                 // Asks the app, as RunSession does, and prints no "Simulated" line: a check runs nothing. A check
@@ -92,7 +98,10 @@ public final class DemoRunExecutor: RunExecuting {
                     let names = missing.map(\.name).joined(separator: ", ")
                     emit(.output(index, .stderr("Not found on \(step.engine.displayName): \(names)")))
                 }
-                if !passed { allEarlierSucceeded = false }
+                if !passed {
+                    allEarlierSucceeded = false
+                    if let group = step.gateGroup { failedGroups.insert(group) }
+                }
                 checksPassed = passed && checksPassed != false
                 emit(.finished(index, passed ? 0 : 1))
                 continue

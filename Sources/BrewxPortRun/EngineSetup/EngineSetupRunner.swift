@@ -12,7 +12,7 @@ public struct HTTPStatusError: Error, Equatable, Sendable {
 public enum PathInfo: Equatable, Sendable {
     case missing
     case symlink
-    case directory(owner: uid_t)
+    case directory(owner: uid_t, mode: mode_t)
     case file(owner: uid_t, mode: mode_t)
     case other
 
@@ -21,7 +21,7 @@ public enum PathInfo: Equatable, Sendable {
         guard Darwin.lstat(path, &info) == 0 else { return .missing }
         switch info.st_mode & S_IFMT {
         case S_IFLNK: return .symlink
-        case S_IFDIR: return .directory(owner: info.st_uid)
+        case S_IFDIR: return .directory(owner: info.st_uid, mode: info.st_mode & 0o7777)
         case S_IFREG: return .file(owner: info.st_uid, mode: info.st_mode & 0o7777)
         default: return .other
         }
@@ -55,6 +55,12 @@ public struct EngineSetupRunner: Sendable {
     public var host: HostInfo
     /// Root-owned 0700. Its parent must be root-owned and writable by root only; nanobrew's hand-off folder goes there.
     public var downloads: URL
+    /// The requester's home folder, looked up from their uid (never from the helper's own environment).
+    public var homeDirectory: @Sendable (uid_t) -> String?
+    /// The text of `name` directly in `home`, or nil if it's missing, too big, or not a plain file inside `home`.
+    public var readStartupFile: @Sendable (_ home: String, _ name: String) -> String?
+    /// Every file in /etc/paths.d as (file name, text).
+    public var readPathsD: @Sendable () -> [(String, String)]
     public var homebrewPlistPath: String
     public var cltPlaceholderPath: String
 
@@ -63,7 +69,7 @@ public struct EngineSetupRunner: Sendable {
     static let nanobrewRoot = "/opt/nanobrew"
     static let nanobrewPrefix = "/opt/nanobrew/prefix"
     static let nanobrewBin = "/opt/nanobrew/prefix/bin"
-    static let nanobrewBinary = "/opt/nanobrew/prefix/bin/nb"
+    static let nanobrewBinary = EngineLocator.nanobrewPath
     static let cltFolder = "/Library/Developer/CommandLineTools"
     /// No installer BrewxPort sets up is anywhere near this; a release claiming more is refused.
     public static let maxDownloadBytes = 2 * 1024 * 1024 * 1024
@@ -76,6 +82,9 @@ public struct EngineSetupRunner: Sendable {
                 giveDirectory: @escaping @Sendable (String, uid_t) -> Bool = { RootDirectories.give($0, to: $1) },
                 removeDirectory: @escaping @Sendable (String) -> Bool = RootDirectories.remove,
                 host: HostInfo, downloads: URL = EngineSetupRunner.defaultDownloads,
+                homeDirectory: @escaping @Sendable (uid_t) -> String? = EngineSetupRunner.homeDirectory,
+                readStartupFile: @escaping @Sendable (String, String) -> String? = EngineSetupRunner.readStartupFile,
+                readPathsD: @escaping @Sendable () -> [(String, String)] = EngineSetupRunner.readPathsD,
                 homebrewPlistPath: String = HomebrewPkgUser.path,
                 cltPlaceholderPath: String = CommandLineTools.placeholder) {
         self.fetch = fetch
@@ -88,6 +97,9 @@ public struct EngineSetupRunner: Sendable {
         self.removeDirectory = removeDirectory
         self.host = host
         self.downloads = downloads
+        self.homeDirectory = homeDirectory
+        self.readStartupFile = readStartupFile
+        self.readPathsD = readPathsD
         self.homebrewPlistPath = homebrewPlistPath
         self.cltPlaceholderPath = cltPlaceholderPath
     }
@@ -190,20 +202,86 @@ public struct EngineSetupRunner: Sendable {
             break
         }
         log("\(name.prefix(1).uppercased() + name.dropFirst()) is set up.")
-        if let note = pathNote(target) { log(note) }
+        if let note = pathNote(target, uid: uid) { log(note) }
     }
 
     /// One line saying what the install did about the shell's PATH.
-    private func pathNote(_ target: SetupTarget) -> String? {
+    private func pathNote(_ target: SetupTarget, uid: uid_t) -> String? {
         switch target {
         case .homebrew:
             return exists("/etc/paths.d/homebrew")
                 ? "Homebrew's installer added /opt/homebrew/bin to your PATH (/etc/paths.d/homebrew)."
                 : "Homebrew's installer didn't add itself to your PATH."
-        case .macports: return "MacPorts' installer added /opt/local/bin to your shell's startup files."
+        case .macports:
+            if let file = macportsPathFile(uid: uid) {
+                return "MacPorts' installer added /opt/local/bin to your PATH (\(file))."
+            }
+            return "MacPorts didn't add itself to your PATH. BrewxPort finds it at \(Self.installedPath(.macports)); to use port in Terminal, add /opt/local/bin to your PATH."
         case .nanobrew: return "nanobrew isn't added to your PATH. BrewxPort finds it at \(Self.nanobrewBinary)."
         case .commandLineTools: return nil
         }
+    }
+
+    static let macportsBin = "/opt/local/bin"
+    static let startupFiles = [".zprofile", ".zshrc", ".bash_profile", ".profile"]
+    static let maxStartupFileBytes = 64 * 1024
+
+    /// Where MacPorts' bin folder is put on the PATH, if anywhere: one of the requester's shell startup files
+    /// or an /etc/paths.d entry. The pkg runs as root, so this looks at what is on disk for the requester.
+    private func macportsPathFile(uid: uid_t) -> String? {
+        if let home = homeDirectory(uid) {
+            for name in Self.startupFiles {
+                if let text = readStartupFile(home, name), Self.namesMacportsBin(text) { return "~/\(name)" }
+            }
+        }
+        for (name, text) in readPathsD() where Self.namesMacportsBin(text) { return "/etc/paths.d/\(name)" }
+        return nil
+    }
+
+    /// True if an uncommented line mentions `/opt/local/bin`.
+    static func namesMacportsBin(_ text: String) -> Bool {
+        text.split(whereSeparator: \.isNewline).contains { line in
+            let trimmed = line.drop { $0 == " " || $0 == "\t" }
+            return !trimmed.hasPrefix("#") && trimmed.contains(macportsBin)
+        }
+    }
+
+    public static func homeDirectory(_ uid: uid_t) -> String? {
+        guard let entry = getpwuid(uid), let dir = entry.pointee.pw_dir else { return nil }
+        let home = String(cString: dir)
+        return home.hasPrefix("/") ? home : nil
+    }
+
+    /// Reads `home/name`, following links only while the real path stays inside the real home. Read-only; gives up
+    /// on anything that isn't a regular file or is over `maxStartupFileBytes`.
+    public static func readStartupFile(home: String, name: String) -> String? {
+        guard let realHome = realpath(home), let real = realpath(home + "/" + name),
+              real.hasPrefix(realHome.hasSuffix("/") ? realHome : realHome + "/") else { return nil }
+        return readSmallFile(real)
+    }
+
+    public static func readPathsD() -> [(String, String)] {
+        let dir = "/etc/paths.d"
+        let names = ((try? FileManager.default.contentsOfDirectory(atPath: dir)) ?? []).sorted()
+        return names.compactMap { name in readSmallFile(dir + "/" + name).map { (name, $0) } }
+    }
+
+    private static func realpath(_ path: String) -> String? {
+        guard let resolved = Darwin.realpath(path, nil) else { return nil }
+        defer { free(resolved) }
+        return String(cString: resolved)
+    }
+
+    /// A regular file's text, opened without following a final link; nil if it isn't one or is too big.
+    private static func readSmallFile(_ path: String) -> String? {
+        let fd = open(path, O_RDONLY | O_NOFOLLOW | O_NONBLOCK)
+        guard fd >= 0 else { return nil }
+        defer { close(fd) }
+        var info = stat()
+        guard fstat(fd, &info) == 0, info.st_mode & S_IFMT == S_IFREG, info.st_size <= maxStartupFileBytes else { return nil }
+        let data = FileHandle(fileDescriptor: fd, closeOnDealloc: false).readData(ofLength: maxStartupFileBytes + 1)
+        guard data.count <= maxStartupFileBytes else { return nil }
+        return String(decoding: data, as: UTF8.self)
     }
 
     // MARK: Steps
@@ -324,16 +402,18 @@ public struct EngineSetupRunner: Sendable {
     /// - Missing: root creates `/opt` (if missing), `/opt/nanobrew`, `prefix` and `bin` one level at a time with
     ///   mkdir(2), each of which must create its entry, all root-owned so nobody can swap them meanwhile. Then it
     ///   gives `bin`, `prefix` and `/opt/nanobrew` to the requester, deepest first, without following links and
-    ///   without recursion (BSD `chown -R` would follow a planted hard link's target).
+    ///   without recursion (BSD `chown -R` would follow a planted hard link's target). An existing `/opt` must be
+    ///   root's and writable by root only.
     /// - Already the requester's: root does nothing inside it; `mkdir -p` runs as the requester.
     /// - Anyone else's, root included: refused.
     ///
     /// After that everything inside runs as the requester: unpack (from a root-owned, world-readable hand-off copy;
     /// the downloads folder is root-only), move, mark executable, clean up. `nb init` is not run here. On failure,
-    /// the folders root created are removed if they are empty.
+    /// the folders created in this run are removed if they are empty (see `removeCreated`).
     private func installNanobrew(archive: URL, uid: uid_t, log: @Sendable (String) -> Void) async throws(SetupError) {
         let asUser = ["-u", "#\(uid)"]
         var created: [String] = []
+        var handedOver: Set<String> = []
         switch inspect(Self.nanobrewRoot) {
         case .missing:
             switch inspect(Self.opt) {
@@ -342,8 +422,10 @@ public struct EngineSetupRunner: Sendable {
                     throw .installFailed("BrewxPort couldn't create \(Self.opt).")
                 }
                 created.append(Self.opt)
-            case .directory(let owner) where owner == 0:
-                break
+            case .directory(let owner, let mode) where owner == 0:
+                guard mode & 0o022 == 0 else {
+                    throw .installFailed("\(Self.opt) is writable by other users, so BrewxPort won't set up nanobrew there.")
+                }
             default:
                 throw .installFailed("\(Self.opt) isn't a root-owned folder, so BrewxPort won't set up nanobrew in it.")
             }
@@ -357,15 +439,16 @@ public struct EngineSetupRunner: Sendable {
                     guard giveDirectory(path, uid) else {
                         throw .installFailed("BrewxPort couldn't give \(path) to your account.")
                     }
+                    handedOver.insert(path)
                 }
             } catch {
                 failure = error
             }
             if let failure {
-                await removeCreated(created, uid: uid, log: log)
+                await removeCreated(created, handedOver: handedOver, uid: uid, log: log)
                 throw failure
             }
-        case .directory(let owner) where owner == uid:
+        case .directory(let owner, _) where owner == uid:
             try await mustRun("/usr/bin/sudo", asUser + ["/bin/mkdir", "-p", Self.nanobrewBin],
                               "BrewxPort couldn't create \(Self.nanobrewBin)")
         default:
@@ -379,7 +462,7 @@ public struct EngineSetupRunner: Sendable {
             failure = error
         }
         if let failure {
-            await removeCreated(created, uid: uid, log: log)
+            await removeCreated(created, handedOver: handedOver, uid: uid, log: log)
             throw failure
         }
     }
@@ -413,14 +496,18 @@ public struct EngineSetupRunner: Sendable {
         }
     }
 
-    /// Removes the folders root created for nanobrew, deepest first, only while empty. `bin` and `prefix` may already
-    /// belong to the requester (who could have swapped them for links), so they're removed as the requester; root
-    /// removes only entries directly inside root-owned `/opt` or `/`.
-    private func removeCreated(_ created: [String], uid: uid_t, log: @Sendable (String) -> Void) async {
+    /// Removes the folders created for nanobrew in this run, deepest first, only while empty; nothing that was there
+    /// before. Who removes each one depends on its parent. A parent already handed to the requester could hold a
+    /// link they swapped in, so the entry is removed as the requester. A parent root still holds (not handed over
+    /// yet, or the root-owned `/opt` or `/`) can't have been changed by anyone else, so root removes the entry with
+    /// rmdir(2); the requester couldn't, and a root-owned `/opt/nanobrew` left behind would block the next try.
+    private func removeCreated(_ created: [String], handedOver: Set<String>, uid: uid_t,
+                               log: @Sendable (String) -> Void) async {
         var left: [String] = []
         for path in created.reversed() {
+            let parent = (path as NSString).deletingLastPathComponent
             let removed: Bool
-            if path == Self.nanobrewBin || path == Self.nanobrewPrefix {
+            if handedOver.contains(parent) {
                 removed = await run("/usr/bin/sudo", ["-u", "#\(uid)", "/bin/rmdir", path]).0 == 0
             } else {
                 removed = removeDirectory(path)
@@ -475,9 +562,22 @@ public struct EngineSetupRunner: Sendable {
         case let error as URLError where error.code == .cancelled:
             return .installFailed("The setup stopped because BrewxPort disconnected. Nothing was installed.")
         case let error as URLError:
-            return .network("BrewxPort couldn't reach GitHub to download \(name): \(oneLine(error.localizedDescription))")
+            let detail = plainWords(error.code).map { ": \($0)" } ?? ""
+            return .network("BrewxPort couldn't reach GitHub to download \(name)\(detail).")
         default:
             return .network("BrewxPort couldn't download \(name): \(oneLine(error.localizedDescription))")
+        }
+    }
+
+    /// The common reasons a connection fails, in plain words. Anything else gets no detail rather than URLSession's
+    /// own text ("bad URL" for a blocked host).
+    private static func plainWords(_ code: URLError.Code) -> String? {
+        switch code {
+        case .notConnectedToInternet: return "no internet connection"
+        case .timedOut: return "the connection timed out"
+        case .cannotFindHost, .dnsLookupFailed: return "couldn't find the server"
+        case .networkConnectionLost: return "the connection dropped"
+        default: return nil
         }
     }
 
@@ -785,13 +885,20 @@ final class LimitedFileWriter {
 
 /// Root's directory operations for nanobrew's folders: one level at a time, never through a symlink.
 public enum RootDirectories {
-    /// mkdir(2) 0755 that must create the entry, then root:wheel 0755 through a no-follow descriptor.
+    /// mkdir(2) 0755 that must create the entry, then root:wheel 0755 through a no-follow descriptor. When that
+    /// fails after the mkdir, the new entry is rmdir'd (non-recursive, doesn't follow a final link), so it isn't left
+    /// behind to block the next try.
     @Sendable public static func make(_ path: String) -> Bool {
         guard mkdir(path, 0o755) == 0 else { return false }
         let fd = open(path, O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC)
-        guard fd >= 0 else { return false }
-        defer { close(fd) }
-        return fchown(fd, 0, 0) == 0 && fchmod(fd, 0o755) == 0
+        guard fd >= 0 else {
+            rmdir(path)
+            return false
+        }
+        let done = fchown(fd, 0, 0) == 0 && fchmod(fd, 0o755) == 0
+        close(fd)
+        if !done { rmdir(path) }
+        return done
     }
 
     /// Gives a root-owned directory (just made by `make`) to `uid`, non-recursively, without following a symlink.

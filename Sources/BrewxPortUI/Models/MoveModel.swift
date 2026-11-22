@@ -7,7 +7,7 @@ import BrewxPortRun
 /// "Move to…": gathers the facts for moving one installed package to another package manager, works out the plan
 /// (`MovePlanner`), and starts the run through the app's one run path (password sheet, step rows, log).
 ///
-/// Gathering, in order:
+/// Gathering, in order (the source side through `DependencyGatherer`):
 /// - Installed's rows (after any load in flight settles) give the source's packages, what the person asked for, and
 ///   what's already on the target.
 /// - The dependents walk asks the source engine (`DependentsListing`) level by level. More than `maxPackages` in the
@@ -67,7 +67,7 @@ import BrewxPortRun
     }
 
     /// The most packages one move gathers facts for.
-    static let maxPackages = 200
+    static let maxPackages = DependencyGatherer.maxPackages
 
     /// How long one dependents call may take. Tests shorten it.
     @ObservationIgnored var queryTimeout: Duration = BrewxPortTimeouts.engineQuery
@@ -101,7 +101,7 @@ import BrewxPortRun
         let sourceID = package.id.engine
         guard target != sourceID,
               let sourceEngine = services.engines.first(where: { $0.id == sourceID }),
-              let listing = sourceEngine as? any DependentsListing,
+              sourceEngine is any DependentsListing,
               MovePlanner.isMovable(package, engineHasDependents: true) else { return }
         task?.cancel()
         generation += 1
@@ -110,7 +110,7 @@ import BrewxPortRun
         pathFix = .offered
         task = Task { [weak self] in
             guard let self else { return }
-            let outcome = await self.gather(package, to: target, listing: listing)
+            let outcome = await self.gather(package, to: target)
             guard !Task.isCancelled, self.generation == mine else { return }
             switch outcome {
             case .success(let gathered):
@@ -210,90 +210,37 @@ import BrewxPortRun
         let message: String
     }
 
-    private func gather(_ picked: Package, to target: EngineID,
-                        listing: any DependentsListing) async -> Result<MoveFacts, GatherFailure> {
+    private func gather(_ picked: Package, to target: EngineID) async -> Result<MoveFacts, GatherFailure> {
         let source = picked.id.engine
         await installed.settled()
         let rows = installed.list.all.map(\.package)
 
-        // The source's packages by lower-cased name: formulae and ports first, so a cask of the same name never
-        // stands in for a formula.
-        var sourceInstalled: [String: Package] = [:]
-        let sourceRows = rows.filter { $0.id.engine == source }
-        for package in sourceRows.sorted(by: { Self.isCommand($0) && !Self.isCommand($1) }) {
-            let key = package.id.name.lowercased()
-            if sourceInstalled[key] == nil { sourceInstalled[key] = package }
-        }
         var pickedRow = picked
-        if let row = sourceRows.first(where: { $0.id == picked.id }) { pickedRow = row }
-        var requested: Set<String>? = []
-        for package in sourceRows where Self.isCommand(package) {
-            guard let asked = package.installedOnRequest else { requested = nil; break }
-            if asked { requested?.insert(package.id.name.lowercased()) }
-        }
+        if let row = rows.first(where: { $0.id == picked.id }) { pickedRow = row }
         var onTargetRows: [String: Package] = [:]
         for package in rows where package.id.engine == target && Self.isCommand(package) {
             onTargetRows[package.id.name.lowercased()] = onTargetRows[package.id.name.lowercased()] ?? package
         }
 
-        // The move set: the picked package and everything that depends on it.
+        // The move set (the picked package and everything that depends on it) and, for the leftovers, what they need.
+        let gatherer = DependencyGatherer(engines: services.engines, catalog: services.catalog, timeout: queryTimeout,
+                                          limit: Self.maxPackages)
+        let gathered: DependencyFacts
+        do throws(DependencyGatherer.Failure) {
+            gathered = try await gatherer.facts(for: [picked], engine: source, installed: rows)
+        } catch {
+            switch error {
+            case .tooMany:
+                return .failure(GatherFailure(
+                    message: "Too many packages depend on \(picked.displayName) to move it here."))
+            case .failed(let error):
+                return .failure(GatherFailure(
+                    message: "BrewxPort couldn't find out what depends on \(picked.displayName): " + Self.text(error)))
+            }
+        }
         let pickedKey = picked.id.name.lowercased()
-        let timeout = queryTimeout
-        let askDependents: @Sendable (String) async throws -> Set<String>
-        if let mapping = listing as? any DependentsMapping {
-            // nanobrew scans every installed formula for each answer, so the scan runs once for the whole move. Each
-            // of its calls has the timeout, so its budget grows with the number of formulae.
-            let map: [String: Set<String>]
-            do {
-                map = try await mapping.installedDependentsMap(callTimeout: timeout)
-            } catch {
-                return .failure(GatherFailure(message: "BrewxPort couldn't find out what depends on \(picked.displayName): "
-                                                  + Self.text(error)))
-            }
-            askDependents = { name in Set((map[name] ?? []).map { $0.lowercased() }) }
-        } else {
-            askDependents = { name in
-                let found = try await firstResult(within: timeout) { try await listing.installedDependents(of: name) }
-                return Set(found.map { $0.lowercased() })
-            }
-        }
-        var dependents: [String: Set<String>]
-        switch await Self.walk(from: [pickedKey], limit: Self.maxPackages, edges: askDependents) {
-        case .success(let found): dependents = found
-        case .failure(.tooMany):
-            return .failure(GatherFailure(message: "Too many packages depend on \(picked.displayName) to move it here."))
-        case .failure(.failed(let error)):
-            return .failure(GatherFailure(message: "BrewxPort couldn't find out what depends on \(picked.displayName): "
-                                              + Self.text(error)))
-        }
-        let members = Array(dependents.keys)
-
-        // Dependencies, for the leftovers only: unknown means no leftovers.
-        var dependencies: [String: Set<String>] = [:]
-        if requested != nil {
-            let catalog = services.catalog
-            let installedNow = sourceInstalled
-            let pickedKind = picked.id.kind
-            let askDependencies: @Sendable (String) async throws -> Set<String> = { name in
-                let ref = installedNow[name]?.id ?? PackageRef(engine: source, kind: pickedKind, name: name)
-                guard let needs = try await catalog.info(ref).dependencies else { throw GatherFailure(message: "") }
-                return Set(needs.map { $0.lowercased() }.filter { installedNow[$0] != nil })
-            }
-            if case .success(let found) = await Self.walk(from: members, limit: Self.maxPackages,
-                                                          edges: askDependencies) {
-                dependencies = found
-                // Who else uses each package the move set needs, so a shared one is never a leftover.
-                let needed = found.keys.filter { dependents[$0] == nil }
-                if case .success(let users) = await Self.each(needed, askDependents) {
-                    dependents.merge(users) { $0.union($1) }
-                } else {
-                    requested = nil
-                }
-            } else {
-                requested = nil
-            }
-            if requested == nil { dependencies = [:] }
-        }
+        let sourceInstalled = gathered.installed
+        let members = Array(gathered.affected)
 
         // Each member on the target.
         let catalog = services.catalog
@@ -330,8 +277,8 @@ import BrewxPortRun
         }
         let pathEntries = await services.path.resolve().entries
 
-        return .success(MoveFacts(picked: pickedRow, target: target, dependents: dependents,
-                                  dependencies: dependencies, requested: requested,
+        return .success(MoveFacts(picked: pickedRow, target: target, dependents: gathered.dependents,
+                                  dependencies: gathered.dependencies, requested: gathered.requested,
                                   sourceInstalled: sourceInstalled, onTarget: onTarget, pathEntries: pathEntries,
                                   targetBin: executable.deletingLastPathComponent().path))
     }
@@ -373,46 +320,15 @@ import BrewxPortRun
         return error.localizedDescription
     }
 
-    enum WalkError: Error {
-        case tooMany
-        case failed(any Error)
-    }
+    typealias WalkError = DependencyGatherer.Failure
 
     /// The most engine calls one gather runs at once (dependents, `info()` and target lookups each).
-    nonisolated static let maxConcurrentCalls = 6
-
-    /// Breadth-first from `start`, asking `edges` for every name once (a level at a time, concurrently). Returns each
-    /// visited name's answer. More than `limit` names visited, or any `edges` call throwing, ends the walk.
-    nonisolated static func walk(from start: [String], limit: Int,
-                                 edges: @escaping @Sendable (String) async throws -> Set<String>)
-        async -> Result<[String: Set<String>], WalkError> {
-        var seen = Set(start)
-        guard seen.count <= limit else { return .failure(.tooMany) }
-        var answers: [String: Set<String>] = [:]
-        var level = Array(seen)
-        while !level.isEmpty {
-            switch await each(level, edges) {
-            case .failure(let error): return .failure(error)
-            case .success(let found):
-                answers.merge(found) { $1 }
-                var next: Set<String> = []
-                for names in found.values { next.formUnion(names.subtracting(seen)) }
-                seen.formUnion(next)
-                guard seen.count <= limit else { return .failure(.tooMany) }
-                level = Array(next)
-            }
-        }
-        return .success(answers)
-    }
+    nonisolated static let maxConcurrentCalls = DependencyGatherer.maxConcurrentCalls
 
     /// `edges` for every name, at most `maxConcurrentCalls` at a time; the first error ends it.
     nonisolated static func each(_ names: [String], _ edges: @escaping @Sendable (String) async throws -> Set<String>)
         async -> Result<[String: Set<String>], WalkError> {
-        do {
-            return .success(try await concurrentMap(names, limit: maxConcurrentCalls, edges))
-        } catch {
-            return .failure(.failed(error))
-        }
+        await DependencyGatherer.each(names, edges)
     }
 }
 
