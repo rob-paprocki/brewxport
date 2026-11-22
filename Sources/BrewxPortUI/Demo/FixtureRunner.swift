@@ -51,6 +51,7 @@ public final class FixtureRunner: CommandRunning {
             case ["search", "--cask"]: return "homebrew/search-cask.txt"
             case ["info", "--json=v2", "--installed"]: return "homebrew/info-installed.json"
             case ["outdated", "--json=v2"]: return "homebrew/outdated.json"
+            case ["tap"]: return "homebrew/tap.txt"
             case ["info", "--json=v2", "--formula", "ripgrep"]: return "homebrew/info-ripgrep.json"
             case ["info", "--json=v2", "--cask", "firefox"]: return "homebrew/info-cask-firefox.json"
             case ["info", "--json=v2", "--cask", "blackhole-2ch"]: return "homebrew/info-cask-blackhole-2ch.json"
@@ -72,6 +73,10 @@ public final class FixtureRunner: CommandRunning {
             case ["version"]: return "macports/version.txt"
             case ["search", "--line"]: return x86 ? "macports/x86_64/search.txt" : "macports/search.txt"
             case ["-v", "-q", "installed", "active"]:
+                return x86 ? "macports/x86_64/installed.txt" : "macports/installed.txt"
+            // The demo's ports were all asked for: the requested list is the installed one (its lines start with
+            // the same "name @version").
+            case ["-q", "installed", "requested"]:
                 return x86 ? "macports/x86_64/installed.txt" : "macports/installed.txt"
             // No x86_64 capture of `port outdated` has rows; the text format is the same on both.
             case ["-q", "outdated"]: return "macports/outdated.txt"

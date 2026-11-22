@@ -43,7 +43,7 @@ struct PackageTable: View {
             TableColumn("Kind", value: \.kindName)
                 .width(min: 44, ideal: 65)
         }
-        .packageRowMenu(model: model, list: list, view: .discover)
+        .packageRowMenu(model: model, view: .discover)
     }
 
     private func checked(_ ref: PackageRef) -> Binding<Bool> {
@@ -67,13 +67,11 @@ extension View {
         if let text { help(text) } else { self }
     }
 
-    /// The right-click menu from `RowActions` and double-click for details, both through `BrewxPortAppModel.perform`.
-    /// Shared by every package table.
-    func packageRowMenu(model: BrewxPortAppModel, list: PackageListState, view: PackageView) -> some View {
+    /// The right-click menu (`BrewxPortAppModel.rowMenuItems`, from `RowActions`) and double-click for details, both
+    /// through `BrewxPortAppModel.perform`. Shared by every package table, Bundles' included.
+    func packageRowMenu(model: BrewxPortAppModel, view: PackageView) -> some View {
         contextMenu(forSelectionType: PackageRef.self) { refs in
-            let items = RowActions.items(for: refs, in: view, rows: list.byRef, outdated: model.outdatedRefs,
-                                         prefs: model.preferences, isRunning: model.run.isRunning || model.preparing,
-                                         canRun: model.canRun)
+            let items = model.rowMenuItems(for: refs, in: view)
             ForEach(items, id: \.self) { item in
                 Button(item.title, systemImage: item.systemImage) {
                     model.perform(item.action, on: refs)

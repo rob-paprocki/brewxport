@@ -18,6 +18,10 @@ public protocol HelperConnecting: Sendable {
     /// calling task must stop the run.
     func runPort(authorization: Data, arguments: [String],
                  onOutput: @escaping @Sendable (OutputEvent) -> Void) async throws -> Int32
+    /// Sets up one package manager as root through the helper. Same authorization, cancellation and
+    /// `HelperError.notAuthorized` rules as `runPort`.
+    func setUpEngine(authorization: Data, target: SetupTarget,
+                     onOutput: @escaping @Sendable (OutputEvent) -> Void) async throws -> Int32
     /// Frees the authorization and destroys its rights. Idempotent, and a no-op when nothing is held. Called at
     /// the end of every run, including a cancelled one, so it must not give up because its task is cancelled.
     func endAuthorization() async
@@ -184,8 +188,14 @@ public final class RunSession: Sendable {
             if isAdministrator() == false { return .unavailable(Self.notAnAdministrator) }
             if let early = await acquireAndVerify(routes, reason: reason, &state, emit) { return early }
         }
+        // Whether the step before the current one finished with exit code 0. A skipped step counts as not.
+        var previousSucceeded = true
         for (index, step) in steps.enumerated() {
             if Task.isCancelled { return .cancelled }
+            if step.dependsOnPrevious && !previousSucceeded {
+                // Left unstarted, which the UI shows as skipped. Later steps that depend on it are skipped too.
+                continue
+            }
             emit(.started(index))
             let code: Int32
             do {
@@ -199,6 +209,7 @@ public final class RunSession: Sendable {
             // A step that returned an exit code finished, even if the run was cancelled meanwhile. Only a step that
             // threw CancellationError is left open; the check at the top of the loop stops the next one.
             emit(.finished(index, code))
+            previousSucceeded = code == 0
         }
         return .done
     }
@@ -211,7 +222,7 @@ public final class RunSession: Sendable {
         state.secret = secret
         if Task.isCancelled { return .cancelled }
 
-        if routes.contains(.helper) {
+        if routes.contains(where: { $0 == .helper || $0 == .helperSetup }) {
             do {
                 state.authorization = try await helper.authorize(secret)
             } catch HelperError.notAuthorized {
@@ -268,6 +279,18 @@ public final class RunSession: Sendable {
             return try await runner.stream(URL(fileURLWithPath: Self.sudoPath),
                                            ["-A", launch.executable.path] + launch.arguments,
                                            options: options, onOutput: onOutput)
+        case .helperSetup:
+            guard let target = step.setupTarget else { throw StepFailure(message: "This step has no engine to set up.") }
+            guard let authorization = state.authorization, let secret = state.secret else {
+                throw StepFailure(message: state.helperFailure ?? "BrewxPort's helper isn't available.")
+            }
+            do {
+                return try await helper.setUpEngine(authorization: authorization, target: target, onOutput: onOutput)
+            } catch HelperError.notAuthorized {
+                let fresh = try await helper.authorize(secret)
+                state.authorization = fresh
+                return try await helper.setUpEngine(authorization: fresh, target: target, onOutput: onOutput)
+            }
         case .helper:
             guard let authorization = state.authorization, let secret = state.secret else {
                 throw StepFailure(message: state.helperFailure ?? "BrewxPort's helper isn't available.")

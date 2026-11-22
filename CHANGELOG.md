@@ -7,6 +7,25 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-11-22
+
+**Upgrading:** nothing to do.
+
+### Added
+
+- A Bundles page. Open a `.brewxportbundle` or a Brewfile from File > Open Bundle (⌘O) or by double-clicking a bundle in Finder. The preview groups packages by engine, marks what's already installed, and gives setup steps for a missing engine. It installs the ticked rows behind at most one password.
+- Export everything installed to a `.brewxportbundle`, or to a Brewfile. The Brewfile holds only what `brew bundle` reads, and BrewxPort lists what it leaves out, by name, before it writes.
+- An Include Dependencies in Exports option, in the File menu and the Bundles page's Export menu. Turn it off and exports hold only what you installed yourself. Packages that came in as another package's dependency are left out, and installing the file on another Mac brings them back. nanobrew doesn't record which packages were dependencies, so all of its packages stay in.
+- Brewfile import lists every line or entry BrewxPort doesn't handle, with its line number and the reason, and counts the blank and comment lines. Nothing is dropped silently.
+- Third-party taps are flagged and start unticked, unless a ticked package needs one. Homebrew 7's `trusted: true` on third-party formulae is accepted.
+- Imported files are treated as untrusted. Only plain package, tap and App Store lines are read, and lines inside Ruby blocks aren't handled. BrewxPort follows simple platform checks like `if OS.mac?`; after any other Ruby code, every later line is marked not handled. Most options aren't applied, and files over 8 MB or 10,000 entries are refused.
+- Version pins in a bundle are kept but not applied. Installing Mac App Store apps from a bundle hasn't been tested in a virtual machine yet.
+- A setup screen at launch when none of the four package managers is set up, whether BrewxPort came from the `.pkg`, the DMG or the zip. It lists the recommended package manager first and the others below, with Set Up and Not now. If the helper still needs approval, it asks for it in System Settings > General > Login Items and carries on.
+- Set up Homebrew, MacPorts, nanobrew or `mas` from inside BrewxPort: File > Set Up Package Manager…, the Set Up button on a missing package manager's Engines page, and the Bundles page's missing-engine banner. Each setup needs an administrator account. Homebrew, MacPorts and nanobrew ask for the password once, and `mas` asks only when it goes in through MacPorts.
+- Homebrew and MacPorts come from their official installer packages, checked against the published checksum and Apple's notarization. Homebrew's signing team is checked too. nanobrew comes from its release archive, checked against both published checksums, and then `nb init` runs. `mas` installs through Homebrew or MacPorts. BrewxPort doesn't run downloaded scripts itself. The official Homebrew and MacPorts packages run their own install scripts through Apple's installer, and nanobrew's `nb init` runs once with your administrator password. BrewxPort doesn't edit your shell files, and the run log says whether each installer added itself to your PATH.
+- MacPorts setup installs Apple's Command Line Tools first if they're missing, about 1.3 GB. Homebrew isn't offered on Intel Macs, which it no longer supports.
+- The `.pkg` installer has a checkbox on its Customize step, ticked by default: "Set up Homebrew" on Apple silicon Macs, "Set up MacPorts" on Intel Macs. It only records your choice. BrewxPort starts that setup the next time it opens, after every `.pkg` install with the box ticked, upgrades included, unless the package manager is already there.
+
 ## [0.2.1] - 2026-11-21
 
 **Upgrading:** nothing to do.

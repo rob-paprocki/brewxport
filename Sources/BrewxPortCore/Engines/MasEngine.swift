@@ -6,19 +6,25 @@ public struct MasEngine: Engine {
     public let capabilities: EngineCapabilities = [.jsonOutput]
 
     private let runner: CommandRunning
-    private let executable: URL?
+    private let cache: ExecutableCache
+    private var executable: URL? { cache.current }
 
     public var executableURL: URL? { executable }
 
     public init(runner: CommandRunning, executable: URL?) {
         self.runner = runner
-        self.executable = executable
+        self.cache = ExecutableCache(locate: { executable })
+    }
+
+    public init(runner: CommandRunning, locate: @escaping @Sendable () -> URL?) {
+        self.runner = runner
+        self.cache = ExecutableCache(locate: locate)
     }
 
     // MARK: detect
 
     public func detect() async -> EngineStatus {
-        await detectStatus(runner: runner, executable: executable, arguments: ["version"]) { stdout in
+        await detectStatus(runner: runner, executable: cache.relocate(), arguments: ["version"]) { stdout in
             guard let first = stdout.split(whereSeparator: \.isNewline).first else { return nil }
             let version = first.trimmingCharacters(in: .whitespaces)
             return version.isEmpty ? nil : version
@@ -92,7 +98,12 @@ public struct MasEngine: Engine {
     }
 
     public func listInstalled() async throws -> [Package] {
-        try await runRecords(["list", "--json"]).map { package($0, installed: $0.record.version) }
+        // Every App Store app was picked by someone; none comes in as a dependency.
+        try await runRecords(["list", "--json"]).map {
+            var app = package($0, installed: $0.record.version)
+            app.installedOnRequest = true
+            return app
+        }
     }
 
     public func listOutdated() async throws -> [Package] {

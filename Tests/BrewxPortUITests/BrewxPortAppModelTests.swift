@@ -1,5 +1,6 @@
 import Testing
 import Foundation
+import AppKit
 import Observation
 import BrewxPortCore
 import BrewxPortRun
@@ -15,13 +16,17 @@ import BrewxPortRun
 
     static func services(catalog: FakeCatalog = FakeCatalog(), executor: FakeRunExecutor? = FakeRunExecutor(),
                          helper: FakeHelperManager? = nil, isDemo: Bool = false, host: Arch = .arm64,
-                         setupProblem: String? = nil, isAdministrator: Bool? = true) -> Services {
+                         setupProblem: String? = nil, isAdministrator: Bool? = true,
+                         hostInfo: HostInfo = HostInfo(appleSilicon: true, macOSMajor: 15), cltPresent: Bool = true,
+                         receipts: any InstallerReceiptReading = NoReceipts(),
+                         store: MemoryStore = MemoryStore()) -> Services {
         // The model loads Installed and Updates on its own; a test that doesn't script them gets empty lists.
         catalog.scriptEmpty(.installed)
         catalog.scriptEmpty(.outdated)
         return Services(engines: PlanFixtures.engines, catalog: catalog, executor: executor, helper: helper,
-                 passwords: PromptPasswordProvider(), isAdministrator: { isAdministrator }, store: MemoryStore(),
-                 path: NoPath(), fileExists: { _ in true }, host: host, setupProblem: setupProblem, isDemo: isDemo)
+                 passwords: PromptPasswordProvider(), isAdministrator: { isAdministrator }, store: store,
+                 path: NoPath(), fileExists: { _ in true }, host: host, hostInfo: hostInfo,
+                 cltPresent: { cltPresent }, receipts: receipts, setupProblem: setupProblem, isDemo: isDemo)
     }
 
     static func package(_ engine: EngineID, _ kind: PackageKind, _ name: String,
@@ -155,7 +160,7 @@ import BrewxPortRun
     }
 
     @Test func checkAgainUsesRefresh() async {
-        let helper = FakeHelperManager(refresh: [.requiresApproval])
+        let helper = FakeHelperManager(refresh: [.requiresApproval], ensure: [.requiresApproval])
         let model = BrewxPortAppModel(services: F.services(helper: helper))
         model.checkHelper()
         #expect(await waitUntil { model.helperState == .requiresApproval && !model.checkingHelper })
@@ -336,7 +341,7 @@ import BrewxPortRun
         model.openLoginItems()
         #expect(helper.openCount == 0)
         var ended = 0
-        model.onRunEnded = { ended += 1 }
+        model.addRunEndedObserver { ended += 1 }
         model.run.cancel()
         #expect(await waitUntil { !model.run.isRunning })
         #expect(model.quitsWhenLastWindowCloses)
@@ -344,6 +349,360 @@ import BrewxPortRun
         #expect(await waitUntil { ended == 1 })
         model.openLoginItems()
         #expect(helper.openCount == 1)
+    }
+
+    @Test func setupRunRechecksEngines() async {
+        let executor = FakeRunExecutor(events: [.started(0), .finished(0, 1), .done])
+        let model = BrewxPortAppModel(services: F.services(
+            executor: executor, helper: FakeHelperManager(),
+            hostInfo: HostInfo(appleSilicon: true, macOSMajor: 15), cltPresent: true))
+        var checks = 0
+        model.addEnginesCheckedObserver { _ in checks += 1 }
+        #expect(model.canSetUpEngines)
+        model.setUpEngine(.homebrew)
+        #expect(await waitUntil { executor.runs.count == 1 })
+        #expect(executor.runs[0].steps.map(\.setupTarget) == [SetupTarget.homebrew])
+        // Even a failed setup ends with a fresh engine check.
+        #expect(await waitUntil { checks == 1 })
+        // An ordinary run doesn't recheck.
+        _ = await F.source([F.package(.homebrew, .formula, "wget")], in: model)
+        model.perform(.install, on: [F.wget])
+        #expect(await waitUntil { executor.runs.count == 2 })
+        try? await Task.sleep(for: .milliseconds(100))
+        #expect(checks == 1)
+    }
+
+    @Test func setupThatNeverStartsDoesNotRecheckAfterALaterRun() async {
+        // A standard account: the setup's helper step is dropped up front, so no run starts.
+        let executor = FakeRunExecutor(events: [.started(0), .finished(0, 0), .done])
+        let model = BrewxPortAppModel(services: F.services(
+            executor: executor, helper: FakeHelperManager(), isAdministrator: false,
+            hostInfo: HostInfo(appleSilicon: true, macOSMajor: 15), cltPresent: true))
+        var checks = 0
+        model.addEnginesCheckedObserver { _ in checks += 1 }
+        #expect(model.setUpEngine(.homebrew) == false)
+        #expect(!model.run.isRunning)
+        _ = await F.source([F.package(.homebrew, .formula, "wget")], in: model)
+        model.perform(.install, on: [F.wget])
+        _ = await waitUntil { executor.runs.count == 1 }
+        try? await Task.sleep(for: .milliseconds(100))
+        #expect(checks == 0)
+    }
+
+    @Test func setupWaitsForHelperApprovalThenStartsExactlyOneRun() async {
+        let executor = FakeRunExecutor(events: [.started(0), .finished(0, 1), .done])
+        let helper = FakeHelperManager(refresh: [.enabled], ensure: [.requiresApproval, .enabled])
+        let none: [EngineID: EngineStatus] = [.homebrew: .missing, .macports: .missing, .nanobrew: .missing,
+                                              .mas: .missing]
+        let model = BrewxPortAppModel(services: F.services(
+            catalog: FakeCatalog(engines: none), executor: executor, helper: helper,
+            hostInfo: HostInfo(appleSilicon: true, macOSMajor: 15), cltPresent: true))
+        model.start()
+        #expect(await waitUntil { model.helperState == .requiresApproval && model.setup.stage != .hidden })
+        model.setup.setUp(.homebrew)
+        // The helper's answer reaches the setup model in its own main-actor hop, so the stage can lag a moment.
+        #expect(await waitUntil { model.setup.stage == .needsHelperApproval })
+        model.checkHelper()
+        #expect(await waitUntil { executor.runs.count == 1 })
+        try? await Task.sleep(for: .milliseconds(150))
+        #expect(executor.runs.count == 1)
+        // The run failed (nothing appeared after the recheck): the screen says so rather than going away.
+        #expect(await waitUntil { if case .failed = model.setup.stage { true } else { false } })
+    }
+
+    // MARK: Set Up buttons
+
+    static let arm = HostInfo(appleSilicon: true, macOSMajor: 15)
+    static let intel = HostInfo(appleSilicon: false, macOSMajor: 15)
+
+    func setupModel(_ engines: [EngineID: EngineStatus], host: HostInfo = arm, isDemo: Bool = false,
+                    executor: FakeRunExecutor? = FakeRunExecutor(), problem: String? = nil,
+                    isAdministrator: Bool? = true) async -> BrewxPortAppModel {
+        let model = BrewxPortAppModel(services: F.services(
+            catalog: FakeCatalog(engines: engines), executor: executor, helper: FakeHelperManager(), isDemo: isDemo,
+            setupProblem: problem, isAdministrator: isAdministrator,
+            hostInfo: host, cltPresent: true))
+        model.checkEnginesAgain()
+        _ = await waitUntil { model.enginesChecked }
+        return model
+    }
+
+    static let allMissing: [EngineID: EngineStatus] = [.homebrew: .missing, .macports: .missing, .nanobrew: .missing,
+                                                       .mas: .missing]
+
+    @Test func setupButtonEnabledForMissingEngine() async {
+        let model = await setupModel(Self.allMissing)
+        #expect(model.setupButton(for: .homebrew) == .enabled(title: "Set Up Homebrew…"))
+        #expect(model.setupButton(for: .macports) == .enabled(title: "Set Up MacPorts…"))
+    }
+
+    @Test func setupButtonHiddenWhenPresentOrUnusable() async {
+        let model = await setupModel([.homebrew: .present(path: URL(fileURLWithPath: "/opt/homebrew/bin/brew"), version: "4"),
+                                      .macports: .unusable(path: URL(fileURLWithPath: "/opt/local/bin/port"), reason: "bad")])
+        #expect(model.setupButton(for: .homebrew) == .hidden)
+        #expect(model.setupButton(for: .macports) == .hidden)
+    }
+
+    @Test func setupButtonHomebrewOnIntelIsOneLine() async {
+        let model = await setupModel(Self.allMissing, host: Self.intel)
+        #expect(model.setupButton(for: .homebrew)
+                == .unavailable(note: "Homebrew doesn't support Intel Macs. MacPorts does the same job."))
+        #expect(model.setupButton(for: .macports) == .enabled(title: "Set Up MacPorts…"))
+    }
+
+    @Test func setupButtonDisabledInDemo() async {
+        let model = await setupModel(Self.allMissing, isDemo: true)
+        #expect(model.setupButton(for: .homebrew)
+                == .disabled(title: "Set Up Homebrew…", help: "Not available in demo mode"))
+    }
+
+    @Test func setupButtonsExplainOnAStandardAccount() async {
+        let model = await setupModel(Self.allMissing, isAdministrator: false)
+        #expect(model.setupButton(for: .homebrew)
+                == .disabled(title: "Set Up Homebrew…", help: "Needs an administrator account."))
+        #expect(model.setupButton(for: .macports)
+                == .disabled(title: "Set Up MacPorts…", help: "Needs an administrator account."))
+        #expect(model.setupButton(for: .nanobrew)
+                == .disabled(title: "Set Up nanobrew…", help: "Needs an administrator account."))
+    }
+
+    @Test func aSetupWithNothingToRunKeepsItsFirstProblem() async {
+        let model = await setupModel(Self.allMissing)
+        #expect(!model.setUpEngine(.mas))
+        #expect(model.lastSetupPlanProblem == "Set up Homebrew or MacPorts first: mas installs through one of them.")
+        #expect(model.setUpEngine(.homebrew))
+        #expect(model.lastSetupPlanProblem == nil)
+    }
+
+    @Test func previewFirstLaunchDoesNothingOutsideDemo() async {
+        let model = await setupModel([.homebrew: .present(path: URL(fileURLWithPath: "/opt/homebrew/bin/brew"), version: "4")])
+        model.previewFirstLaunch()
+        #expect(model.engineStatuses[.homebrew] != .missing)
+        #expect(model.setup.stage == .hidden)
+    }
+
+    @Test func setupButtonMasNeedsAPackageManager() async {
+        let model = await setupModel(Self.allMissing)
+        guard case .disabled(_, let help) = model.setupButton(for: .mas) else { Issue.record("not disabled"); return }
+        #expect(help == "Set up Homebrew or MacPorts first: mas installs through one of them.")
+        let withBrew = await setupModel(Self.allMissing.merging(
+            [.homebrew: .present(path: URL(fileURLWithPath: "/opt/homebrew/bin/brew"), version: "4")]) { $1 })
+        #expect(withBrew.setupButton(for: .mas) == .enabled(title: "Set Up Mac App Store…"))
+    }
+
+    @Test func setupButtonDisabledWhileARunGoesAndFollowsCanSetUp() async {
+        let executor = FakeRunExecutor(events: [.started(0)], hang: true)
+        let model = await setupModel(Self.allMissing, executor: executor)
+        #expect(model.canSetUpEngines)
+        #expect(model.setUpEngine(.homebrew))
+        #expect(!model.canSetUpEngines)
+        guard case .disabled(_, let help) = model.setupButton(for: .macports) else { Issue.record("not disabled"); return }
+        #expect(help == "Wait for the current task to finish.")
+    }
+
+    @Test func setupButtonDisabledWhenCopyCannotRun() async {
+        let model = await setupModel(Self.allMissing, executor: nil, problem: "No helper.")
+        guard case .disabled(_, let help) = model.setupButton(for: .homebrew) else { Issue.record("not disabled"); return }
+        #expect(help == "No helper.")
+    }
+
+    @Test func checkAgainIsOffWhileARunGoes() async {
+        let executor = FakeRunExecutor(events: [.started(0)], hang: true)
+        let model = await setupModel(Self.allMissing, executor: executor)
+        #expect(model.canCheckEngines)
+        #expect(model.setUpEngine(.homebrew))
+        #expect(!model.canCheckEngines)
+    }
+
+    @Test func menuOfferFollowsSetupModel() async {
+        let model = await setupModel(Self.allMissing)
+        // The first launch shows it by itself; "Not now" closes it, and the menu brings it back.
+        #expect(await waitUntil { model.setup.stage != .hidden })
+        #expect(!model.canShowSetupOffer)
+        model.setup.notNow()
+        #expect(model.canShowSetupOffer)
+        model.showSetupOffer()
+        #expect(model.setup.stage == .offer(recommended: .homebrew, others: [.macports, .nanobrew]))
+        #expect(!model.canShowSetupOffer)
+        let demo = await setupModel(Self.allMissing, isDemo: true)
+        #expect(!demo.canShowSetupOffer)
+    }
+
+    /// A fresh Mac with nothing installed, the helper needing approval, and the setup sheet waiting on it.
+    private func waitingForApproval(helper: FakeHelperManager, executor: FakeRunExecutor = FakeRunExecutor(),
+                                    notifications: NotificationCenter = NotificationCenter(),
+                                    pollSleep: @escaping @Sendable (Duration) async -> Void)
+        async -> BrewxPortAppModel {
+        let none: [EngineID: EngineStatus] = [.homebrew: .missing, .macports: .missing, .nanobrew: .missing,
+                                              .mas: .missing]
+        let model = BrewxPortAppModel(services: F.services(
+            catalog: FakeCatalog(engines: none), executor: executor, helper: helper,
+            hostInfo: HostInfo(appleSilicon: true, macOSMajor: 15), cltPresent: true), notifications: notifications)
+        model.pollSleep = pollSleep
+        model.start()
+        _ = await waitUntil { model.helperState == .requiresApproval && model.setup.stage != .hidden }
+        return model
+    }
+
+    private static let shortSleep: @Sendable (Duration) async -> Void = { _ in
+        try? await Task.sleep(for: .milliseconds(5))
+    }
+
+    @Test func approvalPollNoticesApprovalAndStartsOneRun() async {
+        let executor = FakeRunExecutor(events: [.started(0), .finished(0, 0), .done])
+        let helper = FakeHelperManager(refresh: [.requiresApproval, .requiresApproval, .enabled],
+                                       ensure: [.requiresApproval, .enabled])
+        let model = await waitingForApproval(helper: helper, executor: executor, pollSleep: Self.shortSleep)
+        #expect(helper.refreshCount == 0)
+        model.setup.setUp(.homebrew)
+        // The helper's answer reaches the setup model in its own main-actor hop, so the stage can lag a moment.
+        #expect(await waitUntil { model.setup.stage == .needsHelperApproval })
+        #expect(await waitUntil { executor.runs.count == 1 })
+        #expect(model.setup.stage != .needsHelperApproval)
+        #expect(helper.refreshCount >= 3)
+        // The poll stopped with the stage, and it never registers anything.
+        try? await Task.sleep(for: .milliseconds(100))
+        let reads = helper.refreshCount
+        try? await Task.sleep(for: .milliseconds(100))
+        #expect(helper.refreshCount == reads)
+        #expect(executor.runs.count == 1)
+        #expect(helper.reinstallCount == 0)
+    }
+
+    @Test func approvalPollStopsAfterNotNow() async {
+        let helper = FakeHelperManager(refresh: [.requiresApproval], ensure: [.requiresApproval])
+        let model = await waitingForApproval(helper: helper, pollSleep: Self.shortSleep)
+        model.setup.setUp(.homebrew)
+        #expect(await waitUntil { helper.refreshCount >= 2 })
+        model.setup.notNow()
+        try? await Task.sleep(for: .milliseconds(100))
+        let reads = helper.refreshCount
+        try? await Task.sleep(for: .milliseconds(100))
+        #expect(helper.refreshCount == reads)
+    }
+
+    @Test func noPollingInOtherStages() async {
+        let helper = FakeHelperManager(refresh: [.requiresApproval], ensure: [.requiresApproval])
+        let model = await waitingForApproval(helper: helper, pollSleep: Self.shortSleep)
+        // The offer is showing: nothing is being waited for.
+        if case .offer = model.setup.stage {} else { Issue.record("expected the offer") }
+        try? await Task.sleep(for: .milliseconds(100))
+        #expect(helper.refreshCount == 0)
+    }
+
+    @Test func becomingActiveRereadsTheHelperWhileWaiting() async {
+        let helper = FakeHelperManager(refresh: [.requiresApproval], ensure: [.requiresApproval])
+        let center = NotificationCenter()
+        let model = await waitingForApproval(helper: helper, notifications: center, pollSleep: { _ in
+            try? await Task.sleep(for: .seconds(30))
+        })
+        center.post(name: NSApplication.didBecomeActiveNotification, object: nil)
+        #expect(helper.refreshCount == 0)
+        model.setup.setUp(.homebrew)
+        center.post(name: NSApplication.didBecomeActiveNotification, object: nil)
+        #expect(await waitUntil { helper.refreshCount == 1 })
+        model.setup.notNow()
+    }
+
+    @Test func demoSetUpIsNoOp() async {
+        let executor = FakeRunExecutor()
+        let model = BrewxPortAppModel(services: F.services(
+            executor: executor, isDemo: true, hostInfo: HostInfo(appleSilicon: true, macOSMajor: 15), cltPresent: true))
+        #expect(!model.canSetUpEngines)
+        model.setUpEngine(.homebrew)
+        try? await Task.sleep(for: .milliseconds(50))
+        #expect(executor.runs.isEmpty)
+        #expect(!model.run.isRunning)
+    }
+
+    @Test func runEndedObserversAllCalled() async {
+        let executor = FakeRunExecutor(events: [.started(0), .finished(0, 0), .done])
+        let model = BrewxPortAppModel(services: F.services(executor: executor))
+        _ = await F.source([F.package(.homebrew, .formula, "wget")], in: model)
+        var calls: [String] = []
+        model.addRunEndedObserver { calls.append("a") }
+        model.addRunEndedObserver { calls.append("b") }
+        model.perform(.install, on: [F.wget])
+        #expect(await waitUntil { calls.count == 2 })
+        #expect(calls == ["a", "b"])
+        // The lists were reloaded before the observers heard about it.
+        #expect(model.listReloadCount == 1)
+        try? await Task.sleep(for: .milliseconds(50))
+        #expect(calls.count == 2)
+    }
+
+    @Test func enginesCheckedObserversCalled() async {
+        let url = URL(fileURLWithPath: F.path)
+        let catalog = FakeCatalog(engines: [.homebrew: .present(path: url, version: "5"), .mas: .missing])
+        let model = BrewxPortAppModel(services: F.services(catalog: catalog))
+        var heard: [[EngineID: EngineStatus]] = []
+        var sawChecked: [Bool] = []
+        model.addEnginesCheckedObserver { statuses in
+            heard.append(statuses)
+            sawChecked.append(model.enginesChecked)
+        }
+        model.addEnginesCheckedObserver { _ in heard.append([:]) }
+        #expect(!model.enginesChecked)
+        model.checkEnginesAgain()
+        #expect(await waitUntil { heard.count == 2 })
+        #expect(model.enginesChecked)
+        #expect(heard[0] == [.homebrew: .present(path: url, version: "5"), .mas: .missing])
+        #expect(heard[1] == [:])
+        // The statuses are the model's by the time observers run.
+        #expect(sawChecked == [true])
+        catalog.setEngines([.homebrew: .missing])
+        model.checkEnginesAgain()
+        #expect(await waitUntil { heard.count == 4 })
+        #expect(heard[2] == [.homebrew: .missing])
+    }
+
+    @Test func discoverInstallUnchangedAfterRefactor() async {
+        // Discover's install goes through installRequests: same steps, same order, installed rows still left out.
+        let executor = FakeRunExecutor(events: [.started(0)], hang: true)
+        let model = BrewxPortAppModel(services: F.services(executor: executor))
+        _ = await F.source([F.package(.homebrew, .formula, "wget"), F.package(.homebrew, .formula, "jq"),
+                            F.package(.homebrew, .formula, "tree", installed: "1")], in: model)
+        let tree = PackageRef(engine: .homebrew, kind: .formula, name: "tree")
+        model.perform(.install, on: [F.wget, F.jq, tree])
+        #expect(await waitUntil { executor.runs.count == 1 })
+        #expect(executor.runs[0].steps.map(\.operation) == [.install])
+        let arguments = executor.runs[0].steps.flatMap(\.spec.arguments)
+        #expect(arguments.contains("jq") && arguments.contains("wget") && !arguments.contains("tree"))
+        // installRequests is guarded like the rest: nothing while a run is going.
+        let request = ActionRequest(operation: .install, package: F.package(.homebrew, .formula, "jq"))
+        model.installRequests([request])
+        try? await Task.sleep(for: .milliseconds(50))
+        #expect(executor.runs.count == 1)
+        model.run.cancel()
+        #expect(await waitUntil { !model.run.isRunning })
+        // ...or while the remove confirmation is up, which a confirmed uninstall clears before it starts.
+        model.perform(.uninstall, on: [tree])
+        #expect(model.confirmingRemoval)
+        model.installRequests([request])
+        try? await Task.sleep(for: .milliseconds(50))
+        #expect(executor.runs.count == 1)
+        model.confirmUninstall()
+        #expect(await waitUntil { executor.runs.count == 2 })
+        #expect(executor.runs[1].steps.map(\.operation) == [.remove])
+        model.run.cancel()
+        #expect(await waitUntil { !model.run.isRunning })
+    }
+
+    @Test func discoverInstallCheckedOffBehindRemoveConfirmation() async {
+        let catalog = FakeCatalog()
+        catalog.script(.search("wget"), .homebrew, packages: [F.package(.homebrew, .formula, "wget")])
+        let model = BrewxPortAppModel(services: F.services(catalog: catalog))
+        _ = await F.source([F.package(.homebrew, .formula, "jq", installed: "1")], in: model)
+        model.discover.query = "wget"
+        model.discover.submit()
+        #expect(await waitUntil { !model.discover.list.rows.isEmpty })
+        model.discover.list.selection.checked = [F.wget]
+        #expect(model.canInstallChecked)
+        model.perform(.uninstall, on: [F.jq])
+        #expect(model.confirmingRemoval)
+        #expect(!model.canInstallChecked)
+        model.cancelUninstall()
+        #expect(model.canInstallChecked)
     }
 
     @Test func promptRoutedToRunController() async {
@@ -969,7 +1328,11 @@ import BrewxPortRun
 
         model.sidebar = .discover
         #expect(model.primaryActionTitle == "Install Selected")
+        // Bundles is a package table now (Task 7), with nothing open here: nothing to act on.
         model.sidebar = .bundles
+        #expect(model.currentView == .bundles)
+        #expect(!model.canPerformPrimary)
+        model.sidebar = .engine(.homebrew)
         #expect(model.currentView == nil)
         #expect(!model.canPerformPrimary)
     }

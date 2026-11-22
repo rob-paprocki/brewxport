@@ -31,11 +31,34 @@ private func ref(_ kind: PackageKind, _ name: String, engine: EngineID = .homebr
     PackageRef(engine: engine, kind: kind, name: name)
 }
 
+private final class LockedFlag: @unchecked Sendable {
+    private let lock = NSLock()
+    private var flag = false
+    var value: Bool { lock.withLock { flag } }
+    func set() { lock.withLock { flag = true } }
+}
+
 @Suite struct HomebrewEngineTests {
     @Test func detectsVersion() async throws {
         let text = try fixture("version.txt")
         let engine = HomebrewEngine(runner: FakeRunner([["--version"]: ok(text)]), executable: brew)
         #expect(await engine.detect() == .present(path: brew, version: "7.0.13"))
+    }
+
+    @Test func detectsPkgInstallWithoutGit() async throws {
+        let text = try fixture("version-no-git.txt")
+        let engine = HomebrewEngine(runner: FakeRunner([["--version"]: ok(text)]), executable: brew)
+        #expect(await engine.detect() == .present(path: brew, version: ">=4.3.0"))
+    }
+
+    @Test func engineInstalledAfterLaunchIsFoundOnTheNextDetect() async {
+        let installed = LockedFlag()
+        let engine = HomebrewEngine(runner: FakeRunner([["--version"]: ok("Homebrew 7.0.15\n")]),
+                                    locate: { installed.value ? brew : nil })
+        #expect(await engine.detect() == .missing)
+        installed.set()
+        #expect(await engine.detect() == .present(path: brew, version: "7.0.15"))
+        #expect(engine.executableURL == brew)
     }
 
     @Test func detectMissingWithoutExecutable() async {
@@ -220,9 +243,79 @@ private func ref(_ kind: PackageKind, _ name: String, engine: EngineID = .homebr
     @Test func commandKeepsAtSignNames() throws {
         let spec = try HomebrewEngine(runner: FakeRunner([:]), executable: brew)
             .command(for: .install, [ref(.formula, "python@3.12")], options: InstallOptions())
-        #expect(spec.arguments == ["install", "python@3.12"])
+        #expect(spec.arguments == ["install", "--formula", "python@3.12"])
         #expect(spec.executable == brew)
         #expect(spec.needsRoot == false)
+    }
+
+    @Test func formulaInstallPassesFormulaFlag() throws {
+        // A formula entry named like a cask must never install the cask.
+        let e = HomebrewEngine(runner: FakeRunner([:]), executable: brew)
+        let spec = try e.command(for: .install, [ref(.formula, "firefox"), ref(.formula, "jq")],
+                                 options: InstallOptions(extraArgs: ["--HEAD"]))
+        #expect(spec.arguments == ["install", "--formula", "--HEAD", "firefox", "jq"])
+        // Upgrades and removes are unchanged.
+        #expect(try e.command(for: .upgrade, [ref(.formula, "jq")], options: InstallOptions()).arguments
+                == ["upgrade", "jq"])
+    }
+
+    // MARK: taps
+
+    @Test func tapInstallCommand() throws {
+        let spec = try HomebrewEngine(runner: FakeRunner([:]), executable: brew)
+            .command(for: .install, [ref(.tap, "felixkratz/formulae")], options: InstallOptions())
+        #expect(spec.arguments == ["tap", "felixkratz/formulae"])
+        #expect(spec.executable == brew)
+        #expect(spec.needsRoot == false)
+        #expect(HomebrewEngine(runner: FakeRunner([:]), executable: brew)
+            .privilege(for: .install, ref(.tap, "felixkratz/formulae")) == .never)
+    }
+
+    @Test func twoTapRefsThrow() {
+        let e = HomebrewEngine(runner: FakeRunner([:]), executable: brew)
+        #expect(throws: EngineError.self) {
+            _ = try e.command(for: .install, [ref(.tap, "a/b"), ref(.tap, "c/d")], options: InstallOptions())
+        }
+    }
+
+    @Test func tapMixedWithFormulaThrows() {
+        let e = HomebrewEngine(runner: FakeRunner([:]), executable: brew)
+        for refs in [[ref(.tap, "a/b"), ref(.formula, "jq")], [ref(.formula, "jq"), ref(.tap, "a/b")],
+                     [ref(.cask, "firefox"), ref(.tap, "a/b")]] {
+            // The tap check runs first, so the error is the tap one, not "Formulae and casks …".
+            #expect(throws: EngineError(engine: .homebrew, message: "Taps must be added in their own command"),
+                    "\(refs)") {
+                _ = try e.command(for: .install, refs, options: InstallOptions())
+            }
+        }
+    }
+
+    @Test func tapUpgradeThrows() {
+        let e = HomebrewEngine(runner: FakeRunner([:]), executable: brew)
+        for op in [PackageOperation.upgrade, .remove] {
+            #expect(throws: EngineError.self, "\(op)") {
+                _ = try e.command(for: op, [ref(.tap, "a/b")], options: InstallOptions())
+            }
+        }
+    }
+
+    @Test func tapWithOptionsOrBadNameThrows() {
+        let e = HomebrewEngine(runner: FakeRunner([:]), executable: brew)
+        for options in [InstallOptions(version: "1"), InstallOptions(variants: ["+x"]),
+                        InstallOptions(extraArgs: ["--force"])] {
+            #expect(throws: EngineError.self, "\(options)") {
+                _ = try e.command(for: .install, [ref(.tap, "a/b")], options: options)
+            }
+        }
+        for name in ["--force", "a", "a/b/c", "homebrew/core", "a/b.rb", ""] {
+            #expect(throws: EngineError.self, "\(name)") {
+                _ = try e.command(for: .install, [ref(.tap, name)], options: InstallOptions())
+            }
+        }
+        let noExe = HomebrewEngine(runner: FakeRunner([:]), executable: nil)
+        #expect(throws: EngineError.self) {
+            _ = try noExe.command(for: .install, [ref(.tap, "a/b")], options: InstallOptions())
+        }
     }
 
     @Test func caskInstallHasCaskFlag() throws {
@@ -285,6 +378,13 @@ private func ref(_ kind: PackageKind, _ name: String, engine: EngineID = .homebr
 }
 
 private let intelBrew = URL(fileURLWithPath: "/usr/local/bin/brew")
+private final class LockedCounter: @unchecked Sendable {
+    private let lock = NSLock()
+    private var n = 0
+    var count: Int { lock.withLock { n } }
+    func next() -> Int { lock.withLock { n += 1; return n } }
+}
+
 private let archTool = URL(fileURLWithPath: "/usr/bin/arch")
 
 @Suite struct HomebrewArchTests {
@@ -311,7 +411,26 @@ private let archTool = URL(fileURLWithPath: "/usr/bin/arch")
         #expect(spec.arch == .x86_64)
         let launch = spec.launchCommand(host: .arm64)
         #expect(launch.executable == archTool)
-        #expect(launch.arguments == ["-x86_64", "/usr/local/bin/brew", "install", "tree"])
+        #expect(launch.arguments == ["-x86_64", "/usr/local/bin/brew", "install", "--formula", "tree"])
+    }
+
+    @Test func anOperationKeepsOnePathEvenIfTheLocatorsAnswerChanges() async throws {
+        let wrapped = ["-x86_64", "/usr/local/bin/brew"]
+        let runner = FakeRunner([
+            wrapped + ["info", "--json=v2", "--installed"]: ok(#"{"formulae":[],"casks":[]}"#),
+            ["--version"]: versionOK(),
+        ])
+        // The first answer (at launch) is the Intel brew; every later lookup would say the native one.
+        let lookups = LockedCounter()
+        let engine = HomebrewEngine(runner: runner, locate: { lookups.next() == 1 ? intelBrew : brew }, arch: .arm64)
+        _ = try await engine.listInstalled()
+        #expect(runner.executableCalls == [archTool])
+        #expect(Array(runner.calls[0].prefix(2)) == wrapped)
+        #expect(lookups.count == 1)
+        // Only detect() looks again.
+        #expect(await engine.detect() == .present(path: brew, version: "4.4.0"))
+        #expect(runner.executableCalls == [archTool, brew])
+        #expect(engine.runArch == .arm64)
     }
 
     @Test func optHomebrewRunsNative() async throws {
@@ -323,7 +442,7 @@ private let archTool = URL(fileURLWithPath: "/usr/bin/arch")
         #expect(spec.arch == nil)
         let launch = spec.launchCommand(host: .arm64)
         #expect(launch.executable == brew)
-        #expect(launch.arguments == ["install", "tree"])
+        #expect(launch.arguments == ["install", "--formula", "tree"])
     }
 
     @Test func intelMacRunsNative() async throws {
@@ -435,5 +554,46 @@ private let ripgrepFormula = ref(.formula, "ripgrep")
         _ = try await e.info(ripgrepFormula)
         #expect(runner.calls == [argv])
         #expect(runner.executableCalls == [URL(fileURLWithPath: "/usr/bin/arch")])
+    }
+}
+
+// MARK: taps (Plan 4 Task 3)
+
+extension HomebrewEngineTests {
+    @Test func listTapsParsesCapture() async throws {
+        let runner = FakeRunner([["tap"]: ok(try fixture("tap.txt"))])
+        let taps = try await HomebrewEngine(runner: runner, executable: brew).listTaps()
+        #expect(taps == ["felixkratz/formulae"])
+        #expect(runner.calls == [["tap"]])
+        #expect(runner.optionsCalls.first?.timeout == BrewxPortTimeouts.engineQuery)
+    }
+
+    @Test func listTapsRejectsGarbage() async throws {
+        // DERIVED from the real tap.txt capture: one path-like line added.
+        let text = try fixture("tap.txt") + "../x\n"
+        let engine = HomebrewEngine(runner: FakeRunner([["tap"]: ok(text)]), executable: brew)
+        await #expect(throws: EngineError.self) { try await engine.listTaps() }
+    }
+
+    @Test func listTapsSkipsBuiltInTaps() async throws {
+        // DERIVED from the real tap.txt capture: Homebrew's own taps added around it, as older brew lists them.
+        let text = "homebrew/core\n" + (try fixture("tap.txt")) + "homebrew/cask\n"
+        let engine = HomebrewEngine(runner: FakeRunner([["tap"]: ok(text)]), executable: brew)
+        #expect(try await engine.listTaps() == ["felixkratz/formulae"])
+    }
+
+    @Test func listTapsFailsOnNonZeroExitAndWithoutBrew() async throws {
+        let failing = HomebrewEngine(runner: FakeRunner([["tap"]: CommandResult(exitCode: 1, stdout: "", stderr: "x")]),
+                                     executable: brew)
+        await #expect(throws: EngineError.self) { try await failing.listTaps() }
+        let missing = HomebrewEngine(runner: FakeRunner([:]), executable: nil)
+        await #expect(throws: EngineError.self) { try await missing.listTaps() }
+    }
+
+    @Test func installedCoreAndCaskPackagesHaveNoFullName() async throws {
+        let runner = FakeRunner([["info", "--json=v2", "--installed"]: ok(try fixture("info-installed.json"))])
+        let result = try await HomebrewEngine(runner: runner, executable: brew).listInstalled()
+        #expect(!result.isEmpty)
+        #expect(result.allSatisfy { $0.fullName == nil })
     }
 }

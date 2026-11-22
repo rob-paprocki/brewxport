@@ -1,0 +1,10 @@
+Software Update Tool
+
+Finding available software
+Software Update found the following new or updated software:
+* Label: Safari27.2SequoiaAuto-27.2
+	Title: Safari, Version: 27.2, Size: 238722KiB, Recommended: YES, 
+* Label: macOS Sequoia 15.8.3-24H241
+	Title: macOS Sequoia 15.8.3, Version: 15.8.3, Size: 2362098KiB, Recommended: YES, Action: restart, 
+* Label: macOS 27.2.1-26B131
+	Title: macOS 27.2.1, Version: 27.2.1, Size: 12636104KiB, Recommended: YES, Action: restart, 

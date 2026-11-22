@@ -95,4 +95,45 @@ import BrewxPortRun
         #expect(kept == steps)
         #expect(notes.isEmpty)
     }
+
+    // MARK: Setup steps
+
+    static let setupStep = RunStep(
+        engine: .macports, kind: .port, operation: .install,
+        spec: CommandSpec(executable: URL(fileURLWithPath: "/usr/bin/true"), arguments: [], needsRoot: true),
+        title: "Set up MacPorts", setupTarget: .macports)
+
+    @Test func standardAccountDropsSetupStep() {
+        let (kept, notes) = RunPreflight.filter([F.formula(), Self.setupStep], helperState: .enabled,
+                                                isAdministrator: false)
+        #expect(kept == [F.formula()])
+        #expect(notes == ["Skipped Set up MacPorts: they need an administrator account, and this one isn't."])
+    }
+
+    @Test func helperNotEnabledDropsSetupStep() {
+        let (kept, notes) = RunPreflight.filter([F.formula(), Self.setupStep], helperState: .requiresApproval,
+                                                isAdministrator: true)
+        #expect(kept == [F.formula()])
+        #expect(notes.count == 1)
+        #expect(notes.first?.contains("Skipped Set up MacPorts.") == true)
+        #expect(notes.first?.contains("need BrewxPort's helper") == true)
+        let (all, none) = RunPreflight.filter([Self.setupStep], helperState: .enabled, isAdministrator: true)
+        #expect(all == [Self.setupStep])
+        #expect(none.isEmpty)
+    }
+
+    @Test func dependentStepIsDroppedWithItsSetupStep() {
+        let nbInit = RunStep(engine: .nanobrew, kind: .formula, operation: .install,
+                             spec: CommandSpec(executable: URL(fileURLWithPath: "/opt/nanobrew/prefix/bin/nb"),
+                                               arguments: ["init"], needsRoot: true),
+                             title: "Run nb init", dependsOnPrevious: true)
+        let (kept, notes) = RunPreflight.filter([F.formula(), Self.setupStep, nbInit], helperState: .notRegistered,
+                                                isAdministrator: true)
+        #expect(kept == [F.formula()])
+        #expect(notes.count == 1)
+        #expect(notes.first?.hasPrefix("Skipped Set up MacPorts; Run nb init. Engine setup steps need") == true)
+        // With the helper ready both stay.
+        let all = [Self.setupStep, nbInit]
+        #expect(RunPreflight.filter(all, helperState: .enabled, isAdministrator: true).steps == all)
+    }
 }

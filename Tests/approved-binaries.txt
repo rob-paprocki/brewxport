@@ -3,3 +3,7 @@
 # or new binary fails Tests/check_repo.py and the public build until its line is approved here.
 f59a9fa96dede3aa906010e5226a5d9334418c621efe187a941df2f87f9108c5  docs/images/updates-dark.png
 70e2cb5fbd64e50f3a09545a593fb53a073e6c0ffaaaea6ba0bffa87d06dfc86  docs/images/updates-light.png
+1a2efb44204663d4934443f5494bfe07b98f94e072ef537070355d1f867d6f73  docs/images/bundles-dark.png
+f19b71a70f78c605c5f7b1c36931baffd94b00011219f1afce2e81b3d452950b  docs/images/bundles-light.png
+19959d774dfc24fd89508d6ac34fb9fb43f25c4a1e89d9e7d7a6bd0489e1ccf5  docs/images/setup-light.png
+4a01a09c9576a223cf0fb323b568618272fa88b0f70f006088da3e7fe681f9b5  docs/images/setup-dark.png

@@ -14,9 +14,12 @@ public struct RowActionItem: Hashable, Sendable {
 
 /// The right-click menu: only the items that apply to the rows it was opened for, in a fixed order.
 public enum RowActions {
+    /// `installable` is read only on Bundles (`BundlesModel.installableRefs`): its Install shows when one of the rows
+    /// can be installed. Bundles has no Update, Uninstall, Ignore or Skip.
     @MainActor public static func items(for refs: Set<PackageRef>, in view: PackageView,
                                         rows: [PackageRef: PackageRow], outdated: Set<PackageRef>,
-                                        prefs: UpdatePreferences, isRunning: Bool, canRun: Bool) -> [RowActionItem] {
+                                        prefs: UpdatePreferences, isRunning: Bool, canRun: Bool,
+                                        installable: Set<PackageRef> = []) -> [RowActionItem] {
         // Only rows the list knows: a ref that vanished (or was filtered out of the table) isn't acted on.
         let refs = refs.filter { rows[$0] != nil }
         guard !refs.isEmpty else { return [] }
@@ -48,6 +51,10 @@ public enum RowActions {
                 add(.update, "Update", "arrow.triangle.2.circlepath", enabled: mayRun)
             }
             add(.uninstall, "Uninstall…", "trash", enabled: mayRun)
+        case .bundles:
+            if refs.contains(where: { installable.contains($0) }) {
+                add(.install, "Install", "arrow.down.circle", enabled: mayRun)
+            }
         }
         if single { add(.showDetails, "Show details", "info.circle") }
         add(.copyName, single ? "Copy name" : "Copy names", "doc.on.doc")

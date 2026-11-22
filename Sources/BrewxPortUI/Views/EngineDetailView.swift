@@ -20,8 +20,10 @@ struct EngineDetailView: View {
                     Spacer()
                     if model.checkingEngines { ProgressView().controlSize(.small).accessibilityLabel("Checking engines") }
                     Button("Check again", action: model.checkEnginesAgain)
-                        .disabled(model.checkingEngines)
+                        .disabled(!model.canCheckEngines)
                 }
+                SetupButton(model: model, engine: engine)
+                    .frame(maxWidth: .infinity, alignment: .trailing)
             } header: {
                 Label(engine.displayName, systemImage: EngineRowText.symbol(engine)).font(.title2)
             }

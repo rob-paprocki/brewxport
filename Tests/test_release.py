@@ -235,7 +235,9 @@ class PatternTests(unittest.TestCase):
     def test_this_repos_approved_binaries_are_its_only_binaries(self):
         approved, problems = check_repo.load_approved(ROOT)
         self.assertEqual(problems, [])
-        self.assertEqual(sorted(approved), ["docs/images/updates-dark.png", "docs/images/updates-light.png"])
+        self.assertEqual(sorted(approved), ["docs/images/bundles-dark.png", "docs/images/bundles-light.png",
+                                    "docs/images/setup-dark.png", "docs/images/setup-light.png",
+                                    "docs/images/updates-dark.png", "docs/images/updates-light.png"])
 
 
 PNG = b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\xff\xfe"        # a few bytes that aren't UTF-8

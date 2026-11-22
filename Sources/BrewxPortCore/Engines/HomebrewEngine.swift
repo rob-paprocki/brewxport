@@ -1,48 +1,60 @@
 import Foundation
 
 /// Homebrew (formulae and casks), driven through `brew` and its `--json=v2` output.
-public struct HomebrewEngine: Engine {
+public struct HomebrewEngine: Engine, TapListing {
     public let id: EngineID = .homebrew
     public let capabilities: EngineCapabilities = [.casks, .jsonOutput]
 
     private let runner: CommandRunning
-    private let executable: URL?
+    private let cache: ExecutableCache
+    private var executable: URL? { cache.current }
     private let host: Arch
 
     /// `arch` is the machine's architecture; tests force it.
     public init(runner: CommandRunning, executable: URL?, arch: Arch = .current) {
         self.runner = runner
-        self.executable = executable
+        self.cache = ExecutableCache(locate: { executable })
+        self.host = arch
+    }
+
+    public init(runner: CommandRunning, locate: @escaping @Sendable () -> URL?, arch: Arch = .current) {
+        self.runner = runner
+        self.cache = ExecutableCache(locate: locate)
         self.host = arch
     }
 
     public var executableURL: URL? { executable }
 
     /// Intel Homebrew in /usr/local needs Rosetta when the machine is arm64.
-    private var commandArch: Arch? {
-        executable?.path == "/usr/local/bin/brew" ? .x86_64 : nil
+    private func arch(for exe: URL?) -> Arch? {
+        exe?.path == "/usr/local/bin/brew" ? .x86_64 : nil
     }
 
     /// x86_64 for Intel Homebrew in /usr/local, otherwise the machine's architecture.
-    public var runArch: Arch { commandArch ?? host }
+    public var runArch: Arch { arch(for: executable) ?? host }
 
     /// Every query goes through here so it gets the same arch wrapping as install/upgrade/remove.
-    private func query(_ exe: URL, _ args: [String]) async throws -> CommandResult {
-        let launch = CommandSpec(executable: exe, arguments: args, needsRoot: false, arch: commandArch)
+    private func query(_ exe: URL, _ args: [String], options: RunOptions = RunOptions()) async throws -> CommandResult {
+        let launch = CommandSpec(executable: exe, arguments: args, needsRoot: false, arch: arch(for: exe))
             .launchCommand(host: host)
-        return try await runner.run(launch.executable, launch.arguments)
+        return try await runner.run(launch.executable, launch.arguments, options: options)
     }
 
     // MARK: detect
 
     public func detect() async -> EngineStatus {
-        await detectStatus(runner: runner, executable: executable, arguments: ["--version"],
-                           arch: commandArch, host: host) { stdout in
-            // "Homebrew 7.0.13"
+        let exe = cache.relocate()
+        return await detectStatus(runner: runner, executable: exe, arguments: ["--version"],
+                           arch: arch(for: exe), host: host) { stdout in
+            // "Homebrew 7.0.13", or from the official .pkg without a git checkout
+            // "Homebrew >=4.3.0 (shallow or no git repository)": any version token after "Homebrew" works.
             guard let first = stdout.split(whereSeparator: \.isNewline).first else { return nil }
             let parts = first.split(separator: " ")
-            guard parts.count >= 2, parts[0] == "Homebrew", parts[1].first?.isNumber == true else { return nil }
-            return String(parts[1])
+            guard parts.count >= 2, parts[0] == "Homebrew" else { return nil }
+            let version = parts[1]
+            let digits = version.drop(while: { $0 == ">" || $0 == "=" })
+            guard digits.first?.isNumber == true else { return nil }
+            return String(version)
         }
     }
 
@@ -80,16 +92,31 @@ public struct HomebrewEngine: Engine {
 
     private struct InstalledDoc: Decodable {
         struct Formula: Decodable {
-            struct Installed: Decodable { let version: String }
+            struct Installed: Decodable {
+                let version: String
+                /// From the install receipt; missing on receipts older Homebrew versions wrote.
+                let installed_on_request: Bool?
+            }
             let name: String
+            let full_name: String?
+            let tap: String?
             let installed: [Installed]
         }
         struct Cask: Decodable {
             let token: String
+            let full_token: String?
+            let tap: String?
             let installed: String?
         }
         let formulae: [Formula]
         let casks: [Cask]
+    }
+
+    /// `qualified` when `tap` is a third-party tap, else nil. Homebrew's own taps (`BundleRules.builtInTaps`) install
+    /// by bare name, so their packages never get a `fullName`.
+    private static func fullName(_ qualified: String?, tap: String?) -> String? {
+        guard let tap = nonBlank(tap), !BundleRules.builtInTaps.contains(tap.lowercased()) else { return nil }
+        return nonBlank(qualified)
     }
 
     public func listInstalled() async throws -> [Package] {
@@ -97,14 +124,41 @@ public struct HomebrewEngine: Engine {
         let formulae = doc.formulae.map { f in
             Package(id: PackageRef(engine: .homebrew, kind: .formula, name: f.name),
                     displayName: f.name,
-                    installedVersion: f.installed.last?.version)
+                    installedVersion: f.installed.last?.version,
+                    fullName: Self.fullName(f.full_name, tap: f.tap),
+                    installedOnRequest: f.installed.last?.installed_on_request)
         }
         let casks = doc.casks.map { c in
             Package(id: PackageRef(engine: .homebrew, kind: .cask, name: c.token),
                     displayName: c.token,
-                    installedVersion: c.installed)
+                    installedVersion: c.installed,
+                    fullName: Self.fullName(c.full_token, tap: c.tap),
+                    // Casks are never installed as another package's dependency in practice; count them as asked for.
+                    installedOnRequest: true)
         }
         return formulae + casks
+    }
+
+    // MARK: taps
+
+    /// Third-party taps from `brew tap`, one per line. `homebrew/core` and `homebrew/cask` are skipped; any other
+    /// line that isn't a valid `user/repo` tap name makes the call throw rather than be dropped.
+    public func listTaps() async throws -> [String] {
+        let exe = try requireExecutable()
+        let args = ["tap"]
+        let result = try await query(exe, args, options: RunOptions(timeout: BrewxPortTimeouts.engineQuery))
+        guard result.exitCode == 0 else { throw failure("brew tap failed", result) }
+        var taps: [String] = []
+        for line in result.stdout.split(whereSeparator: \.isNewline) {
+            let name = line.trimmingCharacters(in: .whitespaces)
+            if name.isEmpty || BundleRules.builtInTaps.contains(name.lowercased()) { continue }
+            guard BundleRules.isValidTapName(name) else {
+                throw EngineError(engine: .homebrew,
+                                  message: "Couldn't read brew tap output: “\(BundleRules.shown(name))” isn't a tap name")
+            }
+            taps.append(name)
+        }
+        return taps
     }
 
     // MARK: outdated
@@ -237,6 +291,10 @@ public struct HomebrewEngine: Engine {
         guard refs.allSatisfy({ $0.engine == .homebrew }) else {
             throw EngineError(engine: .homebrew, message: "Package belongs to a different engine")
         }
+        // Taps first, before the formula/cask check: a tap is added with `brew tap`, one per command, never installed.
+        if refs.contains(where: { $0.kind == .tap }) {
+            return try tapCommand(for: op, refs, options: options)
+        }
         guard refs.allSatisfy({ $0.kind == first.kind }) else {
             throw EngineError(engine: .homebrew, message: "Formulae and casks must be handled in separate commands")
         }
@@ -255,10 +313,38 @@ public struct HomebrewEngine: Engine {
         case .remove: verb = "uninstall"
         }
         var args = [verb]
-        if first.kind == .cask { args.append("--cask") }
+        if first.kind == .cask {
+            args.append("--cask")
+        } else if op == .install, first.kind == .formula {
+            // A formula entry named like a cask must not install the cask.
+            args.append("--formula")
+        }
         args += options.extraArgs
         args += names
-        return CommandSpec(executable: exe, arguments: args, needsRoot: false, arch: commandArch)
+        return CommandSpec(executable: exe, arguments: args, needsRoot: false, arch: arch(for: exe))
+    }
+
+    /// `brew tap <user/repo>`: exactly one third-party tap, install only, no options.
+    private func tapCommand(for op: PackageOperation, _ refs: [PackageRef], options: InstallOptions) throws
+        -> CommandSpec {
+        guard refs.allSatisfy({ $0.kind == .tap }) else {
+            throw EngineError(engine: .homebrew, message: "Taps must be added in their own command")
+        }
+        guard refs.count == 1, let tap = refs.first else {
+            throw EngineError(engine: .homebrew, message: "Taps are added one at a time")
+        }
+        guard op == .install else {
+            throw EngineError(engine: .homebrew, message: "BrewxPort only adds taps")
+        }
+        guard options == InstallOptions() else {
+            throw EngineError(engine: .homebrew, message: "Adding a tap takes no options")
+        }
+        let names = try packageNameArguments(refs, engine: .homebrew)
+        guard BundleRules.isValidTapName(tap.name) else {
+            throw EngineError(engine: .homebrew, message: "Invalid tap name: \(BundleRules.shown(tap.name))")
+        }
+        let exe = try requireExecutable()
+        return CommandSpec(executable: exe, arguments: ["tap"] + names, needsRoot: false, arch: arch(for: exe))
     }
 
     // MARK: helpers

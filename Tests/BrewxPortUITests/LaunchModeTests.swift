@@ -34,4 +34,21 @@ import Foundation
         #expect(LaunchMode.parse([Self.program], bundleIdentifier: "com.brewxport.app") == .normal)
         #expect(LaunchMode.parse([Self.program], bundleIdentifier: nil) == .normal)
     }
+
+    @Test func demoBundleFlagParsed() {
+        var inventory = DemoOptions()
+        inventory.bundle = "inventory"
+        #expect(LaunchMode.parse([Self.program, "--demo", "--demo-bundle", "inventory"]) == .demo(inventory))
+        var brewfile = DemoOptions()
+        brewfile.bundle = "brewfile"
+        brewfile.appearance = .dark
+        #expect(LaunchMode.parse([Self.program, "--demo-bundle", "brewfile", "--appearance", "dark"],
+                                 bundleIdentifier: "com.brewxport.demo") == .demo(brewfile))
+        // An unknown sample, a path, or a missing value is ignored; without --demo it's not a demo.
+        #expect(LaunchMode.parse([Self.program, "--demo", "--demo-bundle", "vm-export"]) == .demo(DemoOptions()))
+        #expect(LaunchMode.parse([Self.program, "--demo", "--demo-bundle", "/tmp/x.brewxportbundle"])
+                == .demo(DemoOptions()))
+        #expect(LaunchMode.parse([Self.program, "--demo", "--demo-bundle"]) == .demo(DemoOptions()))
+        #expect(LaunchMode.parse([Self.program, "--demo-bundle", "inventory"]) == .normal)
+    }
 }

@@ -7,13 +7,19 @@ public struct NanobrewEngine: Engine {
     public let capabilities: EngineCapabilities = [.casks, .jsonOutput]
 
     private let runner: CommandRunning
-    private let executable: URL?
+    private let cache: ExecutableCache
+    private var executable: URL? { cache.current }
 
     public var executableURL: URL? { executable }
 
     public init(runner: CommandRunning, executable: URL?) {
         self.runner = runner
-        self.executable = executable
+        self.cache = ExecutableCache(locate: { executable })
+    }
+
+    public init(runner: CommandRunning, locate: @escaping @Sendable () -> URL?) {
+        self.runner = runner
+        self.cache = ExecutableCache(locate: locate)
     }
 
     // MARK: JSON shape (schema 1)
@@ -55,7 +61,7 @@ public struct NanobrewEngine: Engine {
     // MARK: detect
 
     public func detect() async -> EngineStatus {
-        await detectStatus(runner: runner, executable: executable, arguments: ["help"]) { stdout in
+        await detectStatus(runner: runner, executable: cache.relocate(), arguments: ["help"]) { stdout in
             // nb has no version command. The first line of help is "nanobrew v0.1.216 - The fastest package manager",
             // with ANSI colour codes around the words.
             guard let first = stdout.split(whereSeparator: \.isNewline).first else { return nil }

@@ -14,6 +14,15 @@ public enum BrewxPortTimeouts {
     /// How long Installed waits for the user's login shell to print its PATH before it uses the system PATH.
     public static let loginShell: Duration = .seconds(5)
 
+    /// How often the setup sheet re-reads the helper's state while it waits for the user to approve it in System Settings.
+    public static let helperApprovalPoll: Duration = .seconds(2)
+
+    /// How long the helper waits for GitHub to answer a "latest release" query.
+    public static let releaseQuery: Duration = .seconds(60)
+
+    /// The longest one engine-setup download or install command may take (a Command Line Tools install is about 1 GB).
+    public static let engineSetup: Duration = .seconds(1800)
+
     /// "didn't answer within 60 seconds", with the seconds taken from `timeout`.
     public static func didntAnswer(within timeout: Duration) -> String {
         let parts = timeout.components

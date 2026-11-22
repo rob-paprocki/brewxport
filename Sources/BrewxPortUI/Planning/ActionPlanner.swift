@@ -34,9 +34,10 @@ public struct ActionPlan: Sendable, Equatable {
 /// Turns requests into run steps.
 ///
 /// Removes run first, then installs, then upgrades. Within each, engines go in `order`, and within an engine,
-/// formulae (or ports, or apps) come before casks, because Homebrew and nanobrew can't mix the two in one command.
-/// Requests are batched into one step per (operation, engine, kind group); a request with non-default
-/// `InstallOptions` gets a step of its own, so a MacPorts install with variants is always one port.
+/// Homebrew taps come first (so formulae from them resolve), then formulae (or ports, or apps), then casks, because
+/// Homebrew and nanobrew can't mix the two in one command. Requests are batched into one step per (operation, engine,
+/// kind group); every tap, and every request with non-default `InstallOptions`, gets a step of its own, so a MacPorts
+/// install with variants is always one port. Two installs share a name when `BundleRules.duplicateKey` matches.
 ///
 /// Each step's command comes from the engine's own `command(for:…)`. An engine that can't build its command is
 /// reported in `problems` and left out; the other steps still run.
@@ -63,22 +64,40 @@ public enum ActionPlanner {
         var unique: [ActionRequest] = []
         for request in requests where !unique.contains(request) { unique.append(request) }
 
-        // The same name installed from two engines: the user has to pick one.
+        // The same name installed from two engines, or twice as the same kind from one (Homebrew's formulae `jq` and
+        // `foo/bar/jq`): the user has to pick one. A formula and a cask with one name install side by side.
         var refusedInstalls = Set<PackageRef>()
         var installNames: [String] = []
         var installsByName: [String: [ActionRequest]] = [:]
         for request in unique where request.operation == .install {
-            let key = request.package.displayName.lowercased()
+            let key = BundleRules.duplicateKey(request.package) // the import preview's key too
             if installsByName[key] == nil { installNames.append(key) }
             installsByName[key, default: []].append(request)
         }
         for key in installNames {
             let group = installsByName[key] ?? []
             let sources = Set(group.map(\.package.id.engine)).sorted(by: byPosition)
-            guard sources.count > 1 else { continue }
-            problems.append("\(group[0].package.displayName) is selected from "
-                            + "\(listed(sources.map(\.displayName))). Pick one.")
-            refusedInstalls.formUnion(group.map(\.package.id))
+            if sources.count > 1 {
+                problems.append("\(group[0].package.displayName) is selected from "
+                                + "\(listed(sources.map(\.displayName))). Pick one.")
+                refusedInstalls.formUnion(group.map(\.package.id))
+                continue
+            }
+            // One engine: refuse only refs that share a kind with another.
+            var kinds: [PackageKind] = []
+            var refsByKind: [PackageKind: [PackageRef]] = [:]
+            for request in group {
+                let ref = request.package.id
+                if refsByKind[ref.kind] == nil { kinds.append(ref.kind) }
+                if !(refsByKind[ref.kind] ?? []).contains(ref) { refsByKind[ref.kind, default: []].append(ref) }
+            }
+            for kind in kinds {
+                let refs = refsByKind[kind] ?? []
+                guard refs.count > 1 else { continue }
+                problems.append("\(group[0].package.displayName) is selected twice from \(sources[0].displayName) "
+                                + "(\(listed(refs.map(\.name)))). Pick one.")
+                refusedInstalls.formUnion(refs)
+            }
         }
 
         // nanobrew cask installs whose installer needs root go to Homebrew, or can't be done.
@@ -110,20 +129,23 @@ public enum ActionPlanner {
         for operation in phases {
             for engine in sortedEngines {
                 let mine = items.filter { $0.operation == operation && $0.ref.engine == engine.id }
-                for kindGroup in [mine.filter { $0.ref.kind != .cask }, mine.filter { $0.ref.kind == .cask }] {
-                    for batch in batches(kindGroup) {
-                        let refs = batch.map(\.ref)
-                        let kind = refs[0].kind
-                        let title = title(engine.id, kind: kind, names: batch.map(\.name))
-                        do {
-                            let spec = try engine.command(for: operation, refs, options: batch[0].options)
-                            steps.append(RunStep(engine: engine.id, kind: kind, operation: operation, spec: spec,
-                                                 title: title))
-                        } catch let error as EngineError {
-                            problems.append("\(title): \(error.message)")
-                        } catch {
-                            problems.append("\(title): \(error)")
-                        }
+                let taps = mine.filter { $0.ref.kind == .tap }
+                let packages = mine.filter { $0.ref.kind != .tap && $0.ref.kind != .cask }
+                let casks = mine.filter { $0.ref.kind == .cask }
+                // Taps first, so formulae from them resolve; `brew tap` takes one tap per command.
+                for batch in taps.map({ [$0] }) + batches(packages) + batches(casks) {
+                    let refs = batch.map(\.ref)
+                    let kind = refs[0].kind
+                    let stepTitle = kind == .tap && operation == .install ? "Add tap `\(refs[0].name)`"
+                        : Self.title(engine.id, kind: kind, names: batch.map(\.name))
+                    do {
+                        let spec = try engine.command(for: operation, refs, options: batch[0].options)
+                        steps.append(RunStep(engine: engine.id, kind: kind, operation: operation, spec: spec,
+                                             title: stepTitle))
+                    } catch let error as EngineError {
+                        problems.append("\(stepTitle): \(error.message)")
+                    } catch {
+                        problems.append("\(stepTitle): \(error)")
                     }
                 }
             }

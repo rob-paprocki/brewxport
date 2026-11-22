@@ -68,6 +68,8 @@ private final class FakeConnection: HelperConnecting, VersionReporting {
     func authorize(_ secret: SecretBuffer) async throws -> Data { Data() }
     func runPort(authorization: Data, arguments: [String],
                  onOutput: @escaping @Sendable (OutputEvent) -> Void) async throws -> Int32 { 0 }
+    func setUpEngine(authorization: Data, target: SetupTarget,
+                     onOutput: @escaping @Sendable (OutputEvent) -> Void) async throws -> Int32 { 0 }
     func endAuthorization() async {}
 }
 

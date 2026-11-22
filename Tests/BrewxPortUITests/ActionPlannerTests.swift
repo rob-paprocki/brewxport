@@ -158,7 +158,87 @@ enum PlanFixtures {
         ]
         let plan = ActionPlanner.make(requests, engines: F.engines, order: F.order)
         #expect(plan.problems == ["figlet is selected from nanobrew and MacPorts. Pick one."])
-        #expect(Self.shapes(plan) == [["homebrew", "formula", F.brewPath, "install", "jq"]])
+        #expect(Self.shapes(plan) == [["homebrew", "formula", F.brewPath, "install", "--formula", "jq"]])
+    }
+
+    @Test func duplicateKeySharedWithPreview() {
+        // The same key as the import preview (`BundleRules.duplicateKey`): the last name segment, lowercased.
+        let requests = [
+            F.request(.install, .homebrew, .formula, "felixkratz/formulae/borders"),
+            F.request(.install, .nanobrew, .formula, "Borders"),
+        ]
+        let plan = ActionPlanner.make(requests, engines: F.engines, order: F.order)
+        #expect(plan.problems == ["felixkratz/formulae/borders is selected from nanobrew and Homebrew. Pick one."])
+        #expect(plan.steps.isEmpty)
+    }
+
+    @Test func formulaAndCaskSameNameBothPlanned() {
+        // Discover: ticking formula `docker` and cask `docker` installs both; they live side by side.
+        let requests = [
+            F.request(.install, .homebrew, .formula, "docker"),
+            F.request(.install, .homebrew, .cask, "docker"),
+        ]
+        let plan = ActionPlanner.make(requests, engines: F.engines, order: F.order)
+        #expect(plan.problems.isEmpty)
+        #expect(Set(Self.shapes(plan).map { $0[1] }) == ["formula", "cask"])
+        #expect(Self.shapes(plan).allSatisfy { $0.last == "docker" })
+
+        // Two formulae with that name still clash; the cask is planned.
+        let three = ActionPlanner.make(requests + [F.request(.install, .homebrew, .formula, "foo/bar/docker")],
+                                       engines: F.engines, order: F.order)
+        #expect(three.problems == ["docker is selected twice from Homebrew (docker and foo/bar/docker). Pick one."])
+        #expect(Self.shapes(three).map { $0[1] } == ["cask"])
+    }
+
+    @Test func tapAndPackageWithSameNameAreNotDuplicates() {
+        let requests = [
+            F.request(.install, .homebrew, .tap, "felixkratz/formulae"),
+            F.request(.install, .nanobrew, .formula, "formulae"),
+        ]
+        let plan = ActionPlanner.make(requests, engines: F.engines, order: F.order)
+        #expect(plan.problems.isEmpty)
+        #expect(plan.steps.count == 2)
+    }
+
+    // MARK: Taps
+
+    @Test func tapsRunBeforeFormulae() {
+        let requests = [
+            F.request(.install, .homebrew, .cask, "rectangle"),
+            F.request(.install, .homebrew, .formula, "felixkratz/formulae/borders"),
+            F.request(.install, .homebrew, .tap, "felixkratz/formulae"),
+            F.request(.install, .homebrew, .formula, "jq"),
+        ]
+        let plan = ActionPlanner.make(requests, engines: F.engines, order: F.order)
+        #expect(plan.problems.isEmpty)
+        #expect(Self.shapes(plan) == [
+            ["homebrew", "tap", F.brewPath, "tap", "felixkratz/formulae"],
+            ["homebrew", "formula", F.brewPath, "install", "--formula", "felixkratz/formulae/borders", "jq"],
+            ["homebrew", "cask", F.brewPath, "install", "--cask", "rectangle"],
+        ])
+        #expect(plan.steps[0].title == "Add tap `felixkratz/formulae`")
+        #expect(plan.steps.map(RunRouting.route(for:)) == [.user, .user, .userWithAskpass])
+    }
+
+    @Test func twoTapsAreTwoSteps() {
+        let requests = [
+            F.request(.install, .homebrew, .tap, "felixkratz/formulae"),
+            F.request(.install, .homebrew, .tap, "hashicorp/tap"),
+        ]
+        let plan = ActionPlanner.make(requests, engines: F.engines, order: F.order)
+        #expect(plan.problems.isEmpty)
+        #expect(Self.shapes(plan) == [
+            ["homebrew", "tap", F.brewPath, "tap", "felixkratz/formulae"],
+            ["homebrew", "tap", F.brewPath, "tap", "hashicorp/tap"],
+        ])
+        #expect(plan.steps.map(\.title) == ["Add tap `felixkratz/formulae`", "Add tap `hashicorp/tap`"])
+    }
+
+    @Test func tapTitleSaysAddOnlyForInstalls() {
+        let plan = ActionPlanner.make([F.request(.remove, .homebrew, .tap, "felixkratz/formulae")],
+                                      engines: F.engines, order: F.order)
+        #expect(plan.steps.isEmpty)
+        #expect(plan.problems == ["Homebrew: felixkratz/formulae: BrewxPort only adds taps"])
     }
 
     @Test func sameNameUpgradeFromTwoEnginesAllowed() {

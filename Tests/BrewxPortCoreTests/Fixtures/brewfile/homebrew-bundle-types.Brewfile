@@ -1,0 +1,17 @@
+tap "apple/apple"
+brew "apple/apple/game-porting-toolkit"
+brew "postgresql@16", restart_service: true
+cask "firefox"
+mas "Refined GitHub", id: 1519867270
+winget "Steam", id: "Valve.Steam"
+winget "PowerToys", id: "XP89DCGQ3K6VLD", source: "msstore"
+vscode "editorconfig.editorconfig"
+go "github.com/charmbracelet/crush"
+cargo "ripgrep"
+cargo "bat", source: "https://github.com/sharkdp/bat"
+uv "mkdocs"
+uv "ruff", source: "git+https://github.com/astral-sh/ruff.git"
+krew "ctx"
+flatpak "com.visualstudio.code"
+flatpak "org.godotengine.Godot", remote: "flathub-beta", url: "https://dl.flathub.org/beta-repo/"
+flatpak "io.github.dvlv.boxbuddyrs", remote: "flathub-beta"

@@ -102,6 +102,25 @@ public actor PackageCatalog {
         return try await Self.race(engine, timeout: queryTimeout) { try await $0.info(ref) }.get()
     }
 
+    /// Homebrew's third-party taps (`brew tap`), with the same detection, timeout and `EngineError` wording as the
+    /// other queries. `[]` when there's no Homebrew engine or Homebrew isn't installed; throws when it's unusable.
+    public func installedTaps() async throws -> [String] {
+        guard let engine = engines.first(where: { $0.id == .homebrew }) else { return [] }
+        let timeout = queryTimeout
+        let status = await Self.timed(timeout) { await engine.detect() } ?? Self.detectTimedOut(engine, after: timeout)
+        switch status {
+        case .missing:
+            return []
+        case .unusable:
+            throw EngineError(engine: .homebrew, message: Self.message(for: .homebrew, status: status) ?? "")
+        case .present:
+            return try await Self.race(engine, timeout: timeout) { engine in
+                guard let taps = engine as? any TapListing else { return [] }
+                return try await taps.listTaps()
+            }.get()
+        }
+    }
+
     private func collect(_ query: CatalogQuery) async -> CatalogResult {
         var outcomes: [EngineOutcome] = []
         for await outcome in stream(query) { outcomes.append(outcome) }

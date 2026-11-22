@@ -114,6 +114,13 @@ final class FakeHelper: HelperConnecting, @unchecked Sendable {
         get { lock.withLock { _runResults } }
         set { lock.withLock { _runResults = newValue } }
     }
+    var setupResults: [RunResult] {
+        get { lock.withLock { _setupResults } }
+        set { lock.withLock { _setupResults = newValue } }
+    }
+    private var _setupResults: [RunResult] = []
+    private var _setupCalls: [(authorization: Data, target: SetupTarget)] = []
+    var setupCalls: [(authorization: Data, target: SetupTarget)] { lock.withLock { _setupCalls } }
     private var _authorizeResults: [Error?] = []
     private var _runResults: [RunResult] = []
     private var _authorizeCalls = 0
@@ -146,6 +153,20 @@ final class FakeHelper: HelperConnecting, @unchecked Sendable {
         switch result {
         case .code(let code):
             onOutput(.stdout("port \(arguments.joined(separator: " "))"))
+            return code
+        case .fail(let error): throw error
+        }
+    }
+
+    func setUpEngine(authorization: Data, target: SetupTarget,
+                     onOutput: @escaping @Sendable (OutputEvent) -> Void) async throws -> Int32 {
+        let result = lock.withLock { () -> RunResult in
+            _setupCalls.append((authorization, target))
+            return _setupResults.isEmpty ? .code(0) : _setupResults.removeFirst()
+        }
+        switch result {
+        case .code(let code):
+            onOutput(.stdout("set up \(target.rawValue)"))
             return code
         case .fail(let error): throw error
         }

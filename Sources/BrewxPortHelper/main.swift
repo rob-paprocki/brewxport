@@ -1,5 +1,6 @@
 // BrewxPortHelper: the root LaunchDaemon (SMAppService, bundled by Task 11). It runs only allow-listed MacPorts
-// `port` commands, for a client that matches BrewxPortClientRequirement and holds the com.brewxport.run right.
+// `port` commands and sets up the allow-listed package managers (`setUpEngine`), for a client that matches
+// BrewxPortClientRequirement and holds the com.brewxport.run right.
 import Foundation
 import BrewxPortRun
 

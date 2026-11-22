@@ -5,7 +5,7 @@ import Security
 public let brewxPortHelperMachService = "com.brewxport.helper"
 
 /// Bump when the protocol or the allow-list changes, so the app re-registers an old helper.
-public let brewxPortHelperVersion = 1
+public let brewxPortHelperVersion = 2
 
 /// Info.plist key (embedded in the helper with `-sectcreate __TEXT __info_plist`) holding the code-signing
 /// requirement every client must satisfy. Missing, blank or unparsable means the helper refuses every connection.
@@ -18,6 +18,11 @@ public let brewxPortClientRequirementKey = "BrewxPortClientRequirement"
     /// for an authorization that holds `brewxPortRunRight`. Replies `(exitCode, nil)` once `port` has run, or
     /// `(-1, errorText)` if it was refused or couldn't run.
     func runPort(authorization: Data, arguments: [String], reply: @escaping @Sendable (Int32, String?) -> Void)
+    /// Sets up one package manager for the connection's user. `target` is a `SetupTarget` raw value; anything else
+    /// is refused. The helper resolves the release, downloads, verifies and installs on its own: the app never sends
+    /// a URL, path, checksum or user. Same authorization as `runPort`; progress lines arrive through `output`.
+    /// Replies `(0, nil)` once set up, or `(-1, errorText)` if refused or failed.
+    func setUpEngine(authorization: Data, target: String, reply: @escaping @Sendable (Int32, String?) -> Void)
 }
 
 /// Exported by the app on the same connection; receives `port`'s output one line at a time.
@@ -27,13 +32,16 @@ public let brewxPortClientRequirementKey = "BrewxPortClientRequirement"
 
 /// The two interfaces, built in one place so the app and the helper agree on them.
 public enum HelperInterfaces {
-    /// Pins the classes NSXPC may decode for `runPort`'s `arguments`, so a hostile peer can't smuggle a
-    /// non-string into the array (which would trap when it bridges to `[String]`).
+    /// Pins the classes NSXPC may decode for `runPort`'s `arguments` and `setUpEngine`'s `target`, so a hostile peer
+    /// can't smuggle a non-string in (which would trap when it bridges to `String`).
     public static func helper() -> NSXPCInterface {
         let interface = NSXPCInterface(with: BrewxPortHelperProtocol.self)
         let classes = NSSet(array: [NSArray.self, NSString.self]) as! Set<AnyHashable>
         interface.setClasses(classes,
                              for: #selector(BrewxPortHelperProtocol.runPort(authorization:arguments:reply:)),
+                             argumentIndex: 1, ofReply: false)
+        interface.setClasses(NSSet(array: [NSString.self]) as! Set<AnyHashable>,
+                             for: #selector(BrewxPortHelperProtocol.setUpEngine(authorization:target:reply:)),
                              argumentIndex: 1, ofReply: false)
         return interface
     }

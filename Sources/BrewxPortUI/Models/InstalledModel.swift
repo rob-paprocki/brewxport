@@ -31,9 +31,11 @@ import BrewxPortCore
     @ObservationIgnored private(set) var analyzing = false
     /// How many times `reload()` ran. Internal: the snapshot script loads once when nothing did yet.
     @ObservationIgnored private(set) var reloadCount = 0
-    /// Called with every installed ref each time a load ends, before the PATH is resolved. The app model feeds
-    /// Discover's installed marks from it (their only source).
-    @ObservationIgnored public var onLoaded: (@MainActor (Set<PackageRef>) -> Void)?
+    /// True once a load has ended.
+    public private(set) var hasLoaded = false
+    /// Called, in the order added, with every installed ref each time a load ends, before the PATH is resolved. The
+    /// app model's Discover feed is the first (Discover's installed marks have no other source); Bundles follows.
+    @ObservationIgnored private var loadedObservers: [@MainActor (Set<PackageRef>) -> Void] = []
 
     @ObservationIgnored private let catalog: any PackageQuerying
     @ObservationIgnored private let path: any PathResolving
@@ -65,7 +67,9 @@ import BrewxPortCore
             guard let self else { return }
             await self.list.settled()
             guard !Task.isCancelled else { return }
-            self.onLoaded?(Set(self.list.all.map(\.id)))
+            self.hasLoaded = true
+            let refs = Set(self.list.all.map(\.id))
+            for observer in self.loadedObservers { observer(refs) }
             self.findDuplicates()
             // Resolved once per launch (LoginShellPath caches it, except a shell that didn't answer in time, which is
             // asked again on the next reload), and never before Installed first loads.
@@ -74,6 +78,11 @@ import BrewxPortCore
             self.findWinners(resolved)
             self.analyzing = false
         }
+    }
+
+    /// Adds a load observer; see `loadedObservers`.
+    public func addLoadedObserver(_ observer: @escaping @MainActor (Set<PackageRef>) -> Void) {
+        loadedObservers.append(observer)
     }
 
     /// Returns once the load and the analysis after it are done (at once when nothing is going).

@@ -1,0 +1,10 @@
+tap "felixkratz/formulae", "https://github.com/FelixKratz/homebrew-formulae"
+brew "jq"
+brew "mas"
+brew "felixkratz/formulae/borders", trusted: true
+cask "rectangle"
+cask "visual-studio-code"
+vscode "ms-python.debugpy"
+vscode "ms-python.python"
+vscode "ms-python.vscode-pylance"
+vscode "ms-python.vscode-python-envs"

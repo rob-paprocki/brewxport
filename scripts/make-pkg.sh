@@ -5,14 +5,23 @@
 #      (identifier com.brewxport.app.pkg, install location /Applications, not relocatable, so it always lands in
 #      /Applications even when another copy of the app is somewhere else; no pre- or postinstall scripts: the
 #      helper registers itself when the app first starts)
+#   1b. builds an empty marker package (identifier com.brewxport.setup-engine.pkg, same version, empty payload, no
+#      scripts). Its receipt is how the app learns the "Set up Homebrew" / "Set up MacPorts" box was ticked.
+#      The distribution's Customize step offers two mutually exclusive choices that share the one marker pkg-ref
+#      (a choice's title can't be set by script, so each architecture gets its own): setup-engine-homebrew,
+#      "Set up Homebrew", visible and ticked only when isArm() (sysctl hw.optional.arm64 == 1; the key is undefined
+#      on Intel), and setup-engine-macports, "Set up MacPorts", the opposite. start_selected is the same
+#      expression as visible, so the hidden twin is never ticked and unticking the visible one really skips the
+#      marker. One identifier, so the app's receipt check works the same on both. The app choice is hidden and
+#      always installed.
 #   2. builds a distribution package with productbuild (title BrewxPort, macOS 15 or later, x86_64 and arm64),
 #      signed with the Developer ID Installer identity and a secure timestamp, and checks it with
 #      `pkgutil --check-signature`
 #   3. with --notarize: submits it with `xcrun notarytool submit --keychain-profile PROFILE --wait`, stops unless
 #      the status is Accepted, staples the ticket and checks it with Gatekeeper (`spctl -a -vvv -t install` must
 #      say Notarized Developer ID)
-#   4. expands the package (`pkgutil --expand-full`) and checks what it would install: BrewxPort.app at
-#      /Applications, three universal binaries, a valid signature, the app's stapled ticket (with --notarize),
+#   4. expands the package (`pkgutil --expand-full`) and checks what it would install: the marker (empty, no
+#      scripts), BrewxPort.app at /Applications, three universal binaries, a valid signature, the app's stapled ticket (with --notarize),
 #      no /Users/ path in any binary, and no scripts
 #
 # usage: scripts/make-pkg.sh APP --sign SHA1 [--keychain PATH] (--notarize PROFILE | --unnotarized)
@@ -40,7 +49,7 @@ while [ $# -gt 0 ]; do
         --keychain) [ $# -ge 2 ] || die "--keychain needs a value"; KEYCHAIN="$2"; shift 2 ;;
         --notarize) [ $# -ge 2 ] || die "--notarize needs a keychain profile"; PROFILE="$2"; shift 2 ;;
         --unnotarized) UNNOTARIZED=1; shift ;;
-        -h|--help) sed -n '2,27p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+        -h|--help) sed -n '2,36p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
         -*) die "unknown argument: $1 (see --help)" ;;
         *) [ -z "$APP" ] || die "only one app, please"; APP="$1"; shift ;;
     esac
@@ -62,6 +71,17 @@ VERSION="$(plutil -extract CFBundleShortVersionString raw -o - "$APP/Contents/In
 [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || die "CFBundleShortVersionString isn't X.Y.Z"
 PKG_ID="com.brewxport.app.pkg"
 if [ "$UNNOTARIZED" -eq 1 ]; then PKG="$OUT/BrewxPort-$VERSION-unnotarized.pkg"; else PKG="$OUT/BrewxPort-$VERSION.pkg"; fi
+MARKER_ID="com.brewxport.setup-engine.pkg"
+HOMEBREW_CHOICE="setup-engine-homebrew"
+MACPORTS_CHOICE="setup-engine-macports"
+HOMEBREW_DESCRIPTION="Installs nothing now. BrewxPort offers to set up Homebrew the first time you open it."
+MACPORTS_DESCRIPTION="Installs nothing now. BrewxPort offers to set up MacPorts the first time you open it."
+# Text that goes into the distribution's XML attributes is escaped here, so editing the copy can't break the XML.
+xml_escape() { printf '%s' "$1" | sed -e 's/&/\&amp;/g' -e 's/</\&lt;/g' -e 's/>/\&gt;/g' -e 's/"/\&quot;/g' -e "s/'/\&apos;/g"; }
+HOMEBREW_TITLE="$(xml_escape "Set up Homebrew")"
+MACPORTS_TITLE="$(xml_escape "Set up MacPorts")"
+HOMEBREW_DESCRIPTION="$(xml_escape "$HOMEBREW_DESCRIPTION")"
+MACPORTS_DESCRIPTION="$(xml_escape "$MACPORTS_DESCRIPTION")"
 BINARIES="Contents/MacOS/BrewxPort Contents/MacOS/brewxport-askpass Contents/Library/HelperTools/BrewxPortHelper"
 
 if [ -n "$PROFILE" ]; then
@@ -93,27 +113,43 @@ while [ "$i" -lt "$count" ]; do
 done
 pkgbuild --root "$WORK/root" --component-plist "$WORK/component.plist" --identifier "$PKG_ID" \
     --version "$VERSION" --install-location /Applications "$WORK/packages/BrewxPort-component.pkg" >/dev/null
+# The marker: an empty payload and no scripts. Installing it only leaves a receipt, which the app reads on first launch.
+mkdir -p "$WORK/empty"
+pkgbuild --root "$WORK/empty" --identifier "$MARKER_ID" --version "$VERSION" \
+    "$WORK/packages/BrewxPort-setup-engine.pkg" >/dev/null
 
 echo "==> building the signed distribution package $(basename "$PKG")"
 cat >"$WORK/distribution.xml" <<XML
 <?xml version="1.0" encoding="utf-8"?>
 <installer-gui-script minSpecVersion="2">
     <title>BrewxPort</title>
-    <options customize="never" require-scripts="false" hostArchitectures="x86_64,arm64"/>
+    <options customize="allow" require-scripts="false" hostArchitectures="x86_64,arm64"/>
     <domains enable_localSystem="true" enable_anywhere="false" enable_currentUserHome="false"/>
     <allowed-os-versions>
         <os-version min="15.0"/>
     </allowed-os-versions>
+    <script>function isArm(){ var v = system.sysctl('hw.optional.arm64'); return v == 1; }</script>
     <choices-outline>
         <line choice="default">
             <line choice="$PKG_ID"/>
+            <line choice="$HOMEBREW_CHOICE"/>
+            <line choice="$MACPORTS_CHOICE"/>
         </line>
     </choices-outline>
     <choice id="default"/>
     <choice id="$PKG_ID" visible="false">
         <pkg-ref id="$PKG_ID"/>
     </choice>
+    <choice id="$HOMEBREW_CHOICE" title="$HOMEBREW_TITLE" description="$HOMEBREW_DESCRIPTION"
+        visible="isArm()" start_selected="isArm()">
+        <pkg-ref id="$MARKER_ID"/>
+    </choice>
+    <choice id="$MACPORTS_CHOICE" title="$MACPORTS_TITLE" description="$MACPORTS_DESCRIPTION"
+        visible="!isArm()" start_selected="!isArm()">
+        <pkg-ref id="$MARKER_ID"/>
+    </choice>
     <pkg-ref id="$PKG_ID" version="$VERSION" onConclusion="none">BrewxPort-component.pkg</pkg-ref>
+    <pkg-ref id="$MARKER_ID" version="$VERSION" onConclusion="none">BrewxPort-setup-engine.pkg</pkg-ref>
 </installer-gui-script>
 XML
 PRODUCTBUILD=(productbuild --distribution "$WORK/distribution.xml" --package-path "$WORK/packages"
@@ -178,6 +214,18 @@ info="$(cat "$COMPONENT/PackageInfo")"
 extra="$(cd "$COMPONENT/Payload" && ls -A | grep -Ev '^BrewxPort\.app$' || true)"
 [ -d "$COMPONENT/Payload/BrewxPort.app" ] && [ -z "$extra" ] || die "the payload isn't BrewxPort.app alone"
 echo "    installs BrewxPort.app ($PKG_ID $VERSION) to /Applications, not relocatable, no scripts"
+MARKER="$WORK/expanded/BrewxPort-setup-engine.pkg"
+[ -d "$MARKER" ] || die "the package holds no BrewxPort-setup-engine.pkg"
+minfo="$(cat "$MARKER/PackageInfo")"
+[[ "$minfo" == *"identifier=\"$MARKER_ID\""* && "$minfo" == *"version=\"$VERSION\""* ]] ||
+    die "the setup-engine marker has the wrong identifier or version"
+[ -d "$MARKER/Payload" ] && [ -z "$(ls -A "$MARKER/Payload")" ] || die "the setup-engine marker has a payload; it must be empty"
+[[ "$minfo" != *"<preinstall "* && "$minfo" != *"<postinstall "* ]] || die "the setup-engine marker has install scripts"
+[[ "$dist" == *'customize="allow"'* && "$dist" == *'title="Set up Homebrew"'* && "$dist" == *'title="Set up MacPorts"'* ]] ||
+    die "the distribution lacks its Customize option or the Set up Homebrew / Set up MacPorts choices"
+stray="$(find "$WORK/expanded" \( -name Scripts -o -name preinstall -o -name postinstall \))"
+[ -z "$stray" ] || die "the package has install scripts"
+echo "    marker $MARKER_ID $VERSION: empty payload, no scripts; Set up Homebrew / MacPorts choices present"
 
 PAYLOAD_APP="$COMPONENT/Payload/BrewxPort.app"
 for rel in $BINARIES; do

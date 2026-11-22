@@ -105,4 +105,29 @@ struct RowActionsTests {
         #expect(RowActions.copyText(for: [mas.id], rows: rows) == "Xcode")
         #expect(RowActions.copyText(for: [], rows: rows) == "")
     }
+
+    @Test func bundlesMenuHasNoUninstallOrIgnore() {
+        // jq can be installed; wget is already installed; curl's engine is missing (neither installed nor installable).
+        let rows = table(row("jq"), row("wget", installed: "1.0"), row("curl", engine: .macports, kind: .port))
+        let jq = ref("jq"), wget = ref("wget"), curl = ref("curl", engine: .macports, kind: .port)
+        func menu(_ refs: Set<PackageRef>, isRunning: Bool = false, canRun: Bool = true) -> [RowActionItem] {
+            RowActions.items(for: refs, in: .bundles, rows: rows, outdated: [wget],
+                             prefs: UpdatePreferences(store: MemoryStore()), isRunning: isRunning, canRun: canRun,
+                             installable: [jq])
+        }
+        #expect(menu([jq]).map(\.title) == ["Install", "Show details", "Copy name"])
+        #expect(menu([jq]).first?.isEnabled == true)
+        #expect(menu([wget]).map(\.title) == ["Show details", "Copy name"])
+        #expect(menu([curl]).map(\.title) == ["Show details", "Copy name"])
+        #expect(menu([jq, wget, curl]).map(\.title) == ["Install", "Copy names"])
+        for refs: Set<PackageRef> in [[jq], [wget], [jq, wget, curl]] {
+            let actions = menu(refs).map(\.action)
+            #expect(!actions.contains(.uninstall))
+            #expect(!actions.contains(.ignore))
+            #expect(!actions.contains(.update))
+            #expect(!actions.contains { if case .skipVersion = $0 { true } else { false } })
+        }
+        #expect(menu([jq], isRunning: true).first?.isEnabled == false)
+        #expect(menu([jq], canRun: false).first?.isEnabled == false)
+    }
 }

@@ -110,11 +110,36 @@ final class FakeRunExecutor: RunExecuting, @unchecked Sendable {
     }
 }
 
+/// Holds async work until the test releases it, so a test orders events without racing sleeps. `release()` lets
+/// go of the callers waiting at that moment; wait for `waiting` to reach the count you expect before releasing.
+final class Gate: @unchecked Sendable {
+    private let lock = NSLock()
+    private var waiters: [CheckedContinuation<Void, Never>] = []
+
+    var waiting: Int { lock.withLock { waiters.count } }
+
+    func wait() async {
+        await withCheckedContinuation { (waiter: CheckedContinuation<Void, Never>) in
+            lock.withLock { waiters.append(waiter) }
+        }
+    }
+
+    func release() {
+        let released = lock.withLock { () -> [CheckedContinuation<Void, Never>] in
+            defer { waiters = [] }
+            return waiters
+        }
+        for waiter in released { waiter.resume() }
+    }
+}
+
 /// `PackageQuerying` with scripted outcomes per query. A query can delay or hang per engine.
 final class FakeCatalog: PackageQuerying, @unchecked Sendable {
     struct Script: Sendable {
         var result: Result<[Package], EngineError>
         var delay: Duration = .zero
+        /// Answers only once the gate is released.
+        var gate: Gate?
         /// Never answers (until the consumer stops iterating).
         var hang = false
         /// Hangs, then after this long answers the way `PackageCatalog` does when an engine runs out its time:
@@ -134,6 +159,13 @@ final class FakeCatalog: PackageQuerying, @unchecked Sendable {
     private var infoScripts: [PackageRef: InfoScript] = [:]
     private var _queries: [CatalogQuery] = []
     private var _infoCalls: [PackageRef] = []
+    private var _taps: Result<[String], EngineError> = .success([])
+
+    /// What `installedTaps()` answers.
+    var taps: Result<[String], EngineError> {
+        get { lock.withLock { _taps } }
+        set { lock.withLock { _taps = newValue } }
+    }
 
     private static func key(_ query: CatalogQuery) -> String { String(describing: query) }
 
@@ -191,6 +223,7 @@ final class FakeCatalog: PackageQuerying, @unchecked Sendable {
                                 return
                             }
                             if script.delay > .zero { try? await Task.sleep(for: script.delay) }
+                            if let gate = script.gate { await gate.wait() }
                             guard !Task.isCancelled else { return }
                             continuation.yield(EngineOutcome(engine: engine, result: script.result))
                         }
@@ -201,6 +234,8 @@ final class FakeCatalog: PackageQuerying, @unchecked Sendable {
             continuation.onTermination = { _ in task.cancel() }
         }
     }
+
+    func installedTaps() async throws -> [String] { try taps.get() }
 
     func info(_ ref: PackageRef) async throws -> PackageDetails {
         let script = lock.withLock { () -> InfoScript? in

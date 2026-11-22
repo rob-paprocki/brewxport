@@ -137,6 +137,33 @@ final class LiveHelperConnection: HelperConnecting, VersionReporting, @unchecked
         throw LiveHelperError(description: text)
     }
 
+    /// Same wiring as `runPort`: output through the sink, cancelling invalidates the connection, a `-1` reply is a
+    /// refusal.
+    func setUpEngine(authorization: Data, target: SetupTarget,
+                     onOutput: @escaping @Sendable (OutputEvent) -> Void) async throws -> Int32 {
+        let connection = current()
+        sink.attach(onOutput)
+        defer { sink.detach() }
+        let once = Once<(Int32, String?)>()
+        let (code, text) = try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation { continuation in
+                once.install(continuation)
+                guard let helper = proxy(connection, once) else { return }
+                helper.setUpEngine(authorization: authorization, target: target.rawValue) { code, text in
+                    once.resume(.success((code, text)))
+                }
+            }
+        } onCancel: { [handle = ConnectionHandle(connection: connection)] in
+            handle.connection.invalidate()
+            once.resume(.failure(CancellationError()))
+        }
+        guard let text, code == -1 else { return code }
+        // The helper's refusal text for an expired or missing right is `HelperError.notAuthorized.message`
+        // (HelperService.refusal); RunSession re-authorizes once on that error.
+        if text == HelperError.notAuthorized.message { throw HelperError.notAuthorized }
+        throw LiveHelperError(description: text)
+    }
+
     // MARK: Connection
 
     private func current() -> NSXPCConnection {

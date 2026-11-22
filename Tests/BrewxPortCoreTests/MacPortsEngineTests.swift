@@ -76,7 +76,8 @@ private func ref(_ name: String, engine: EngineID = .macports, kind: PackageKind
         // Captured on Apple silicon (brewxport-run1): noarch, single-arch and +universal ports.
         let (e, runner) = engine([["-v", "-q", "installed", "active"]: ok(try fixture("installed.txt"))])
         let pkgs = try await e.listInstalled()
-        #expect(runner.calls == [["-v", "-q", "installed", "active"]])
+        // The second call asks which ports were requested (InstalledOnRequestTests).
+        #expect(runner.calls == [["-v", "-q", "installed", "active"], ["-q", "installed", "requested"]])
         let archs = Dictionary(uniqueKeysWithValues: pkgs.map { ($0.id.name, $0.installedArchs) })
         #expect(archs["figlet"] == [.arm64])
         #expect(archs["nano"] == [.arm64, .x86_64])
@@ -337,5 +338,27 @@ private let infoArgs = ["info", "--description", "--homepage", "--version", "--v
         }
         await #expect(throws: EngineError.self) { try await e.info(ref("ripgrep", engine: .homebrew)) }
         #expect(runner.calls.isEmpty)
+    }
+}
+
+// MARK: requested variants (Plan 4 Task 3)
+
+extension MacPortsEngineTests {
+    @Test func requestedVariantsParsed() async throws {
+        let (e, _) = engine([["-v", "-q", "installed", "active"]: ok(try fixture("installed.txt"))])
+        let pkgs = try await e.listInstalled()
+        let byName = Dictionary(uniqueKeysWithValues: pkgs.map { ($0.id.name, $0) })
+        #expect(byName["bzip2"]?.requestedVariants == ["+universal"])
+        #expect(byName["bzip2"]?.installedVersion == "1.0.8_1")
+        #expect(byName["autoconf"]?.requestedVariants == [])
+    }
+
+    @Test func requestedVariantsFieldEdgeCases() {
+        // Not captures: the field's own edges, cut from the captured line shape.
+        #expect(MacPortsEngine.requestedVariants(in: "  x @1_0 (active) platform='darwin 27'") == [])
+        #expect(MacPortsEngine.requestedVariants(in: "  x @1_0 (active) requested_variants=''") == [])
+        #expect(MacPortsEngine.requestedVariants(in: "  x @1_0+a+b (active) requested_variants='+universal-x11+quartz'")
+                == ["+universal", "-x11", "+quartz"])
+        #expect(MacPortsEngine.requestedVariants(in: "  x @1_0 (active) requested_variants='+universal") == [])
     }
 }

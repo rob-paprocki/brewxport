@@ -14,18 +14,22 @@ public struct DemoOptions: Equatable, Sendable {
     public var snapshot: URL?
     /// `--demo-arch arm64|x86_64`.
     public var host: Arch
+    /// `--demo-bundle NAME`: one of `DemoSamples.names`, opened on Bundles at launch.
+    public var bundle: String?
 
     public init() {
         fixtures = nil
         appearance = nil
         snapshot = nil
         host = .current
+        bundle = nil
     }
 
     public static let fixturesFlag = "--demo-fixtures"
     public static let appearanceFlag = "--appearance"
     public static let snapshotFlag = "--snapshot"
     public static let archFlag = "--demo-arch"
+    public static let bundleFlag = "--demo-bundle"
 
     /// Reads the demo flags. A flag whose value is missing, starts with `--` or isn't one BrewxPort knows is ignored.
     static func parse(_ flags: [String]) -> DemoOptions {
@@ -34,7 +38,7 @@ public struct DemoOptions: Equatable, Sendable {
         while index < flags.endIndex {
             let flag = flags[index]
             let next = flags.index(after: index)
-            guard [fixturesFlag, appearanceFlag, snapshotFlag, archFlag].contains(flag),
+            guard [fixturesFlag, appearanceFlag, snapshotFlag, archFlag, bundleFlag].contains(flag),
                   next < flags.endIndex, !flags[next].hasPrefix("--") else {
                 index = next
                 continue
@@ -44,6 +48,7 @@ public struct DemoOptions: Equatable, Sendable {
             case fixturesFlag: options.fixtures = URL(fileURLWithPath: value)
             case snapshotFlag: options.snapshot = URL(fileURLWithPath: value)
             case appearanceFlag: if let appearance = Appearance(rawValue: value) { options.appearance = appearance }
+            case bundleFlag: if DemoSamples.names.contains(value) { options.bundle = value }
             default: if let arch = Arch(rawValue: value) { options.host = arch }
             }
             index = flags.index(after: next)

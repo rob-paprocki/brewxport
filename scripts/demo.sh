@@ -9,17 +9,21 @@
 # starts it with `open -n`; --snapshot runs the bundle's binary directly instead, so the exit code comes back.
 #
 # usage: scripts/demo.sh [--appearance light|dark] [--snapshot DIR] [--demo-arch arm64|x86_64]
+#                        [--demo-bundle inventory|brewfile]
 #
 #   --appearance  force the light or dark appearance
-#   --snapshot    write discover-, updates- and installed-<appearance>.png into DIR, then quit (exit 0 when all
-#                 three were written, 1 on failure or after 30 s)
+#   --snapshot    write discover-, updates-, installed-, bundles- and setup-<appearance>.png into DIR, then quit (exit 0
+#                 when all five were written, 1 on failure or after 30 s)
 #   --demo-arch   pretend to be an Apple silicon or an Intel Mac (engine order, Homebrew prefix, captures)
+#   --demo-bundle open a sample on Bundles at launch (with --snapshot, in the Bundles picture): "inventory" is an
+#                 export of the demo's own packages, made in memory; "brewfile" is a real Brewfile written by
+#                 `brew bundle dump`, with its description comments
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 
 case "${1:-}" in
-    -h|--help) sed -n '2,16p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -h|--help) sed -n '2,20p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
 esac
 
 # Warns when this Mac isn't marked as a development Mac: a normal launch of a real BrewxPort.app here would register
@@ -42,6 +46,11 @@ PB=/usr/libexec/PlistBuddy
 "$PB" -c "Set :CFBundleIdentifier com.brewxport.demo" "$APP/Contents/Info.plist"
 "$PB" -c "Set :CFBundleName BrewxPort Demo" "$APP/Contents/Info.plist"
 "$PB" -c "Set :CFBundleDisplayName BrewxPort Demo" "$APP/Contents/Info.plist"
+# The demo knows the bundle type (so its open and save panels do) but doesn't own it: the real app exports the
+# type, the demo only imports it, and it never claims the Finder's double-click.
+"$PB" -c "Copy :UTExportedTypeDeclarations :UTImportedTypeDeclarations" "$APP/Contents/Info.plist"
+"$PB" -c "Delete :UTExportedTypeDeclarations" "$APP/Contents/Info.plist"
+"$PB" -c "Set :CFBundleDocumentTypes:0:LSHandlerRank None" "$APP/Contents/Info.plist"
 codesign --force -s - --deep "$APP" >/dev/null 2>&1
 
 for arg in "$@"; do

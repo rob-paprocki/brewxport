@@ -69,7 +69,7 @@ struct DetailsInspector: View {
             }
         case .ready:
             Button("Install") { model.installFromInspector() }
-                .disabled(!model.canRun)
+                .disabled(!model.canInstallFromInspector)
         case .running:
             Button("Install") {}.disabled(true)
         case .alreadyInstalled:

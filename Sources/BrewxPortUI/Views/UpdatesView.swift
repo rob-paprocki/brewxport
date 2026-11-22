@@ -125,6 +125,6 @@ private struct UpdatesTable: View {
             TableColumn("Arch", value: \.archName)
                 .width(min: 40, ideal: 55)
         }
-        .packageRowMenu(model: model, list: list, view: .updates)
+        .packageRowMenu(model: model, view: .updates)
     }
 }

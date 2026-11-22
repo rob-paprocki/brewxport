@@ -118,13 +118,40 @@ import Testing
     @Test func onLoadedGetsEveryInstalledRefBeforeThePath() async {
         let model = Self.model(Self.catalog([Self.jq, Self.portFiglet]), path: SlowPath())
         var loaded: [Set<PackageRef>] = []
-        model.onLoaded = { loaded.append($0) }
+        model.addLoadedObserver { loaded.append($0) }
+        #expect(!model.hasLoaded)
         model.reload()
         #expect(await waitUntil { loaded.count == 1 })
         #expect(loaded == [[Self.jq.id, Self.portFiglet.id]])
+        #expect(model.hasLoaded)
         #expect(model.analyzing)
         await model.settled()
         #expect(!model.analyzing)
+    }
+
+    @Test func loadedObserversAllCalled() async {
+        // Through the app model, whose Discover feed is the first observer: it still marks Discover's rows.
+        let catalog = Self.catalog([Self.jq, Self.portFiglet])
+        let app = BrewxPortAppModel(services: AppFixtures.services(catalog: catalog))
+        var order: [String] = []
+        var first: Set<PackageRef> = [], second: Set<PackageRef> = []
+        app.installed.addLoadedObserver { refs in
+            first = refs
+            order.append("first")
+        }
+        app.installed.addLoadedObserver { refs in
+            second = refs
+            order.append("second")
+        }
+        app.installed.reload()
+        #expect(await waitUntil { order.count == 2 })
+        #expect(order == ["first", "second"])
+        #expect(first == [Self.jq.id, Self.portFiglet.id])
+        #expect(second == first)
+        #expect(app.discover.list.installedRefs == first)
+        // A second load calls each observer again.
+        app.installed.reload()
+        #expect(await waitUntil { order.count == 4 })
     }
 
     struct SlowPath: PathResolving {

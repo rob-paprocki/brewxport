@@ -301,7 +301,7 @@ private func expectNotAllowed(_ arguments: [String], sourceLocation: SourceLocat
         #expect(HelperCompatibility.check(installed: brewxPortHelperVersion, bundled: brewxPortHelperVersion))
         #expect(!HelperCompatibility.check(installed: 1, bundled: 2))
         #expect(!HelperCompatibility.check(installed: 2, bundled: 1))
-        #expect(brewxPortHelperVersion == 1)
+        #expect(brewxPortHelperVersion == 2)
     }
 }
 

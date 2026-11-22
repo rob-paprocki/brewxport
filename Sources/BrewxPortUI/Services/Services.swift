@@ -21,7 +21,14 @@ public protocol PackageQuerying: Sendable {
     func presentEngines() async -> [EngineID: EngineStatus]
     func stream(_ query: CatalogQuery) -> AsyncStream<EngineOutcome>
     func info(_ ref: PackageRef) async throws -> PackageDetails
+    /// Homebrew's third-party taps; `[]` when Homebrew is missing.
+    func installedTaps() async throws -> [String]
 }
+
+extension PackageQuerying {
+    public func installedTaps() async throws -> [String] { [] }
+}
+
 extension PackageCatalog: PackageQuerying {}
 
 /// Everything the UI needs from the outside world. Live, demo and test copies differ only here.
@@ -39,6 +46,11 @@ public struct Services: Sendable {
     /// Live: FileManager. Demo: the fixture inventory read at launch.
     public let fileExists: @Sendable (String) -> Bool
     public let host: Arch
+    /// The Mac's chip and macOS version, for package-manager setup. Tests pin it.
+    public let hostInfo: HostInfo
+    /// Whether the Command Line Tools are installed. Live: the marker file. Tests pin it.
+    public let cltPresent: @Sendable () -> Bool
+    public let receipts: any InstallerReceiptReading
     public let setupProblem: String?
     public let isDemo: Bool
 
@@ -46,7 +58,8 @@ public struct Services: Sendable {
         engines: [any Engine], catalog: any PackageQuerying, executor: (any RunExecuting)?,
         helper: (any HelperManaging)?, passwords: PromptPasswordProvider, isAdministrator: @escaping AdminCheck,
         store: any KeyValueStoring, path: any PathResolving, fileExists: @escaping @Sendable (String) -> Bool,
-        host: Arch, setupProblem: String?, isDemo: Bool
+        host: Arch, hostInfo: HostInfo, cltPresent: @escaping @Sendable () -> Bool,
+        receipts: any InstallerReceiptReading, setupProblem: String?, isDemo: Bool
     ) {
         self.engines = engines
         self.catalog = catalog
@@ -58,6 +71,9 @@ public struct Services: Sendable {
         self.path = path
         self.fileExists = fileExists
         self.host = host
+        self.hostInfo = hostInfo
+        self.cltPresent = cltPresent
+        self.receipts = receipts
         self.setupProblem = setupProblem
         self.isDemo = isDemo
     }

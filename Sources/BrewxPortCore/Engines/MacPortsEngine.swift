@@ -6,19 +6,25 @@ public struct MacPortsEngine: Engine {
     public let capabilities: EngineCapabilities = [.sourceBuilds]
 
     private let runner: CommandRunning
-    private let executable: URL?
+    private let cache: ExecutableCache
+    private var executable: URL? { cache.current }
 
     public var executableURL: URL? { executable }
 
     public init(runner: CommandRunning, executable: URL?) {
         self.runner = runner
-        self.executable = executable
+        self.cache = ExecutableCache(locate: { executable })
+    }
+
+    public init(runner: CommandRunning, locate: @escaping @Sendable () -> URL?) {
+        self.runner = runner
+        self.cache = ExecutableCache(locate: locate)
     }
 
     // MARK: detect
 
     public func detect() async -> EngineStatus {
-        await detectStatus(runner: runner, executable: executable, arguments: ["version"]) { stdout in
+        await detectStatus(runner: runner, executable: cache.relocate(), arguments: ["version"]) { stdout in
             // "Version: 2.12.7"
             for line in stdout.split(whereSeparator: \.isNewline) {
                 let text = line.trimmingCharacters(in: .whitespaces)
@@ -75,10 +81,30 @@ public struct MacPortsEngine: Engine {
             guard !version.isEmpty else { continue }
             let name = String(tokens[0])
             packages.append(Package(id: ref(name), displayName: name, installedVersion: String(version),
-                                    installedArchs: Self.archs(in: line)))
+                                    installedArchs: Self.archs(in: line),
+                                    requestedVariants: Self.requestedVariants(in: line)))
         }
         try requireParsed(packages, out.split(whereSeparator: \.isNewline).map(String.init), "installed")
+        // Which ports the user asked for. `-v installed` doesn't say, so it's a second query; when that one fails,
+        // the list still loads and `installedOnRequest` stays nil (unknown), which keeps every port in an export.
+        if let requested = await requestedPorts() {
+            for i in packages.indices { packages[i].installedOnRequest = requested.contains(packages[i].id.name) }
+        }
         return packages
+    }
+
+    /// The names `port -q installed requested` lists, or nil when it fails. MacPorts 2.12.7 prints nothing and exits
+    /// 0 when no port is requested, so empty output is an empty set.
+    func requestedPorts() async -> Set<String>? {
+        guard let out = try? await runOK(["-q", "installed", "requested"]) else { return nil }
+        var names = Set<String>()
+        for line in out.split(whereSeparator: \.isNewline) {
+            // "  figlet @2.2.5_0 (active)"
+            let tokens = line.split(whereSeparator: \.isWhitespace)
+            guard tokens.count >= 2, tokens[1].hasPrefix("@") else { continue }
+            names.insert(String(tokens[0]))
+        }
+        return names
     }
 
     public func listOutdated() async throws -> [Package] {
@@ -105,6 +131,23 @@ public struct MacPortsEngine: Engine {
         guard let end = rest.firstIndex(of: "'") else { return nil }
         let archs = Set(rest[..<end].split(separator: " ").compactMap { Arch(rawValue: String($0)) })
         return archs.isEmpty ? nil : archs
+    }
+
+    /// The requested_variants field of one `port -v installed` line, split into signed variants:
+    /// `requested_variants='+universal-x11'` gives `["+universal", "-x11"]`. Empty without the field or when it's ''.
+    static func requestedVariants(in line: Substring) -> [String] {
+        guard let start = line.range(of: " requested_variants='") else { return [] }
+        let rest = line[start.upperBound...]
+        guard let end = rest.firstIndex(of: "'") else { return [] }
+        var variants: [String] = []
+        for ch in rest[..<end] where !ch.isWhitespace {
+            if ch == "+" || ch == "-" || variants.isEmpty {
+                variants.append(String(ch))
+            } else {
+                variants[variants.count - 1].append(ch)
+            }
+        }
+        return variants
     }
 
     // MARK: info

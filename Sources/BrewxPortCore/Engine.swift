@@ -118,6 +118,11 @@ extension Engine {
     public var runArch: Arch { .current }
 }
 
+/// An engine that can list its installed third-party taps (Homebrew). Demo mode's wrapper forwards it.
+public protocol TapListing: Sendable {
+    func listTaps() async throws -> [String]
+}
+
 /// One text field from an engine, trimmed; nil when blank.
 func nonBlank(_ s: String?) -> String? {
     guard let t = s?.trimmingCharacters(in: .whitespacesAndNewlines), !t.isEmpty else { return nil }
@@ -128,4 +133,26 @@ func nonBlank(_ s: String?) -> String? {
 func webURL(_ s: String?) -> URL? {
     guard let t = nonBlank(s) else { return nil }
     return URL(string: t)
+}
+
+/// An engine's located executable. Located once when the engine is made; only `detect()` looks again, so an engine
+/// installed while BrewxPort runs is found by the next check, and every other operation reads one stable value.
+public final class ExecutableCache: @unchecked Sendable {
+    private let lock = NSLock()
+    private let locate: @Sendable () -> URL?
+    private var value: URL?
+
+    public init(locate: @escaping @Sendable () -> URL?) {
+        self.locate = locate
+        value = locate()
+    }
+
+    public var current: URL? { lock.withLock { value } }
+
+    /// Looks again and remembers the answer.
+    public func relocate() -> URL? {
+        let found = locate()
+        lock.withLock { value = found }
+        return found
+    }
 }

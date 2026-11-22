@@ -25,7 +25,15 @@ extension AppDelegate {
     func demoDidFinishLaunching() {
         guard let demo else { return }
         NSApp.activate()
-        guard let directory = demo.snapshot else { return }
+        if let name = demo.bundle { DemoLaunch.model?.snapshotSample = name }
+        guard let directory = demo.snapshot else {
+            // `--demo-bundle NAME`: open the sample on Bundles. A snapshot opens the same sample itself, once it
+            // reaches Bundles (`prepareSnapshot`, `snapshotSample`), so the earlier views aren't disturbed.
+            if let name = demo.bundle, let model = DemoLaunch.model {
+                Task { @MainActor in await model.openDemoSample(name) }
+            }
+            return
+        }
         DispatchQueue.global().asyncAfter(deadline: .now() + Self.snapshotDeadline) {
             FileHandle.standardError.write(Data("BrewxPort demo: snapshot didn't finish in 30 s\n".utf8))
             exit(1)

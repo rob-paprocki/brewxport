@@ -34,7 +34,9 @@ enum LiveServices {
         return Services(
             engines: engines, catalog: catalog, executor: executor, helper: helper, passwords: passwords,
             isAdministrator: AdminMembership.currentUserIsAdmin, store: DefaultsStore(), path: loginShellPath(runner),
-            fileExists: { FileManager.default.fileExists(atPath: $0) }, host: host, setupProblem: setupProblem,
+            fileExists: { FileManager.default.fileExists(atPath: $0) }, host: host, hostInfo: HostInfo.current(),
+            cltPresent: { FileManager.default.fileExists(atPath: CommandLineTools.marker) },
+            receipts: PkgutilReceipts(runner: runner), setupProblem: setupProblem,
             isDemo: false)
     }
 

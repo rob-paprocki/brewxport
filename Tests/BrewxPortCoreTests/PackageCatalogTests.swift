@@ -187,3 +187,42 @@ private struct Boom: Error {}
         await #expect(throws: EngineError.self) { try await catalog.info(rgRef) }
     }
 }
+
+// MARK: taps (Plan 4 Task 3)
+
+private func homebrewFixture(_ name: String) throws -> String {
+    let url = URL(fileURLWithPath: #filePath)
+        .deletingLastPathComponent()
+        .appendingPathComponent("Fixtures/homebrew/\(name)")
+    return try String(contentsOf: url, encoding: .utf8)
+}
+
+extension PackageCatalogTests {
+    @Test func catalogInstalledTapsEmptyWithoutHomebrew() async throws {
+        let none = PackageCatalog(engines: [StubEngine(id: .macports)], arch: .arm64)
+        #expect(try await none.installedTaps() == [])
+        let runner = FakeRunner([:])
+        let missing = PackageCatalog(engines: [HomebrewEngine(runner: runner, executable: nil)], arch: .arm64)
+        #expect(try await missing.installedTaps() == [])
+        #expect(runner.calls.isEmpty)
+    }
+
+    @Test func catalogInstalledTapsFromHomebrew() async throws {
+        let brew = URL(fileURLWithPath: "/opt/homebrew/bin/brew")
+        let ok = { (s: String) in CommandResult(exitCode: 0, stdout: s, stderr: "") }
+        let runner = FakeRunner([["--version"]: ok(try homebrewFixture("version.txt")),
+                                 ["tap"]: ok(try homebrewFixture("tap.txt"))])
+        let catalog = PackageCatalog(engines: [HomebrewEngine(runner: runner, executable: brew, arch: .arm64)],
+                                     arch: .arm64)
+        #expect(try await catalog.installedTaps() == ["felixkratz/formulae"])
+    }
+
+    @Test func catalogInstalledTapsThrowsWhenHomebrewUnusable() async {
+        let broken = StubEngine(id: .homebrew, status: .unusable(path: URL(fileURLWithPath: "/opt/homebrew/bin/brew"),
+                                                                  reason: "bad"))
+        let catalog = PackageCatalog(engines: [broken], arch: .arm64)
+        await #expect(throws: EngineError(engine: .homebrew, message: "Homebrew is installed but not working: bad")) {
+            try await catalog.installedTaps()
+        }
+    }
+}

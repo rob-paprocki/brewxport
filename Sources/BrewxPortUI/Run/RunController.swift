@@ -36,7 +36,11 @@ public final class RunController: PasswordPrompting {
     /// Why the last run couldn't make admin changes for a reason other than the password, or nil.
     public private(set) var privilegeProblem: String?
 
-    public var showingPasswordSheet = false
+    public var showingPasswordSheet = false {
+        didSet { if oldValue, !showingPasswordSheet { onPasswordSheetClosed?() } }
+    }
+    /// Called when the password sheet goes away. The app model opens a file the Finder sent meanwhile.
+    @ObservationIgnored public var onPasswordSheetClosed: (@MainActor () -> Void)?
     public private(set) var passwordReason = ""
 
     /// Why something the user asked for won't run: the plan's problems and the preflight's notes. The panel shows
@@ -128,7 +132,7 @@ public final class RunController: PasswordPrompting {
         }
         prepare(runnable, plan: plan, notes: adminNotes)
 
-        guard runnable.contains(where: { RunRouting.route(for: $0) == .helper }) else {
+        guard runnable.contains(where: RunPreflight.usesHelper) else {
             launch(runnable, reason: plan.reason, executor: executor, run: run)
             return true
         }

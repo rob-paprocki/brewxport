@@ -25,7 +25,7 @@ let package = Package(
         // sudo's SUDO_ASKPASS helper. Darwin only, no dependencies: it handles the password.
         .executableTarget(name: "brewxport-askpass"),
         .testTarget(name: "BrewxPortCoreTests", dependencies: ["BrewxPortCore"], exclude: ["Fixtures"]),
-        .testTarget(name: "BrewxPortRunTests", dependencies: ["BrewxPortRun", "BrewxPortCore"]),
+        .testTarget(name: "BrewxPortRunTests", dependencies: ["BrewxPortRun", "BrewxPortCore"], exclude: ["Fixtures"]),
         .testTarget(name: "BrewxPortUITests", dependencies: ["BrewxPortUI", "BrewxPortCore", "BrewxPortRun"]),
     ],
     swiftLanguageModes: [.v6]

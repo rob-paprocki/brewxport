@@ -45,12 +45,15 @@ final class HelperService: NSObject, BrewxPortHelperProtocol, Sendable {
     }
 
     private let peer: pid_t
+    /// The connection's effective uid: who setup installs for. Never taken from the request.
+    private let requester: uid_t
     private let rightReady: Bool
     private let gate: RunGate
     private let state: Mutex<State>
 
-    init(peer: pid_t, rightReady: Bool, gate: RunGate, sink: ClientSink?) {
+    init(peer: pid_t, requester: uid_t, rightReady: Bool, gate: RunGate, sink: ClientSink?) {
         self.peer = peer
+        self.requester = requester
         self.rightReady = rightReady
         self.gate = gate
         self.state = Mutex(State(sink: sink))
@@ -63,7 +66,7 @@ final class HelperService: NSObject, BrewxPortHelperProtocol, Sendable {
     func runPort(authorization: Data, arguments: [String], reply: @escaping @Sendable (Int32, String?) -> Void) {
         guard gate.tryEnter() else {
             helperLog.notice("pid \(self.peer): refused, another run is in progress")
-            reply(-1, "Another MacPorts command is already running. Try again when it finishes.")
+            reply(-1, "BrewxPort's helper is busy with another run. Try again when it finishes.")
             return
         }
         if let refusal = refusal(authorization: authorization, arguments: arguments) {
@@ -88,6 +91,71 @@ final class HelperService: NSObject, BrewxPortHelperProtocol, Sendable {
         if cancelNow { task.cancel() }
     }
 
+    func setUpEngine(authorization: Data, target: String, reply: @escaping @Sendable (Int32, String?) -> Void) {
+        guard gate.tryEnter() else {
+            helperLog.notice("pid \(self.peer): setup refused, another run is in progress")
+            reply(-1, "BrewxPort's helper is busy with another run. Try again when it finishes.")
+            return
+        }
+        if let refusal = authorizationRefusal(authorization) {
+            gate.leave()
+            reply(-1, refusal)
+            return
+        }
+        guard let setupTarget = SetupTarget(rawValue: target) else {
+            gate.leave()
+            helperLog.error("pid \(self.peer): refused setup of an unknown target (\(target.prefix(40), privacy: .public))")
+            reply(-1, "BrewxPort's helper doesn't know how to set that up.")
+            return
+        }
+        if let refusal = AdminMembership.setupRefusal(uid: requester) {
+            gate.leave()
+            helperLog.error("pid \(self.peer): refused setup, uid \(self.requester) isn't an administrator")
+            reply(-1, refusal)
+            return
+        }
+        guard let userName = Self.userName(of: requester) else {
+            gate.leave()
+            helperLog.error("pid \(self.peer): refused setup, no account for uid \(self.requester)")
+            reply(-1, "BrewxPort's helper couldn't find your user account.")
+            return
+        }
+        helperLog.notice("pid \(self.peer): setting up \(setupTarget.rawValue, privacy: .public) for uid \(self.requester)")
+        let task = Task { [self] in
+            let runner = EngineSetupRunner.live { [self] event in
+                state.withLock { $0.sink }?.send(event)
+            }
+            let uid = requester
+            var failure: String?
+            do throws(SetupError) {
+                try await runner.setUp(setupTarget, forUID: uid, userName: userName) { [self] line in
+                    state.withLock { $0.sink }?.send(.stdout(line))
+                }
+            } catch {
+                failure = error.message
+            }
+            gate.leave()
+            helperLog.notice("pid \(self.peer): setup of \(setupTarget.rawValue, privacy: .public) finished: \(failure ?? "set up", privacy: .public)")
+            reply(failure == nil ? 0 : -1, failure)
+        }
+        let cancelNow = state.withLock { s in
+            s.run = task
+            return s.invalidated
+        }
+        if cancelNow { task.cancel() }
+    }
+
+    /// The account name for `uid`, from the user database (`getpwuid_r`).
+    private static func userName(of uid: uid_t) -> String? {
+        var record = passwd()
+        var result: UnsafeMutablePointer<passwd>?
+        var buffer = [CChar](repeating: 0, count: 4096)
+        guard getpwuid_r(uid, &record, &buffer, buffer.count, &result) == 0, result != nil,
+              let name = record.pw_name else { return nil }
+        let text = String(cString: name)
+        return text.isEmpty ? nil : text
+    }
+
     /// The connection is gone: kill the running `port` (its whole process group) and drop the client proxy.
     func connectionInvalidated() {
         let run = state.withLock { s in
@@ -101,8 +169,8 @@ final class HelperService: NSObject, BrewxPortHelperProtocol, Sendable {
         }
     }
 
-    /// Authorization first, on every call, then argv, then the executable. Nil means go.
-    private func refusal(authorization: Data, arguments: [String]) -> String? {
+    /// The right must be installed and `authorization` must hold it. Shared by every root request. Nil means go.
+    private func authorizationRefusal(_ authorization: Data) -> String? {
         guard rightReady else {
             helperLog.error("pid \(self.peer): refused, the \(brewxPortRunRight, privacy: .public) right isn't installed")
             return "The helper couldn't set up its authorization right. Quit and reopen BrewxPort, then click Check again."
@@ -111,6 +179,20 @@ final class HelperService: NSObject, BrewxPortHelperProtocol, Sendable {
             try HelperAuthorization.authorize(externalForm: authorization) { detail in
                 helperLog.error("pid \(self.peer): not authorized: \(detail, privacy: .public)")
             }
+            return nil
+        } catch let error as HelperError {
+            helperLog.error("pid \(self.peer): refused: \(error.message, privacy: .public)")
+            return error.message
+        } catch {
+            helperLog.error("pid \(self.peer): refused: \(String(describing: error), privacy: .public)")
+            return "Refused: \(error.localizedDescription)"
+        }
+    }
+
+    /// Authorization first, on every call, then argv, then the executable. Nil means go.
+    private func refusal(authorization: Data, arguments: [String]) -> String? {
+        if let refusal = authorizationRefusal(authorization) { return refusal }
+        do {
             try HelperRequestValidator.validate(arguments: arguments)
             try HelperRequestValidator.validateInstallation(
                 attributes: HelperRequestValidator.fileSystemAttributes,
@@ -168,7 +250,7 @@ final class ListenerDelegate: NSObject, NSXPCListenerDelegate, Sendable {
         let proxy = connection.remoteObjectProxyWithErrorHandler { error in
             helperLog.error("pid \(pid): client proxy error: \(error.localizedDescription, privacy: .public)")
         } as? BrewxPortHelperClientProtocol
-        let service = HelperService(peer: pid, rightReady: rightReady, gate: gate, sink: proxy.map(ClientSink.init))
+        let service = HelperService(peer: pid, requester: connection.effectiveUserIdentifier, rightReady: rightReady, gate: gate, sink: proxy.map(ClientSink.init))
         connection.exportedObject = service
         connection.invalidationHandler = { [weak service] in service?.connectionInvalidated() }
         connection.interruptionHandler = { [weak service] in service?.connectionInvalidated() }

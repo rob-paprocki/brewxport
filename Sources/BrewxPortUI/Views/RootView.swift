@@ -2,8 +2,8 @@ import BrewxPortCore
 import BrewxPortRun
 import SwiftUI
 
-/// The window: sidebar, the selected page, the run panel along the bottom, the inspector, the password sheet and
-/// the uninstall confirmation.
+/// The window: sidebar, the selected page, the run panel along the bottom, the inspector, the password sheet,
+/// the uninstall confirmation, and Bundles' open and save panels.
 public struct RootView: View {
     @Bindable var model: BrewxPortAppModel
 
@@ -28,6 +28,7 @@ public struct RootView: View {
                     .inspectorColumnWidth(min: 250, ideal: 280)
             }
         }
+        .modifier(BundlesFilePanels(model: model))
         .task { model.start() }
         // Esc, the close button or anything else that dismisses the sheet ends the prompt as cancelled, so the run
         // never waits on a sheet that's gone. A secret that was already handed over makes this a no-op.
@@ -37,6 +38,8 @@ public struct RootView: View {
                 model.run.finishPassword($0)
             }
         }
+        // The setup sheet shows while a screen has something to say; while a setup runs, the run panel shows it.
+        .sheet(isPresented: setupShown) { SetupView(model: model) }
         .confirmationDialog(model.uninstallTitle, isPresented: uninstallShown, presenting: model.pendingUninstall) { refs in
             // Sets the refs again first, so the order SwiftUI clears the binding and runs the action in doesn't matter.
             // They are the refs the title names: nothing can replace `pendingUninstall` while it's set
@@ -49,6 +52,11 @@ public struct RootView: View {
         } message: { _ in
             Text("Each package is removed with its own engine.")
         }
+    }
+
+    private var setupShown: Binding<Bool> {
+        Binding(get: { model.setup.sheetShown },
+                set: { shown in if !shown { model.setup.dismiss() } })
     }
 
     private var uninstallShown: Binding<Bool> {
@@ -65,7 +73,7 @@ public struct RootView: View {
         case .installed:
             InstalledView(model: model)
         case .bundles:
-            BundlesPlaceholderView()
+            BundlesView(model: model)
         case .engine(let id):
             EngineDetailView(model: model, engine: id)
         }

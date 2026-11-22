@@ -50,6 +50,18 @@ enum Steps {
                 title: "Upgrade \(id)")
     }
 
+    static func setup(_ target: SetupTarget = .macports) -> RunStep {
+        RunStep(engine: .macports, kind: .port, operation: .install,
+                spec: CommandSpec(executable: URL(fileURLWithPath: "/usr/bin/true"), arguments: [], needsRoot: true),
+                title: "Set up \(target.rawValue)", setupTarget: target)
+    }
+
+    static func nbInit() -> RunStep {
+        RunStep(engine: .nanobrew, kind: .formula, operation: .install,
+                spec: CommandSpec(executable: URL(fileURLWithPath: nbPath), arguments: ["init"], needsRoot: true),
+                title: "Run nb init", dependsOnPrevious: true)
+    }
+
     static let sudoVerify = ["/usr/bin/sudo", "-A", "-k", "-v"]
 }
 
@@ -62,6 +74,18 @@ enum Steps {
         #expect(RunRouting.route(for: Steps.nanobrew()) == .user)
     }
 
+    @Test func nanobrewGoesToSudoOnlyForItsOwnInit() {
+        func step(_ path: String, _ arguments: [String], root: Bool = true) -> RunStep {
+            RunStep(engine: .nanobrew, operation: .install,
+                    spec: CommandSpec(executable: URL(fileURLWithPath: path), arguments: arguments, needsRoot: root),
+                    title: "")
+        }
+        #expect(RunRouting.route(for: step(Steps.nbPath, ["init"])) == .sudoAskpass)
+        #expect(RunRouting.route(for: step("/tmp/nb", ["init"])) == .user)
+        #expect(RunRouting.route(for: step(Steps.nbPath, ["install", "x"])) == .user)
+        #expect(RunRouting.route(for: step(Steps.nbPath, ["init"], root: false)) == .user)
+    }
+
     @Test func rootlessPortAndMasRunAsTheUser() {
         let port = RunStep(engine: .macports, kind: .port,
                            operation: .upgrade,
@@ -71,15 +95,37 @@ enum Steps {
         #expect(RunRouting.route(for: Steps.mas(needsRoot: false)) == .user)
     }
 
-    @Test func brewAndNanobrewNeverGoToRoot() {
-        // Even if a spec claimed root, brew and nb are never run as root.
-        for engine in [EngineID.homebrew, .nanobrew] {
-            let step = RunStep(engine: engine, kind: .formula,
-                               operation: .upgrade,
-                               spec: CommandSpec(executable: URL(fileURLWithPath: "/x"), arguments: [], needsRoot: true),
-                               title: "")
-            #expect(RunRouting.route(for: step) == .user)
-        }
+    @Test func brewNeverGoesToRoot() {
+        // Even if a spec claimed root, brew is never run as root.
+        let step = RunStep(engine: .homebrew, kind: .formula,
+                           operation: .upgrade,
+                           spec: CommandSpec(executable: URL(fileURLWithPath: "/x"), arguments: [], needsRoot: true),
+                           title: "")
+        #expect(RunRouting.route(for: step) == .user)
+    }
+
+    @Test func setupStepRoutesToHelper() {
+        #expect(RunRouting.route(for: Steps.setup(.macports)) == .helperSetup)
+        #expect(RunRouting.route(for: Steps.setup(.commandLineTools)) == .helperSetup)
+    }
+
+    @Test func nbInitRoutesToSudoAskpass() {
+        #expect(RunRouting.route(for: Steps.nbInit()) == .sudoAskpass)
+    }
+
+    @Test func nanobrewRootRoutesToSudoOnlyForInit() {
+        let other = RunStep(engine: .nanobrew, kind: .formula, operation: .install,
+                            spec: CommandSpec(executable: URL(fileURLWithPath: Steps.nbPath),
+                                              arguments: ["install", "jq"], needsRoot: true), title: "")
+        #expect(RunRouting.route(for: other) == .user)
+        let notRoot = RunStep(engine: .nanobrew, kind: .formula, operation: .install,
+                              spec: CommandSpec(executable: URL(fileURLWithPath: Steps.nbPath),
+                                                arguments: ["init"], needsRoot: false), title: "")
+        #expect(RunRouting.route(for: notRoot) == .user)
+    }
+
+    @Test func nbNormalStaysUser() {
+        #expect(RunRouting.route(for: Steps.nanobrew()) == .user)
     }
 
     @Test func stepKindDefaultsToFormula() {
@@ -294,6 +340,47 @@ enum Steps {
         #expect(h.helper.authorizeCalls == 0)
         #expect(h.helper.runCalls.isEmpty)
         #expect(h.servers.isEmpty)
+    }
+
+    // MARK: Setup steps
+
+    @Test func sessionCallsSetUpEngineWithTarget() async {
+        let h = Harness()
+        let events = await collect(h.session().run([Steps.setup(.macports)]))
+        #expect(h.helper.setupCalls.map(\.target) == [.macports])
+        #expect(h.helper.setupCalls.first?.authorization == FakeHelper.token)
+        #expect(h.helper.runCalls.isEmpty)
+        #expect(h.passwords.calls == 1)
+        #expect(events.contains(.finished(0, 0)))
+    }
+
+    @Test func setupReauthorizesOnce() async {
+        let h = Harness()
+        h.helper.setupResults = [.fail(HelperError.notAuthorized), .code(0)]
+        let events = await collect(h.session().run([Steps.setup(.nanobrew)]))
+        #expect(h.helper.authorizeCalls == 2)
+        #expect(h.helper.setupCalls.map(\.target) == [.nanobrew, .nanobrew])
+        #expect(events.contains(.finished(0, 0)))
+    }
+
+    @Test func dependentStepIsSkippedAfterFailedSetup() async {
+        let h = Harness()
+        h.helper.setupResults = [.code(1)]
+        let later = Steps.formula("wget")
+        let events = await collect(h.session().run([Steps.setup(.nanobrew), Steps.nbInit(), later]))
+        #expect(events.contains(.finished(0, 1)))
+        #expect(!events.contains(.started(1)))
+        #expect(!events.contains { if case .finished(1, _) = $0 { true } else { false } })
+        #expect(h.runner.calls.allSatisfy { $0.arguments != ["-A", Steps.nbPath, "init"] })
+        // The independent step after it still runs.
+        #expect(events.contains(.started(2)))
+        #expect(events.contains(.finished(2, 0)))
+    }
+
+    @Test func dependentStepRunsAfterSuccessfulSetup() async {
+        let h = Harness()
+        let events = await collect(h.session().run([Steps.setup(.nanobrew), Steps.nbInit()]))
+        #expect(events.contains(.finished(1, 0)))
     }
 
     // MARK: Rulings

@@ -35,4 +35,4 @@ public struct PackageRow: Identifiable, Hashable, Sendable {
 }
 
 /// Which table a menu or action belongs to.
-public enum PackageView: Sendable { case discover, updates, installed }
+public enum PackageView: Sendable { case discover, updates, installed, bundles }

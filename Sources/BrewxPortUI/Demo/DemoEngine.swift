@@ -6,16 +6,20 @@ import BrewxPortRun
 public actor DemoInventory {
     private var installed: [EngineID: [Package]]
     private var outdated: [EngineID: [Package]]
+    /// Homebrew's third-party taps, as `brew tap` lists them (lowercase).
+    private var taps: [String]
     /// Every row a search has shown, so an install knows the package's name, summary and version.
     private var known: [PackageRef: Package] = [:]
 
-    public init(installed: [EngineID: [Package]], outdated: [EngineID: [Package]]) {
+    public init(installed: [EngineID: [Package]], outdated: [EngineID: [Package]], taps: [String] = []) {
         self.installed = installed
         self.outdated = outdated
+        self.taps = taps
     }
 
     func installed(_ engine: EngineID) -> [Package] { installed[engine] ?? [] }
     func outdated(_ engine: EngineID) -> [Package] { outdated[engine] ?? [] }
+    func installedTaps() -> [String] { taps }
 
     func remember(_ packages: [Package]) {
         for package in packages { known[package.id] = package }
@@ -33,13 +37,23 @@ public actor DemoInventory {
 
     /// What the step would have done. Steps are batched, so the packages are the step's arguments that name one;
     /// anything else (flags, variants) is skipped. This assumes no package is named like a verb or flag the step
-    /// also carries ("install", "-N", "--cask"); the captured fixtures have none.
+    /// also carries ("install", "-N", "--cask", "--formula", "tap"); the captured fixtures have none.
+    ///
+    /// An install of a package no search showed (a bundle or Brewfile row) gets a row made from its argument, the way
+    /// `brew info --installed` lists it: a tap-qualified `user/repo/name` becomes `name` with that full name. Its
+    /// version isn't known. `brew tap user/repo` adds the tap.
     func apply(_ step: RunStep) {
         let engine = step.engine
         let names = Set(step.spec.arguments)
         switch step.operation {
+        case .install where step.kind == .tap:
+            for tap in Self.packageArguments(step) where !taps.contains(tap.lowercased()) {
+                taps.append(tap.lowercased())
+            }
         case .install:
-            var adding = known.values.filter { $0.id.engine == engine && names.contains($0.id.name) }
+            var adding = known.values.filter {
+                $0.id.engine == engine && (names.contains($0.id.name) || $0.fullName.map(names.contains) == true)
+            }
             if adding.isEmpty {
                 // A nanobrew cask routed to Homebrew: the row came from nanobrew's search.
                 adding = known.values
@@ -50,8 +64,16 @@ public actor DemoInventory {
                         return row
                     }
             }
+            let named = Set(adding.flatMap { [$0.id.name] + [$0.fullName].compactMap { $0 } })
+            for argument in Self.packageArguments(step) where !named.contains(argument) {
+                let bare = String(argument.split(separator: "/").last ?? Substring(argument))
+                adding.append(Package(id: PackageRef(engine: engine, kind: step.kind, name: bare), displayName: bare,
+                                      fullName: bare == argument ? nil : argument))
+            }
             for var row in adding where !(installed[engine] ?? []).contains(where: { $0.id == row.id }) {
                 row.installedVersion = row.latestVersion ?? row.installedVersion
+                // The demo installs only what was picked, never a dependency.
+                row.installedOnRequest = true
                 installed[engine, default: []].append(row)
             }
         case .upgrade:
@@ -73,13 +95,19 @@ public actor DemoInventory {
             outdated[engine]?.removeAll { names.contains($0.id.name) }
         }
     }
+
+    /// The step's arguments that name a package or tap: not the verb, a flag (`-N`, `--cask`) or a variant (`+x`).
+    private static func packageArguments(_ step: RunStep) -> [String] {
+        let verbs: Set<String> = ["install", "tap"]
+        return step.spec.arguments.filter { !verbs.contains($0) && !$0.hasPrefix("-") && !$0.hasPrefix("+") }
+    }
 }
 
 /// A real engine on a `FixtureRunner`, with its installed and outdated lists kept in a shared `DemoInventory`.
 ///
 /// Searches go through the real engine's parser on the captured search and keep the rows whose name contains the
 /// query. Commands and privileges are the real engine's, so the steps a demo run shows are the ones BrewxPort would run.
-public final class DemoEngine: Engine {
+public final class DemoEngine: Engine, TapListing {
     public let runner: FixtureRunner
     let wrapped: any Engine
     let inventory: DemoInventory
@@ -110,6 +138,12 @@ public final class DemoEngine: Engine {
 
     public func listInstalled() async throws -> [Package] { await inventory.installed(id) }
     public func listOutdated() async throws -> [Package] { await inventory.outdated(id) }
+
+    /// The inventory's taps (the captured ones, plus any a demo run added); `[]` for an engine without taps.
+    public func listTaps() async throws -> [String] {
+        guard wrapped is any TapListing else { return [] }
+        return await inventory.installedTaps()
+    }
 
     /// The captured details when there are some, otherwise the row's own fields. The installed version always
     /// follows the inventory, so details agree with the lists after a demo run.

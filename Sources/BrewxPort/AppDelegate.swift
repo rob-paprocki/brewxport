@@ -10,7 +10,11 @@ import SwiftUI
 @MainActor final class AppDelegate: NSObject, NSApplicationDelegate {
     /// Nil in the notice-only window, which always quits at once.
     var model: BrewxPortAppModel? {
-        didSet { model?.onRunEnded = { MainWindow.reopenIfClosed() } }
+        // Set at launch and again when the window appears: the observer is added once per model.
+        didSet {
+            guard model !== oldValue else { return }
+            model?.addRunEndedObserver { MainWindow.reopenIfClosed() }
+        }
     }
 
     func applicationWillFinishLaunching(_ notification: Notification) {
@@ -19,6 +23,16 @@ import SwiftUI
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         demoDidFinishLaunching()
+    }
+
+    /// A `.brewxportbundle` double-clicked in the Finder or dropped on the Dock icon: the window comes back if it was
+    /// closed, and the file shows on Bundles once the window has started and nothing modal is up
+    /// (`openFromFinder`). One file is open at a time, so only the first of several is opened. The notice-only
+    /// window has no model and ignores it.
+    func application(_ application: NSApplication, open urls: [URL]) {
+        guard let model, let url = urls.first else { return }
+        MainWindow.reopenIfClosed()
+        model.openFromFinder(url)
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {

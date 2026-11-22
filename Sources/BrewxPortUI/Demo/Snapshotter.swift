@@ -8,13 +8,13 @@ public enum SnapshotError: Error, Equatable, Sendable {
     case renderFailed
 }
 
-/// `--snapshot <dir>`: photographs the demo window's Discover, Updates and Installed views into PNGs, without the
+/// `--snapshot <dir>`: photographs the demo window's Discover, Updates, Installed and Bundles views and the setup screen into PNGs, without the
 /// menu bar or the desktop. With Screen Recording (granted to the terminal) it uses `screencapture`, which shows
 /// vibrancy and the active window as people see them; without it, `cacheDisplay`, which draws them flat.
 @MainActor public enum Snapshotter {
     public static let size = NSSize(width: 1200, height: 760)
     public static let views: [(name: String, item: SidebarItem)] =
-        [("discover", .discover), ("updates", .updates), ("installed", .installed)]
+        [("discover", .discover), ("updates", .updates), ("installed", .installed), ("bundles", .bundles)]
 
     /// Photographs the window into a PNG at `url`: with `screencapture` when it can (the real composited window,
     /// sidebar and toolbar vibrancy included), else by rendering the view (`render`). Returns the method used.
@@ -77,6 +77,16 @@ public enum SnapshotError: Error, Equatable, Sendable {
             FileHandle.standardError.write(Data("BrewxPort demo: \(url.lastPathComponent) via \(method.rawValue)\n".utf8))
             written.append(url)
         }
+        // The setup screen last: the offer as a Mac with no package manager sees it, as a sheet on the window.
+        model.sidebar = .discover
+        model.previewFirstLaunch()
+        try await Task.sleep(for: settle + .milliseconds(700))
+        window.displayIfNeeded()
+        let url = directory.appendingPathComponent("setup-\(suffix).png")
+        let method = try write(window: window, to: url)
+        FileHandle.standardError.write(Data("BrewxPort demo: \(url.lastPathComponent) via \(method.rawValue)\n".utf8))
+        written.append(url)
+        model.setup.dismiss()
         return written
     }
 

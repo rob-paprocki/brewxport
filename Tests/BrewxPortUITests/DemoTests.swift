@@ -337,3 +337,150 @@ import BrewxPortRun
         #expect(arm.packages.filter { $0.id.name == "figlet" }.map(\.id.engine) == [.nanobrew, .macports])
     }
 }
+
+// MARK: taps (Plan 4 Task 3)
+
+extension DemoTests {
+    @Test func demoCatalogListsCapturedTaps() async throws {
+        let services = try Self.services()
+        #expect(try await services.catalog.installedTaps() == ["felixkratz/formulae"])
+    }
+
+    @Test func fakeCatalogTapsAreScripted() async throws {
+        let fake = FakeCatalog()
+        #expect(try await fake.installedTaps() == [])
+        fake.taps = .failure(EngineError(engine: .homebrew, message: "no"))
+        await #expect(throws: EngineError(engine: .homebrew, message: "no")) { try await fake.installedTaps() }
+    }
+}
+
+// MARK: sample bundle and Brewfile (Plan 4 Task 8)
+
+extension DemoTests {
+    static let felixTap = PackageRef(engine: .homebrew, kind: .tap, name: "felixkratz/formulae")
+
+    static func fixture(_ path: String) throws -> Data {
+        try Data(contentsOf: UIFixtures.directory.appendingPathComponent(path))
+    }
+
+    /// A started demo window whose engines have been checked.
+    static func startedModel() async throws -> BrewxPortAppModel {
+        let model = BrewxPortAppModel(services: try services())
+        model.start()
+        _ = await waitUntil { model.enginesChecked }
+        return model
+    }
+
+    @Test func demoSampleNames() async throws {
+        #expect(DemoSamples.names == ["inventory", "brewfile"])
+        let services = try Self.services()
+        #expect(await DemoSamples.data("nope", catalog: services.catalog, fixtures: UIFixtures.directory) == nil)
+        // The Brewfile is the captured one, byte for byte.
+        let brewfile = try #require(await DemoSamples.data("brewfile", catalog: services.catalog,
+                                                           fixtures: UIFixtures.directory))
+        #expect(brewfile.fileName == "dump-describe.Brewfile")
+        #expect(brewfile.data == (try Self.fixture("brewfile/dump-describe.Brewfile")))
+        #expect(await DemoSamples.data("brewfile", catalog: services.catalog, fixtures: nil) == nil)
+        // The inventory is the exporter's bundle of what the demo has installed, taps included; nothing on disk.
+        let inventory = try #require(await DemoSamples.data("inventory", catalog: services.catalog,
+                                                            fixtures: UIFixtures.directory, host: .arm64))
+        #expect(inventory.fileName.hasSuffix(".brewxportbundle"))
+        let bundle = try BundleFile.decode(inventory.data)
+        #expect(bundle.unhandled.isEmpty)
+        #expect(bundle.arch == .arm64)
+        #expect(bundle.entries.contains { $0.kind == .tap && $0.name == "felixkratz/formulae" })
+        #expect(bundle.entries.contains { $0.engine == .macports && $0.name == "figlet" })
+    }
+
+    @Test func demoBundleOpensFromInventoryExport() async throws {
+        let model = try await Self.startedModel()
+        await model.openDemoSample("inventory")
+        #expect(model.sidebar == .bundles)
+        #expect(await waitUntil { model.bundles.preview != nil })
+        guard case .ready(let preview, let name) = model.bundles.state else {
+            Issue.record("not ready: \(model.bundles.state)")
+            return
+        }
+        #expect(name.hasSuffix(".brewxportbundle"))
+        #expect(model.bundles.rowState(Self.felixTap) == .alreadyInstalled(version: nil))
+        // It's the demo's own inventory: everything is already installed.
+        #expect(preview.toInstallCount == 0)
+        #expect(preview.installedCount > 0)
+        #expect(preview.unhandled.isEmpty)
+    }
+
+    @Test func demoBrewfileOpensWithUnhandledLines() async throws {
+        let model = try await Self.startedModel()
+        await model.openDemoSample("brewfile")
+        #expect(await waitUntil { model.bundles.preview != nil })
+        let preview = try #require(model.bundles.preview)
+        #expect(model.bundles.state.name == "dump-describe.Brewfile")
+        let read = try BrewfileReader.read(try Self.fixture("brewfile/dump-describe.Brewfile"))
+        #expect(!read.unhandled.isEmpty)
+        #expect(preview.unhandled.count == read.unhandled.count)
+        #expect(preview.unhandled.allSatisfy { $0.location.hasPrefix("line ") })
+    }
+
+    @Test func demoInstallUsesDemoExecutor() async throws {
+        let model = try await Self.startedModel()
+        #expect(model.services.executor is DemoRunExecutor)
+        // A real `brew bundle dump`: jq and mas aren't in the demo's Homebrew inventory, the tap is.
+        model.bundles.open(data: try Self.fixture("brewfile/dump-basic.Brewfile"), name: "dump-basic.Brewfile")
+        #expect(await waitUntil { model.bundles.preview != nil })
+        #expect(model.bundles.rowState(Self.felixTap) == .alreadyInstalled(version: nil))
+        let jq = PackageRef(engine: .homebrew, kind: .formula, name: "jq")
+        let mas = PackageRef(engine: .homebrew, kind: .formula, name: "mas")
+        #expect(model.bundles.rowState(jq) == .willInstall)
+        // Formulae only, so no step needs the password sheet.
+        model.bundles.list.selection.checked = [jq, mas]
+        #expect(model.bundles.canInstall)
+        model.bundles.installChecked()
+        #expect(model.run.isRunning)
+        #expect(model.run.steps.count == 1)
+        #expect(await waitUntil { !model.run.isRunning })
+        #expect(model.run.log.lines.contains { $0.text == "Simulated: brew install --formula jq mas" })
+        // The run changed the demo inventory, so after the Installed reload both rows are installed.
+        #expect(await waitUntil { model.bundles.rowState(jq)?.isAlreadyInstalled == true })
+        #expect(model.bundles.rowState(mas)?.isAlreadyInstalled == true)
+    }
+
+    /// The binding carry: a demo `brew tap` adds the tap, and a formula named with that tap's prefix installs and
+    /// then matches. The names are the README Brewfile's (`denji/nginx/nginx-full`); the bundle is built here by
+    /// the exporter, not stored.
+    @Test func demoTapAndTapFormulaInstall() async throws {
+        let model = try await Self.startedModel()
+        let tap = PackageRef(engine: .homebrew, kind: .tap, name: "denji/nginx")
+        let formula = PackageRef(engine: .homebrew, kind: .formula, name: "denji/nginx/nginx-full")
+        let made = BundleExporter.make(
+            installed: [Package(id: PackageRef(engine: .homebrew, kind: .formula, name: "nginx-full"),
+                                displayName: "nginx-full", fullName: "denji/nginx/nginx-full")],
+            taps: ["denji/nginx"], appVersion: "1.0", arch: .arm64)
+        #expect(made.refused.isEmpty)
+        model.bundles.open(data: try made.bundle.encoded(), name: "nginx.brewxportbundle")
+        #expect(await waitUntil { model.bundles.preview != nil })
+        #expect(model.bundles.rowState(tap) == .willInstall)
+        #expect(model.bundles.rowState(formula) == .willInstall)
+        model.bundles.list.selection.checked = [tap, formula]
+        model.bundles.installChecked()
+        #expect(model.run.steps.count == 2)
+        #expect(await waitUntil { !model.run.isRunning })
+        #expect(await waitUntil { model.bundles.rowState(tap)?.isAlreadyInstalled == true })
+        #expect(model.bundles.rowState(formula)?.isAlreadyInstalled == true)
+        #expect(try await model.services.catalog.installedTaps() == ["felixkratz/formulae", "denji/nginx"])
+        // Installed shows it the way `brew info --installed` would: bare name, tap-qualified full name.
+        let installed = await Self.merged(model.services, .installed)
+        let row = try #require(installed.packages.first { $0.id.name == "nginx-full" })
+        #expect(row.id.engine == .homebrew)
+        #expect(row.fullName == "denji/nginx/nginx-full")
+    }
+
+    @Test func prepareSnapshotBundlesWaitsForPreview() async throws {
+        // Not started: prepareSnapshot starts what it needs.
+        let model = BrewxPortAppModel(services: try Self.services())
+        await model.prepareSnapshot(.bundles)
+        #expect(model.sidebar == .bundles)
+        #expect(model.bundles.preview != nil)
+        #expect(model.bundles.state.name?.hasSuffix(".brewxportbundle") == true)
+        #expect(model.bundles.rowState(Self.felixTap) == .alreadyInstalled(version: nil))
+    }
+}

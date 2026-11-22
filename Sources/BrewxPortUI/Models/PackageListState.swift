@@ -20,6 +20,8 @@ import BrewxPortCore
     /// `isVisible`, then `sortOrder`.
     public private(set) var rows: [PackageRow] = []
     public private(set) var errors: [String] = []
+    /// The engines whose latest answer was an error (the ones `errors` names).
+    public private(set) var failedEngines: Set<EngineID> = []
     public private(set) var loading = false
     public private(set) var byRef: [PackageRef: PackageRow] = [:]
 
@@ -137,6 +139,7 @@ import BrewxPortCore
                                                    isInstalled: $0.installedVersion != nil || installedRefs.contains($0.id)) }
         byRef = Dictionary(all.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
         errors = merged.errors.map(EngineErrorText.line)
+        failedEngines = Set(merged.errors.map(\.engine))
         let visible = all.filter(isVisible)
         rows = sortOrder.isEmpty ? visible : visible.sorted(using: sortOrder)
     }

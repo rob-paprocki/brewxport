@@ -1,7 +1,8 @@
 #!/bin/bash
 # Builds build/BrewxPortDemo.app with scripts/demo.sh (snapshot mode into a temp dir, so nothing stays open) and
 # checks its layout and identity: com.brewxport.demo, "BrewxPort Demo", the BrewxPort binary, DemoFixtures, ad-hoc signed,
-# and no BrewxPortHelper, launchd plist or brewxport-askpass anywhere inside.
+# and no BrewxPortHelper, launchd plist or brewxport-askpass anywhere inside. The snapshot run must write all four
+# pictures, Bundles included.
 #
 # usage: Tests/scripts/test-demo-app.sh
 set -euo pipefail
@@ -33,6 +34,17 @@ extra="$(find "$APP" \( -iname '*helper*' -o -iname '*.plist' -o -iname '*askpas
     ! -path "$APP/Contents/Resources/DemoFixtures/*" || true)"
 [ -z "$extra" ] && pass "no helper, launchd plist or askpass in the bundle" || fail "unexpected files: $extra"
 codesign --verify --deep "$APP" 2>/dev/null && pass "ad-hoc signature verifies" || fail "signature does not verify"
+rank="$("$PB" -c "Print :CFBundleDocumentTypes:0:LSHandlerRank" "$APP/Contents/Info.plist" 2>/dev/null || true)"
+[ "$rank" = None ] && pass "the demo doesn't claim bundle files (LSHandlerRank None)" || fail "LSHandlerRank is '$rank'"
+imported="$("$PB" -c "Print :UTImportedTypeDeclarations:0:UTTypeIdentifier" "$APP/Contents/Info.plist" 2>/dev/null || true)"
+[ "$imported" = com.brewxport.bundle ] && pass "the demo imports com.brewxport.bundle" || fail "imported type is '$imported'"
+"$PB" -c "Print :UTExportedTypeDeclarations" "$APP/Contents/Info.plist" >/dev/null 2>&1 &&
+    fail "the demo exports a type; only the real app may" || pass "the demo exports no type"
+
+shots="$(find "$TMP/shots" -name '*.png' 2>/dev/null | wc -l | tr -d ' ')"
+[ "$shots" = 4 ] && pass "snapshot wrote four pictures" || fail "snapshot wrote $shots pictures, wanted 4"
+[ -n "$(find "$TMP/shots" -name 'bundles-*.png' 2>/dev/null)" ] && pass "bundles-<appearance>.png written" ||
+    fail "no bundles-<appearance>.png"
 
 [ "$failures" -eq 0 ] && { echo "all passed"; exit 0; }
 echo "$failures failed" >&2

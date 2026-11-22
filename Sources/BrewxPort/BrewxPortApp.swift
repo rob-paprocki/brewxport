@@ -13,8 +13,9 @@ enum BrewxPortMain {
         if mode == .selfCheck {
             exit(SelfCheck.run())
         }
-        // BrewxPort opens no documents. Without this, AppKit takes a path argument (`--demo-fixtures DIR`,
-        // `--snapshot DIR`) for a file to open, and SwiftUI then presents no window at launch.
+        // Files reach BrewxPort only from LaunchServices (`AppDelegate.application(_:open:)`), never from its
+        // arguments. Without this, AppKit takes a path argument (`--demo-fixtures DIR`, `--snapshot DIR`) for a file
+        // to open, and SwiftUI then presents no window at launch.
         UserDefaults.standard.register(defaults: ["NSTreatUnknownArgumentsAsOpen": "NO"])
         switch StartupPolicy.decide(mode: mode, developmentMac: StartupPolicy.isDevelopmentMac()) {
         case .live:
@@ -74,14 +75,16 @@ struct NoticeApp: App {
 
 /// The engines BrewxPort drives, found at their fixed paths.
 enum Engines {
-    static func make(runner: CommandRunning = ProcessRunner(), arch: Arch = .current) -> [any Engine] {
-        let locator = EngineLocator()
-        func path(_ id: EngineID) -> URL? { locator.locate(id, arch: arch) }
+    /// Each engine looks its executable up again every time it's used, so one installed while BrewxPort runs
+    /// (set up from the first-launch screen, say) is found by the next check without relaunching.
+    static func make(runner: CommandRunning = ProcessRunner(), arch: Arch = .current,
+                     locator: EngineLocator = EngineLocator()) -> [any Engine] {
+        func path(_ id: EngineID) -> @Sendable () -> URL? { { locator.locate(id, arch: arch) } }
         return [
-            HomebrewEngine(runner: runner, executable: path(.homebrew), arch: arch),
-            NanobrewEngine(runner: runner, executable: path(.nanobrew)),
-            MacPortsEngine(runner: runner, executable: path(.macports)),
-            MasEngine(runner: runner, executable: path(.mas)),
+            HomebrewEngine(runner: runner, locate: path(.homebrew), arch: arch),
+            NanobrewEngine(runner: runner, locate: path(.nanobrew)),
+            MacPortsEngine(runner: runner, locate: path(.macports)),
+            MasEngine(runner: runner, locate: path(.mas)),
         ]
     }
 }

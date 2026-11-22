@@ -119,6 +119,6 @@ private struct InstalledTable: View {
             }
             .width(40)
         }
-        .packageRowMenu(model: model, list: list, view: .installed)
+        .packageRowMenu(model: model, view: .installed)
     }
 }
