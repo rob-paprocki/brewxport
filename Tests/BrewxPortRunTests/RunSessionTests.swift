@@ -64,7 +64,7 @@ enum Steps {
 
     static func remove(_ name: String = "wget") -> RunStep {
         RunStep(engine: .homebrew, operation: .remove,
-                spec: CommandSpec(executable: URL(fileURLWithPath: brewPath), arguments: ["uninstall", name],
+                spec: CommandSpec(executable: URL(fileURLWithPath: brewPath), arguments: ["uninstall", "--formula", name],
                                   needsRoot: false),
                 title: "Remove \(name)", requiresAllEarlier: true)
     }
@@ -440,6 +440,99 @@ final class VerifierProbe: @unchecked Sendable {
         // Only the helper needs the password: no sudo verify, no askpass server.
         #expect(h.runner.calls.isEmpty)
         #expect(h.servers.isEmpty)
+    }
+
+    // MARK: Uninstalling what is already gone
+
+    /// Homebrew's own message for a package whose keg folder isn't there.
+    static let noSuchKeg = "Error: No such keg: /opt/homebrew/Cellar/wget"
+
+    @Test func noSuchKegCountsAsAlreadyRemoved() async {
+        let h = Harness()
+        h.runner.respond([Steps.brewPath, "uninstall", "--formula", "wget"], code: 1, stderr: Self.noSuchKeg)
+        let events = await collect(h.session().run([Steps.remove("wget")]))
+        #expect(events.contains(.output(0, .stderr(Self.noSuchKeg))))
+        #expect(events.contains(.output(0, .stdout("wget was already removed."))))
+        #expect(events.contains(.finished(0, 0)))
+    }
+
+    @Test func formulaFlagDoesNotHideNoSuchKeg() async {
+        // The exact shape the engine builds: `brew uninstall --formula wget`.
+        let h = Harness()
+        h.runner.respond([Steps.brewPath, "uninstall", "--formula", "wget"], code: 1, stderr: Self.noSuchKeg)
+        let events = await collect(h.session().run([Steps.remove("wget")]))
+        #expect(events.contains(.finished(0, 0)))
+    }
+
+    @Test func noSuchKegOnIntelCountsToo() async {
+        let h = Harness()
+        h.runner.respond([Steps.brewPath, "uninstall", "--formula", "wget"], code: 1,
+                         stderr: "Error: No such keg: /usr/local/Cellar/wget")
+        let events = await collect(h.session().run([Steps.remove("wget")]))
+        #expect(events.contains(.finished(0, 0)))
+    }
+
+    @Test func noSuchKegAlongsideAnotherErrorStillFails() async {
+        let h = Harness()
+        h.runner.respond([Steps.brewPath, "uninstall", "--formula", "wget"], code: 1,
+                         stderr: Self.noSuchKeg + "\nError: Refusing to uninstall /opt/homebrew/Cellar/openssl@3/3.4.0\n"
+                         + "because it is required by curl, which is currently installed.")
+        let events = await collect(h.session().run([Steps.remove("wget")]))
+        #expect(events.contains(.finished(0, 1)))
+        #expect(!events.contains(.output(0, .stdout("wget was already removed."))))
+    }
+
+    @Test func noSuchKegInAMultiPackageUninstallStillFails() async {
+        let h = Harness()
+        let step = RunStep(engine: .homebrew, operation: .remove,
+                           spec: CommandSpec(executable: URL(fileURLWithPath: Steps.brewPath),
+                                             arguments: ["uninstall", "--formula", "wget", "jq"], needsRoot: false),
+                           title: "Remove wget, jq")
+        h.runner.respond([Steps.brewPath, "uninstall", "--formula", "wget", "jq"], code: 1, stderr: Self.noSuchKeg)
+        let events = await collect(h.session().run([step]))
+        #expect(events.contains(.finished(0, 1)))
+        #expect(!events.contains(.output(0, .stdout("wget was already removed."))))
+    }
+
+    @Test func noSuchKegForAnotherPackageStillFails() async {
+        let h = Harness()
+        h.runner.respond([Steps.brewPath, "uninstall", "--formula", "jq"], code: 1, stderr: Self.noSuchKeg)
+        let events = await collect(h.session().run([Steps.remove("jq")]))
+        #expect(events.contains(.finished(0, 1)))
+    }
+
+    @Test func noSuchKegUnderRosettaCountsAsAlreadyRemoved() async {
+        let h = Harness()
+        let step = RunStep(engine: .homebrew, operation: .remove,
+                           spec: CommandSpec(executable: URL(fileURLWithPath: Steps.intelBrewPath),
+                                             arguments: ["uninstall", "--formula", "wget"], needsRoot: false, arch: .x86_64),
+                           title: "Remove wget")
+        h.runner.respond(["/usr/bin/arch", "-x86_64", Steps.intelBrewPath, "uninstall", "--formula", "wget"], code: 1,
+                         stderr: "Error: No such keg: /usr/local/Cellar/wget")
+        let events = await collect(h.session(host: .arm64).run([step]))
+        #expect(events.contains(.output(0, .stdout("wget was already removed."))))
+        #expect(events.contains(.finished(0, 0)))
+    }
+
+    @Test func noSuchKegWithExitStatusTwoStillFails() async {
+        let h = Harness()
+        h.runner.respond([Steps.brewPath, "uninstall", "--formula", "wget"], code: 2, stderr: Self.noSuchKeg)
+        let events = await collect(h.session().run([Steps.remove("wget")]))
+        #expect(events.contains(.finished(0, 2)))
+    }
+
+    @Test func otherUninstallFailuresAreUnchanged() async {
+        let h = Harness()
+        h.runner.respond([Steps.brewPath, "uninstall", "--formula", "wget"], code: 1, stderr: "Error: Permission denied @ apply2files")
+        let events = await collect(h.session().run([Steps.remove("wget")]))
+        #expect(events.contains(.finished(0, 1)))
+    }
+
+    @Test func noSuchKegOnAnUpgradeStaysAFailure() async {
+        let h = Harness()
+        h.runner.respond([Steps.brewPath, "upgrade", "wget"], code: 1, stderr: Self.noSuchKeg)
+        let events = await collect(h.session().run([Steps.formula("wget")]))
+        #expect(events.contains(.finished(0, 1)))
     }
 
     @Test func continuesAfterFailedStep() async {
@@ -855,26 +948,27 @@ final class VerifierProbe: @unchecked Sendable {
         let path = nanobrew ? Steps.nbPath : Steps.brewPath
         return RunStep(engine: engine, operation: .remove,
                        spec: CommandSpec(executable: URL(fileURLWithPath: path),
-                                         arguments: [nanobrew ? "remove" : "uninstall", name], needsRoot: false),
+                                         arguments: nanobrew ? ["remove", name] : ["uninstall", "--formula", name],
+                                         needsRoot: false),
                        title: "Remove \(name)", requiresAllEarlier: true, gateGroup: engine.rawValue)
     }
 
     @Test func groupedGateIgnoresOtherGroupsFailures() async {
         // Homebrew's wget fails: Homebrew's later libidn2 is skipped, nanobrew's jq and fd still run.
         let h = Harness()
-        h.runner.respond([Steps.brewPath, "uninstall", "wget"], code: 1)
+        h.runner.respond([Steps.brewPath, "uninstall", "--formula", "wget"], code: 1)
         let steps = [Self.groupedRemove("wget"), Self.groupedRemove("jq", nanobrew: true),
                      Self.groupedRemove("libidn2"), Self.groupedRemove("fd", nanobrew: true)]
         let events = await collect(h.session().run(steps))
         #expect(events == [.started(0), .finished(0, 1), .started(1), .finished(1, 0), .started(3), .finished(3, 0),
                            .done])
-        #expect(!h.runner.calls.contains { $0.arguments == ["uninstall", "libidn2"] })
+        #expect(!h.runner.calls.contains { $0.arguments == ["uninstall", "--formula", "libidn2"] })
     }
 
     @Test func groupedGateCountsASkippedStepInItsGroup() async {
         // wget fails, libidn2 is skipped, so openssl (after a skip, not a failure) is skipped too.
         let h = Harness()
-        h.runner.respond([Steps.brewPath, "uninstall", "wget"], code: 1)
+        h.runner.respond([Steps.brewPath, "uninstall", "--formula", "wget"], code: 1)
         let steps = [Self.groupedRemove("wget"), Self.groupedRemove("libidn2"), Self.groupedRemove("jq", nanobrew: true),
                      Self.groupedRemove("openssl")]
         let events = await collect(h.session().run(steps))
@@ -1022,7 +1116,7 @@ final class VerifierProbe: @unchecked Sendable {
     @Test func passedCheckGateRunsAfterAFailedRemoval() async {
         // The check passed, so the target has the packages: a failed removal doesn't stop the marks.
         let h = Harness()
-        h.runner.respond([Steps.brewPath, "uninstall", "jq"], code: 1)
+        h.runner.respond([Steps.brewPath, "uninstall", "--formula", "jq"], code: 1)
         let steps = [Steps.check(["jq"]), Steps.remove("jq"), Self.mark()]
         let events = await collect(h.session().run(steps, reason: "R", verify: VerifierProbe().verify))
         #expect(events.contains(.finished(1, 1)))

@@ -154,13 +154,7 @@ final class HelperService: NSObject, BrewxPortHelperProtocol, Sendable {
 
     /// The account name for `uid`, from the user database (`getpwuid_r`).
     private static func userName(of uid: uid_t) -> String? {
-        var record = passwd()
-        var result: UnsafeMutablePointer<passwd>?
-        var buffer = [CChar](repeating: 0, count: 4096)
-        guard getpwuid_r(uid, &record, &buffer, buffer.count, &result) == 0, result != nil,
-              let name = record.pw_name else { return nil }
-        let text = String(cString: name)
-        return text.isEmpty ? nil : text
+        UserDatabase.entry(for: uid)?.name
     }
 
     /// The connection is gone: kill the running `port` (its whole process group) and drop the client proxy.

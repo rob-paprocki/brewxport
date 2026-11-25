@@ -87,6 +87,7 @@ import BrewxPortRun
         details = DetailsModel(catalog: services.catalog)
         preferences = UpdatePreferences(store: services.store)
         exportIncludesDependencies = services.store.data(forKey: Self.exportIncludesDependenciesKey) != Data("0".utf8)
+        groupByPackageManager = services.store.data(forKey: Self.groupByPackageManagerKey) != Data("0".utf8)
         let engines = services.engines
         let order = PackageCatalog.defaultOrder(for: services.host)
         let host = services.host
@@ -372,6 +373,12 @@ import BrewxPortRun
 
     public func updateAll() {
         updateRefs(updates.updateAllRequests())
+    }
+
+    /// A section header's "Update N": Update all limited to one engine, in one run, through the same path. Its button
+    /// is on and off with Update all (`canUpdateAll`).
+    public func updateAll(engine: EngineID) {
+        updateRefs(updates.updateAllRequests(for: engine))
     }
 
     /// The toolbar's "Update N": the checked rows on screen that aren't ignored or skipped.
@@ -1048,6 +1055,64 @@ import BrewxPortRun
         didSet {
             services.store.set(Data((exportIncludesDependencies ? "1" : "0").utf8),
                                forKey: Self.exportIncludesDependenciesKey)
+        }
+    }
+
+    static let groupByPackageManagerKey = "groupByPackageManager"
+
+    /// View > Group by Package Manager (⌥⌘G). On (the default), Updates, Installed and Discover split their rows into
+    /// one section per package manager. One setting for all three pages, remembered across launches. Turning it on
+    /// or off never touches a checked row. It leaves the highlight alone too, with one exception: collapsed sections
+    /// are remembered while grouping is off, so turning grouping back on drops the highlighted rows of any section
+    /// that comes back collapsed, because nothing hidden may be acted on by a key press.
+    public var groupByPackageManager: Bool = true {
+        didSet {
+            services.store.set(Data((groupByPackageManager ? "1" : "0").utf8), forKey: Self.groupByPackageManagerKey)
+            if groupByPackageManager && !oldValue {
+                for view in [PackageView.updates, .installed, .discover] { dropCollapsedHighlight(on: view) }
+            }
+        }
+    }
+
+    /// Installed's rows, one section per package manager in engine order, each sorted by the table's sort. Nil with
+    /// grouping off. A name two managers installed sits in both. Collapsing isn't applied: it only hides rows.
+    public var installedSections: [PackageSection<InstalledRow>]? {
+        groupByPackageManager ? PackageSections.make(installed.rows, engine: \.id.engine, order: engineOrder) : nil
+    }
+
+    /// Discover's rows (after the engine picker), one section per package manager. Nil with grouping off.
+    public var discoverSections: [PackageSection<PackageRow>]? {
+        groupByPackageManager ? PackageSections.make(discover.list.rows, engine: \.id.engine, order: engineOrder) : nil
+    }
+
+    private struct CollapseKey: Hashable {
+        let engine: EngineID
+        let view: PackageView
+    }
+
+    /// The sections folded shut on each page. Session only: not saved, and a section starts open.
+    private var collapsedSections: Set<CollapseKey> = []
+
+    public func isCollapsed(_ engine: EngineID, on view: PackageView) -> Bool {
+        collapsedSections.contains(CollapseKey(engine: engine, view: view))
+    }
+
+    /// Takes the rows of every collapsed section on a page out of its highlight; checked rows stay as they are.
+    private func dropCollapsedHighlight(on view: PackageView) {
+        let list = list(for: view)
+        list.selection.selected = list.selection.selected.filter { !isCollapsed($0.engine, on: view) }
+    }
+
+    /// Folds a section shut or open on one page. Folding it drops that engine's rows from the page's highlight
+    /// (`selected`), because rows nobody can see shouldn't take Return or Delete. It never changes the checked rows,
+    /// and opening it again restores nothing.
+    public func setCollapsed(_ collapsed: Bool, _ engine: EngineID, on view: PackageView) {
+        let key = CollapseKey(engine: engine, view: view)
+        if collapsed {
+            collapsedSections.insert(key)
+            dropCollapsedHighlight(on: view)
+        } else {
+            collapsedSections.remove(key)
         }
     }
 

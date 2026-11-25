@@ -171,7 +171,7 @@ import BrewxPortRun
     static func groupedRemove(_ engine: EngineID, _ kind: PackageKind, _ name: String) -> RunStep {
         let (path, arguments): (String, [String]) = switch engine {
         case .macports: ("/opt/local/bin/port", ["-N", "uninstall", name])
-        default: ("/opt/homebrew/bin/brew", kind == .cask ? ["uninstall", "--cask", name] : ["uninstall", name])
+        default: ("/opt/homebrew/bin/brew", kind == .cask ? ["uninstall", "--cask", name] : ["uninstall", "--formula", name])
         }
         return RunStep(engine: engine, kind: kind, operation: .remove,
                        spec: CommandSpec(executable: URL(fileURLWithPath: path), arguments: arguments,

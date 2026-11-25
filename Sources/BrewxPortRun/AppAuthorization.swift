@@ -32,10 +32,7 @@ public final class AppAuthorization: @unchecked Sendable {
 
     /// The login name of the user running BrewxPort.
     public static func currentUserName() -> String {
-        if let entry = getpwuid(getuid()), let name = entry.pointee.pw_name {
-            return String(cString: name)
-        }
-        return NSUserName()
+        UserDatabase.entry(for: getuid())?.name ?? NSUserName()
     }
 
     /// True while an acquired authorization is held.

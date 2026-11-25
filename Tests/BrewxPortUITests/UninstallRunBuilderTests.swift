@@ -41,8 +41,9 @@ import BrewxPortRun
         // wget before libidn2 (it needs it), then the leftovers, ripgrep before pcre2: name order would be the reverse.
         #expect(steps.map(\.title) == ["Homebrew: wget", "Homebrew: libidn2", "Homebrew: ripgrep", "Homebrew: pcre2"])
         #expect(steps.allSatisfy { $0.operation == .remove })
-        #expect(steps.map(\.spec.arguments) == [["uninstall", "wget"], ["uninstall", "libidn2"],
-                                                ["uninstall", "ripgrep"], ["uninstall", "pcre2"]])
+        #expect(steps.map(\.spec.arguments) == [["uninstall", "--formula", "wget"], ["uninstall", "--formula", "libidn2"],
+                                                ["uninstall", "--formula", "ripgrep"],
+                                                ["uninstall", "--formula", "pcre2"]])
     }
 
     @Test func caskPickBeforeItsFormulaLeftovers() {
@@ -52,8 +53,8 @@ import BrewxPortRun
         let section = Self.section(.homebrew, picks: [Self.pkg(.homebrew, "droid", .cask)],
                                    leftovers: [Self.pkg(.homebrew, "pcre2"), Self.pkg(.homebrew, "ripgrep")])
         let steps = Self.build([section], facts: [.homebrew: facts]).actions.steps
-        #expect(steps.map(\.spec.arguments) == [["uninstall", "--cask", "droid"], ["uninstall", "ripgrep"],
-                                                ["uninstall", "pcre2"]])
+        #expect(steps.map(\.spec.arguments) == [["uninstall", "--cask", "droid"], ["uninstall", "--formula", "ripgrep"],
+                                                ["uninstall", "--formula", "pcre2"]])
     }
 
     @Test func gatedWithinManagerOnly() {
@@ -130,7 +131,7 @@ import BrewxPortRun
             [PlanFixtures.nbPath, "remove", "--cask", "firefox"],
             [PlanFixtures.nbPath, "remove", "jq"],
             [PlanFixtures.brewPath, "uninstall", "--cask", "droid"],
-            [PlanFixtures.brewPath, "uninstall", "wget"],
+            [PlanFixtures.brewPath, "uninstall", "--formula", "wget"],
             [PlanFixtures.portPath, "-N", "uninstall", "curl"],
             [PlanFixtures.masPath, "uninstall", "497799835"],
         ])

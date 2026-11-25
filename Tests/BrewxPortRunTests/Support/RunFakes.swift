@@ -92,6 +92,7 @@ final class FakeRunner: CommandRunning, @unchecked Sendable {
         }
         if let error = response.error { throw error }
         for line in response.stdout { onOutput(.stdout(line)) }
+        if !response.stderr.isEmpty { onOutput(.stderr(response.stderr)) }
         return response.code
     }
 

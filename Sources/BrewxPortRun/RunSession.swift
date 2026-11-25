@@ -345,8 +345,21 @@ public final class RunSession: Sendable {
             // No extra variables: the runner's own base environment.
             let options = step.userEnvironment.isEmpty
                 ? RunOptions() : RunOptions(environment: baseEnvironment.merging(step.userEnvironment) { $1 })
-            return try await runner.stream(launch.executable, launch.arguments, options: options,
-                                           onOutput: onOutput)
+            guard step.engine == .homebrew, step.operation == .remove else {
+                return try await runner.stream(launch.executable, launch.arguments, options: options,
+                                               onOutput: onOutput)
+            }
+            let errors = Mutex<[String]>([])
+            let code = try await runner.stream(launch.executable, launch.arguments, options: options) { event in
+                if case .stderr(let text) = event { errors.withLock { $0.append(text) } }
+                onOutput(event)
+            }
+            guard code == 1,
+                  let names = Self.alreadyRemoved(stderr: errors.withLock { $0 }.joined(separator: "\n"),
+                                                  arguments: step.spec.arguments)
+            else { return code }
+            for name in names { emit(.output(index, .stdout("\(name) was already removed."))) }
+            return 0
         case .userWithAskpass, .sudoAskpass:
             guard state.askpassFailure == nil, let server = state.server else {
                 throw StepFailure(message: state.askpassFailure ?? "BrewxPort couldn't pass the password to sudo.")
@@ -390,6 +403,30 @@ public final class RunSession: Sendable {
                                                 onOutput: onOutput)
             }
         }
+    }
+
+    /// The packages Homebrew says have no keg, when that is the only error `brew uninstall` printed (Apple silicon
+    /// `/opt/homebrew/Cellar/<name>`, Intel `/usr/local/Cellar/<name>`). Nil when any other `Error:` line is there,
+    /// or none is a "No such keg", or the step removes more than one package or a different one from the missing
+    /// keg, so the step keeps its failure.
+    static func alreadyRemoved(stderr: String, arguments: [String]) -> [String]? {
+        // Only a step that removes exactly one package: `brew uninstall a b` checks every keg first and removes
+        // nothing when one is missing, so the others would still be installed.
+        let packages = arguments.dropFirst().filter { !$0.hasPrefix("-") }
+        guard packages.count == 1, let package = packages.first?.split(separator: "/").last else { return nil }
+        var names: [String] = []
+        for line in stderr.split(whereSeparator: \.isNewline) {
+            let text = line.trimmingCharacters(in: .whitespaces)
+            guard text.hasPrefix("Error:") else { continue }
+            let prefix = "Error: No such keg: "
+            guard text.hasPrefix(prefix) else { return nil }
+            let path = text.dropFirst(prefix.count)
+            guard path.hasPrefix("/opt/homebrew/Cellar/") || path.hasPrefix("/usr/local/Cellar/") else { return nil }
+            let name = path.split(separator: "/").last.map(String.init) ?? ""
+            guard !name.isEmpty, name != "Cellar" else { return nil }
+            names.append(name)
+        }
+        return names == [String(package)] ? names : nil
     }
 
     private func askpassEnvironment(_ server: any AskpassServing) -> [String: String] {

@@ -7,6 +7,22 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-11-25
+
+**Upgrading:** nothing to do.
+
+### Added
+
+- Updates, Installed and Discover group packages by package manager. Each section shows a count and a collapse arrow. View > Group by Package Manager (⌥⌘G) turns it off and brings back the flat list.
+- Each package manager's section on Updates has an Update button that updates only that manager. It asks for at most one password.
+
+### Fixed
+
+- Discover's engine picker shows the picked engine's name next to its icon. It used to show only the icon.
+- Uninstalling a Homebrew package that's already gone (Homebrew says "No such keg") counts it as removed instead of failing.
+- When a Homebrew formula you uninstall is already gone, BrewxPort no longer removes a cask with the same name in its place.
+- Setting up MacPorts no longer reports a failure after MacPorts installed when BrewxPort's helper can't read one of your shell startup files, such as one still downloading from iCloud. The run log says it couldn't check your PATH instead.
+
 ## [0.5.0] - 2026-11-22
 
 **Upgrading:** nothing to do.

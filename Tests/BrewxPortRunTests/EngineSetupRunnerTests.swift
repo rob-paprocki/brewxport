@@ -25,10 +25,16 @@ final class SetupWorld: @unchecked Sendable {
     /// A file the (fake) installer also puts down, such as Homebrew's /etc/paths.d entry.
     var installerAlsoCreates: String?
     /// The requester's home as the runner sees it, and the startup files in it (name to text) the fake reader serves.
-    var home = "/Users/alice"
+    var home: String? = "/Users/alice"
     var homeFiles: [String: String] = [:]
+    /// Startup files the fake reader says it couldn't read (a read error, such as a file still in iCloud).
+    var unreadableHomeFiles: Set<String> = []
     /// Entries in /etc/paths.d (file name to text) the fake reader serves.
     var pathsD: [String: String] = [:]
+    /// /etc/paths.d entries the fake reader couldn't read.
+    var unreadablePathsD: Set<String> = []
+    /// The fake /etc/paths.d listing itself fails.
+    var pathsDUnlistable = false
     /// Use the runner's real file reader against `home` on disk instead of `homeFiles`.
     var useRealStartupReader = false
     var nanobrewDir: PathInfo = .missing
@@ -154,10 +160,21 @@ final class SetupWorld: @unchecked Sendable {
             downloads: downloads,
             homeDirectory: { _ in self.home },
             readStartupFile: { home, name in
-                if self.useRealStartupReader { return EngineSetupRunner.readStartupFile(home: home, name: name) }
-                return self.lock.withLock { self.homeFiles[name] }
+                if self.useRealStartupReader { return EngineSetupRunner.startupFile(home: home, name: name) }
+                return self.lock.withLock {
+                    if self.unreadableHomeFiles.contains(name) { return .unreadable }
+                    return self.homeFiles[name].map { .text($0) } ?? .skipped
+                }
             },
-            readPathsD: { self.lock.withLock { self.pathsD.sorted { $0.key < $1.key }.map { ($0.key, $0.value) } } },
+            readPathsD: {
+                self.lock.withLock {
+                    if self.pathsDUnlistable { return nil }
+                    let names = Set(self.pathsD.keys).union(self.unreadablePathsD).sorted()
+                    return names.map { name in
+                        (name, self.unreadablePathsD.contains(name) ? FileRead.unreadable : .text(self.pathsD[name]!))
+                    }
+                }
+            },
             homebrewPlistPath: plistPath,
             cltPlaceholderPath: placeholderPath)
     }
@@ -876,6 +893,43 @@ final class SetupWorld: @unchecked Sendable {
         #expect(world.logs.last == Self.macportsNotOnPath)
     }
 
+    static let macportsPathUnchecked = "BrewxPort couldn't check whether MacPorts is on your PATH. BrewxPort finds it at /opt/local/bin/port; to use port in Terminal, make sure /opt/local/bin is on your PATH."
+
+    @Test func macportsNoteSaysItCouldNotCheckWhenAStartupFileCannotBeRead() async throws {
+        let world = try SetupWorld()
+        world.unreadableHomeFiles = [".zshrc"]
+        #expect(await Self.outcome(world, .macports) == nil)
+        #expect(world.logs.contains("MacPorts is set up."))
+        #expect(world.logs.last == Self.macportsPathUnchecked)
+    }
+
+    @Test func macportsNoteSaysItCouldNotCheckWithoutAHomeFolder() async throws {
+        let world = try SetupWorld()
+        world.home = nil
+        #expect(await Self.outcome(world, .macports) == nil)
+        #expect(world.logs.last == Self.macportsPathUnchecked)
+    }
+
+    @Test func macportsNoteSaysItCouldNotCheckWhenPathsDCannotBeRead() async throws {
+        let unreadable = try SetupWorld()
+        unreadable.unreadablePathsD = ["macports"]
+        #expect(await Self.outcome(unreadable, .macports) == nil)
+        #expect(unreadable.logs.last == Self.macportsPathUnchecked)
+
+        let unlistable = try SetupWorld()
+        unlistable.pathsDUnlistable = true
+        #expect(await Self.outcome(unlistable, .macports) == nil)
+        #expect(unlistable.logs.last == Self.macportsPathUnchecked)
+    }
+
+    @Test func macportsNoteStillNamesAFileItFoundWhenAnotherCannotBeRead() async throws {
+        let world = try SetupWorld()
+        world.unreadableHomeFiles = [".zprofile"]
+        world.pathsD["macports"] = "/opt/local/bin\n"
+        #expect(await Self.outcome(world, .macports) == nil)
+        #expect(world.logs.last == "MacPorts' installer added /opt/local/bin to your PATH (/etc/paths.d/macports).")
+    }
+
     @Test func nanobrewLogsWhatHappenedToPath() async throws {
         let nano = try SetupWorld()
         #expect(await Self.outcome(nano, .nanobrew) == nil)
@@ -910,6 +964,140 @@ final class SetupWorld: @unchecked Sendable {
         let classes = HelperInterfaces.helper().classes(for: sel, argumentIndex: 1, ofReply: false)
         #expect(classes.count == 1)
         #expect(classes.contains(NSString.self as AnyObject as! AnyHashable))
+    }
+}
+
+@Suite struct StartupFileReaderTests {
+    static func makeFolder() throws -> URL {
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent("startup-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: false)
+        return folder
+    }
+
+    static let line = "export PATH=/opt/local/bin:$PATH\n"
+
+    @Test func readsAPlainFile() throws {
+        let home = try Self.makeFolder()
+        defer { try? FileManager.default.removeItem(at: home) }
+        try Self.line.write(to: home.appendingPathComponent(".zshrc"), atomically: true, encoding: .utf8)
+        #expect(EngineSetupRunner.readStartupFile(home: home.path, name: ".zshrc") == Self.line)
+        #expect(EngineSetupRunner.startupFile(home: home.path, name: ".zshrc") == .text(Self.line))
+    }
+
+    @Test func skipsAMissingFile() throws {
+        let home = try Self.makeFolder()
+        defer { try? FileManager.default.removeItem(at: home) }
+        #expect(EngineSetupRunner.readStartupFile(home: home.path, name: ".zshrc") == nil)
+        #expect(EngineSetupRunner.startupFile(home: home.path, name: ".zshrc") == .skipped)
+    }
+
+    @Test func skipsADirectory() throws {
+        let home = try Self.makeFolder()
+        defer { try? FileManager.default.removeItem(at: home) }
+        try FileManager.default.createDirectory(at: home.appendingPathComponent(".zshrc"), withIntermediateDirectories: false)
+        #expect(EngineSetupRunner.readStartupFile(home: home.path, name: ".zshrc") == nil)
+        #expect(EngineSetupRunner.startupFile(home: home.path, name: ".zshrc") == .skipped)
+    }
+
+    @Test(.timeLimit(.minutes(1))) func skipsAFIFOWithoutHanging() throws {
+        let home = try Self.makeFolder()
+        defer { try? FileManager.default.removeItem(at: home) }
+        #expect(mkfifo(home.appendingPathComponent(".zshrc").path, 0o644) == 0)
+        #expect(EngineSetupRunner.readStartupFile(home: home.path, name: ".zshrc") == nil)
+        #expect(EngineSetupRunner.startupFile(home: home.path, name: ".zshrc") == .skipped)
+    }
+
+    @Test func skipsASymlinkThatLeavesHome() throws {
+        let home = try Self.makeFolder()
+        let outside = try Self.makeFolder()
+        defer {
+            try? FileManager.default.removeItem(at: home)
+            try? FileManager.default.removeItem(at: outside)
+        }
+        try Self.line.write(to: outside.appendingPathComponent("secret"), atomically: true, encoding: .utf8)
+        try FileManager.default.createSymbolicLink(at: home.appendingPathComponent(".zshrc"),
+                                                   withDestinationURL: outside.appendingPathComponent("secret"))
+        #expect(EngineSetupRunner.readStartupFile(home: home.path, name: ".zshrc") == nil)
+        #expect(EngineSetupRunner.startupFile(home: home.path, name: ".zshrc") == .skipped)
+    }
+
+    @Test func skipsAnOversizedFile() throws {
+        let home = try Self.makeFolder()
+        defer { try? FileManager.default.removeItem(at: home) }
+        let big = String(repeating: "#", count: EngineSetupRunner.maxStartupFileBytes + 1)
+        try big.write(to: home.appendingPathComponent(".zshrc"), atomically: true, encoding: .utf8)
+        #expect(EngineSetupRunner.readStartupFile(home: home.path, name: ".zshrc") == nil)
+        #expect(EngineSetupRunner.startupFile(home: home.path, name: ".zshrc") == .skipped)
+    }
+
+    @Test(.enabled(if: getuid() != 0, "root can open a mode 000 file"))
+    func aFileThatCannotBeOpenedIsUnreadable() throws {
+        let home = try Self.makeFolder()
+        defer { try? FileManager.default.removeItem(at: home) }
+        let path = home.appendingPathComponent(".zshrc").path
+        try Self.line.write(toFile: path, atomically: true, encoding: .utf8)
+        #expect(chmod(path, 0) == 0)
+        defer { chmod(path, 0o644) }
+        #expect(EngineSetupRunner.startupFile(home: home.path, name: ".zshrc") == .unreadable)
+        #expect(EngineSetupRunner.readStartupFile(home: home.path, name: ".zshrc") == nil)
+    }
+
+    @Test func aReadErrorIsUnreadableNotACrash() throws {
+        let home = try Self.makeFolder()
+        defer { try? FileManager.default.removeItem(at: home) }
+        let path = home.appendingPathComponent(".zshrc").path
+        try Self.line.write(toFile: path, atomically: true, encoding: .utf8)
+        let failing: EngineSetupRunner.ReadFD = { _, _, _ in
+            errno = EIO
+            return -1
+        }
+        #expect(EngineSetupRunner.readSmallFile(path, read: failing) == .unreadable)
+    }
+
+    @Test func aReadInterruptedBySignalIsRetried() throws {
+        let home = try Self.makeFolder()
+        defer { try? FileManager.default.removeItem(at: home) }
+        let path = home.appendingPathComponent(".zshrc").path
+        try Self.line.write(toFile: path, atomically: true, encoding: .utf8)
+        final class Once: @unchecked Sendable {
+            let lock = NSLock()
+            var done = false
+            func first() -> Bool { lock.withLock { defer { done = true }; return !done } }
+        }
+        let once = Once()
+        let flaky: EngineSetupRunner.ReadFD = { fd, buffer, count in
+            if once.first() {
+                errno = EINTR
+                return -1
+            }
+            return Darwin.read(fd, buffer, count)
+        }
+        #expect(EngineSetupRunner.readSmallFile(path, read: flaky) == .text(Self.line))
+    }
+
+    @Test func aFileThatGrowsPastTheLimitWhileReadIsSkipped() throws {
+        let home = try Self.makeFolder()
+        defer { try? FileManager.default.removeItem(at: home) }
+        let path = home.appendingPathComponent(".zshrc").path
+        try "small".write(toFile: path, atomically: true, encoding: .utf8)
+        // Claims a full buffer on every call, as a file growing under the reader would.
+        let endless: EngineSetupRunner.ReadFD = { _, _, count in count }
+        #expect(EngineSetupRunner.readSmallFile(path, read: endless) == .skipped)
+    }
+}
+
+@Suite struct UserDatabaseTests {
+    @Test func findsTheCurrentUser() throws {
+        let entry = try #require(UserDatabase.entry(for: getuid()))
+        #expect(entry.name == NSUserName())
+        #expect(entry.home == NSHomeDirectoryForUser(NSUserName()))
+        #expect(EngineSetupRunner.homeDirectory(getuid()) == NSHomeDirectoryForUser(NSUserName()))
+    }
+
+    @Test func anUnknownUIDHasNoEntry() {
+        let unused: uid_t = 4_000_000_000
+        #expect(UserDatabase.entry(for: unused) == nil)
+        #expect(EngineSetupRunner.homeDirectory(unused) == nil)
     }
 }
 

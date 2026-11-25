@@ -328,7 +328,16 @@ private final class LockedFlag: @unchecked Sendable {
         let e = HomebrewEngine(runner: FakeRunner([:]), executable: brew)
         let r = [ref(.formula, "a"), ref(.formula, "b")]
         #expect(try e.command(for: .upgrade, r, options: InstallOptions()).arguments == ["upgrade", "a", "b"])
-        #expect(try e.command(for: .remove, r, options: InstallOptions()).arguments == ["uninstall", "a", "b"])
+        #expect(try e.command(for: .remove, r, options: InstallOptions()).arguments == ["uninstall", "--formula", "a", "b"])
+    }
+
+    @Test func removeNamesTheKind() throws {
+        // A bare `brew uninstall foo` falls through to an installed cask `foo` when the formula is gone.
+        let e = HomebrewEngine(runner: FakeRunner([:]), executable: brew)
+        #expect(try e.command(for: .remove, [ref(.formula, "wget")], options: InstallOptions()).arguments
+            == ["uninstall", "--formula", "wget"])
+        #expect(try e.command(for: .remove, [ref(.cask, "zoom")], options: InstallOptions()).arguments
+            == ["uninstall", "--cask", "zoom"])
     }
 
     @Test func nothingIsRootForBrew() throws {

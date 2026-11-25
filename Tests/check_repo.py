@@ -37,13 +37,13 @@ IPV4 = re.compile(r"(?<![\d.])(\d{1,3}(?:\.\d{1,3}){3})(?![\d.]*\d)")
 IPV6 = re.compile(r"(?<![\w:.])([0-9A-Fa-f]{0,4}(?::[0-9A-Fa-f]{0,4}){2,7})(?![\w:])")
 MAC = re.compile(r"(?<![0-9A-Fa-f:-])[0-9A-Fa-f]{2}([:-])[0-9A-Fa-f]{2}(?:\1[0-9A-Fa-f]{2}){4}(?![0-9A-Fa-f:-])")
 
-ALLOWED_EMAILS = {"git@github.com",
+ALLOWED_EMAILS = {"git@github.com", "noreply@github.com",
                   "41898282+github-actions[bot]@users.noreply.github.com"}
 EXAMPLE_NET = ipaddress.ip_network("192.168.100.0/24")
 ALLOWED_NETS = [ipaddress.ip_network(n) for n in (
     "127.0.0.0/8", "192.0.2.0/24", "198.51.100.0/24", "203.0.113.0/24", "2001:db8::/32")]
 ALLOWED_IPS = {ipaddress.ip_address(a) for a in (
-    "0.0.0.0", "255.255.255.255", "1.1.1.1", "8.8.8.8", "::", "::1")}
+    "0.0.0.0", "255.255.255.255", "1.1.1.1", "1.0.0.1", "8.8.8.8", "8.8.4.4", "9.9.9.9", "::", "::1")}
 
 
 # Homebrew's versioned formula files (`python@3.15.rb`, `node@22.11.rb`) match the email pattern.

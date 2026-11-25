@@ -2,7 +2,8 @@ import BrewxPortCore
 import SwiftUI
 
 /// Updates: every engine's outdated packages with checkboxes, sortable columns, Update all, Update N (the checked
-/// rows), Refresh and "Show ignored". Ignored rows carry `bell.slash` and skipped ones `forward`.
+/// rows), Refresh and "Show ignored". Ignored rows carry `bell.slash` and skipped ones `forward`. With Group by
+/// Package Manager on, rows sit in one collapsible section per engine whose header has its own "Update N".
 struct UpdatesView: View {
     @Bindable var model: BrewxPortAppModel
 
@@ -83,7 +84,8 @@ private struct UpdatesTable: View {
     @Bindable var list: PackageListState
 
     var body: some View {
-        Table(list.rows, selection: $list.selection.selected, sortOrder: $list.sortOrder) {
+        let grouped = model.groupByPackageManager
+        Table(of: PackageRow.self, selection: $list.selection.selected, sortOrder: $list.sortOrder) {
             TableColumn("") { (row: PackageRow) in
                 Toggle("Select \(row.name)", isOn: list.checkedBinding(row.id))
                     .toggleStyle(.checkbox)
@@ -110,10 +112,12 @@ private struct UpdatesTable: View {
                 }
             }
             .width(min: 80, ideal: 160)
-            TableColumn("Engine", value: \.engineName) { (row: PackageRow) in
-                Label(row.engineName, systemImage: EngineRowText.symbol(row.id.engine))
+            if !grouped {
+                TableColumn("Engine", value: \.engineName) { (row: PackageRow) in
+                    Label(row.engineName, systemImage: EngineRowText.symbol(row.id.engine))
+                }
+                .width(min: 96, ideal: 130)
             }
-            .width(min: 96, ideal: 130)
             TableColumn("Installed", value: \.installed) { (row: PackageRow) in
                 Text(row.installed).monospacedDigit()
             }
@@ -124,7 +128,37 @@ private struct UpdatesTable: View {
             .width(min: 56, ideal: 90)
             TableColumn("Arch", value: \.archName)
                 .width(min: 40, ideal: 55)
+        } rows: {
+            if grouped {
+                // One section per engine, in engine order; the column sort orders rows within each section.
+                ForEach(PackageSections.make(list.rows, engine: \.id.engine, order: model.engineOrder)) { section in
+                    let engine = section.engine
+                    let collapsed = model.isCollapsed(engine, on: .updates)
+                    Section {
+                        // A collapsed section only hides its rows: they stay in `list.rows`, checked or not.
+                        ForEach(collapsed ? [] : section.rows) { TableRow($0) }
+                    } header: {
+                        PackageSectionHeader(engine: engine, count: section.rows.count, isCollapsed: collapsed) {
+                            model.setCollapsed(!collapsed, engine, on: .updates)
+                        } trailing: {
+                            let n = updates.updateCount(for: engine)
+                            if n > 0 {
+                                Button("Update \(n)") { model.updateAll(engine: engine) }
+                                    .controlSize(.small)
+                                    .accessibilityLabel(
+                                        "Update \(engine.displayName), \(n) \(n == 1 ? "package" : "packages")")
+                                    .disabled(!model.canUpdateAll)
+                                    .help("Update every \(engine.displayName) package that isn't ignored or skipped")
+                            }
+                        }
+                    }
+                }
+            } else {
+                ForEach(list.rows) { TableRow($0) }
+            }
         }
         .packageRowMenu(model: model, view: .updates)
+        // Grouping hides the Engine column; a fresh table avoids the blank strip its old width leaves behind.
+        .id(grouped)
     }
 }

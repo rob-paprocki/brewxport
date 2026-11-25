@@ -79,7 +79,8 @@ private struct InstalledTable: View {
     @Bindable var list: PackageListState
 
     var body: some View {
-        Table(installed.rows, selection: $list.selection.selected, sortOrder: $installed.sortOrder) {
+        let sections = model.installedSections
+        Table(of: InstalledRow.self, selection: $list.selection.selected, sortOrder: $installed.sortOrder) {
             TableColumn("") { (item: InstalledRow) in
                 Toggle("Select \(item.name)", isOn: list.checkedBinding(item.id))
                     .toggleStyle(.checkbox)
@@ -102,10 +103,12 @@ private struct InstalledTable: View {
                 Text(item.version).monospacedDigit()
             }
             .width(min: 56, ideal: 90)
-            TableColumn("Engine", value: \.engineName) { (item: InstalledRow) in
-                Label(item.engineName, systemImage: EngineRowText.symbol(item.id.engine))
+            if sections == nil {
+                TableColumn("Engine", value: \.engineName) { (item: InstalledRow) in
+                    Label(item.engineName, systemImage: EngineRowText.symbol(item.id.engine))
+                }
+                .width(min: 96, ideal: 130)
             }
-            .width(min: 96, ideal: 130)
             TableColumn("Arch", value: \.archName)
                 .width(min: 40, ideal: 55)
             TableColumn("Kind", value: \.kindName)
@@ -118,7 +121,26 @@ private struct InstalledTable: View {
                 }
             }
             .width(40)
+        } rows: {
+            if let sections {
+                ForEach(sections) { section in
+                    let engine = section.engine
+                    let collapsed = model.isCollapsed(engine, on: .installed)
+                    Section {
+                        // A collapsed section only hides its rows: they stay in `list.rows`, checked or not.
+                        ForEach(collapsed ? [] : section.rows) { TableRow($0) }
+                    } header: {
+                        PackageSectionHeader(engine: engine, count: section.rows.count, isCollapsed: collapsed) {
+                            model.setCollapsed(!collapsed, engine, on: .installed)
+                        }
+                    }
+                }
+            } else {
+                ForEach(installed.rows) { TableRow($0) }
+            }
         }
         .packageRowMenu(model: model, view: .installed)
+        // Grouping hides the Engine column; a fresh table avoids the blank strip its old width leaves behind.
+        .id(sections != nil)
     }
 }

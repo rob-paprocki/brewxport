@@ -42,6 +42,8 @@ struct DiscoverView: View {
                     }
                 }
                 .pickerStyle(.menu)
+                // In a toolbar, labels default to icon only, so a picked engine showed as a bare icon.
+                .labelStyle(.titleAndIcon)
                 .help("Show results from one engine")
             }
             ToolbarItem {

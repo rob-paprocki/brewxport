@@ -10,7 +10,8 @@ struct PackageTable: View {
     @Bindable var list: PackageListState
 
     var body: some View {
-        Table(list.rows, selection: $list.selection.selected, sortOrder: $list.sortOrder) {
+        let sections = model.discoverSections
+        Table(of: PackageRow.self, selection: $list.selection.selected, sortOrder: $list.sortOrder) {
             TableColumn("") { (row: PackageRow) in
                 Toggle("Select \(row.name)", isOn: checked(row.id))
                     .toggleStyle(.checkbox)
@@ -34,16 +35,37 @@ struct PackageTable: View {
                     .optionalHelp(row.latestHelp)
             }
             .width(min: 56, ideal: 90)
-            TableColumn("Engine", value: \.engineName) { (row: PackageRow) in
-                Label(row.engineName, systemImage: EngineRowText.symbol(row.id.engine))
+            if sections == nil {
+                TableColumn("Engine", value: \.engineName) { (row: PackageRow) in
+                    Label(row.engineName, systemImage: EngineRowText.symbol(row.id.engine))
+                }
+                .width(min: 96, ideal: 130)
             }
-            .width(min: 96, ideal: 130)
             TableColumn("Arch", value: \.archName)
                 .width(min: 40, ideal: 55)
             TableColumn("Kind", value: \.kindName)
                 .width(min: 44, ideal: 65)
+        } rows: {
+            if let sections {
+                ForEach(sections) { section in
+                    let engine = section.engine
+                    let collapsed = model.isCollapsed(engine, on: .discover)
+                    Section {
+                        // A collapsed section only hides its rows: they stay in `list.rows`, checked or not.
+                        ForEach(collapsed ? [] : section.rows) { TableRow($0) }
+                    } header: {
+                        PackageSectionHeader(engine: engine, count: section.rows.count, isCollapsed: collapsed) {
+                            model.setCollapsed(!collapsed, engine, on: .discover)
+                        }
+                    }
+                }
+            } else {
+                ForEach(list.rows) { TableRow($0) }
+            }
         }
         .packageRowMenu(model: model, view: .discover)
+        // Grouping hides the Engine column; a fresh table avoids the blank strip its old width leaves behind.
+        .id(sections != nil)
     }
 
     private func checked(_ ref: PackageRef) -> Binding<Bool> {
@@ -117,5 +139,46 @@ struct MoveToMenu: View {
             }
         }
         .disabled(items.isEmpty)
+    }
+}
+
+/// A package table's section header row: collapse arrow, the engine's symbol and "<Engine> (<count>)", then
+/// `trailing` at the far end (Updates puts its "Update N" button there). Used inside `Section { } header: { }` in a
+/// `Table`'s rows builder.
+struct PackageSectionHeader<Trailing: View>: View {
+    let engine: EngineID
+    /// The section's rows as the page shows them with the section open.
+    let count: Int
+    let isCollapsed: Bool
+    let toggle: () -> Void
+    @ViewBuilder let trailing: () -> Trailing
+
+    init(engine: EngineID, count: Int, isCollapsed: Bool, toggle: @escaping () -> Void,
+         @ViewBuilder trailing: @escaping () -> Trailing = { EmptyView() }) {
+        self.engine = engine
+        self.count = count
+        self.isCollapsed = isCollapsed
+        self.toggle = toggle
+        self.trailing = trailing
+    }
+
+    var body: some View {
+        HStack(spacing: 6) {
+            Button(action: toggle) {
+                Image(systemName: "chevron.right")
+                    .rotationEffect(.degrees(isCollapsed ? 0 : 90))
+                    .frame(width: 12)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(isCollapsed ? "Expand \(engine.displayName)" : "Collapse \(engine.displayName)")
+            Label {
+                Text(verbatim: "\(engine.displayName) (\(count))")
+            } icon: {
+                Image(systemName: EngineRowText.symbol(engine))
+            }
+            Spacer()
+            trailing()
+        }
     }
 }

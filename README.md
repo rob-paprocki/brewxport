@@ -14,7 +14,7 @@ A native Mac app for finding, installing and updating software from Homebrew, na
 
 ## Why
 
-- Search nanobrew, Homebrew, MacPorts and mas at once. Matching packages sit side by side, and you pick which engine installs it.
+- Search nanobrew, Homebrew, MacPorts and mas at once. Results are grouped by package manager, and you pick which one installs each package.
 - Update everything behind one admin password, like a single UAC prompt on Windows.
 - Set up a new Mac from a bundle file exported on the old one. Brewfiles work for import and export too.
 - Keep Intel Macs going. Homebrew plans to drop Intel in 2027, so MacPorts gets full support here.
@@ -99,6 +99,12 @@ Add `--notarize PROFILE` to have Apple notarize it as well. `PROFILE` is a keych
 
 > [!WARNING]
 > A normal launch of `BrewxPort.app` registers its admin helper. Try it in a virtual machine, or use `scripts/demo.sh`.
+
+## Updates, Installed and Discover
+
+These three pages group packages by package manager. Each section shows how many packages it holds and folds up with its arrow. On Updates, a section's Update button, like Update 3 on Homebrew, updates only that manager and asks for at most one password. To see one flat list again, turn off View > Group by Package Manager (⌥⌘G).
+
+When Homebrew updates a package, it also updates the out-of-date packages that depend on it, including ones you've ignored or skipped here. Homebrew does that so they keep working.
 
 ## Uninstall a package
 

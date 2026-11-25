@@ -48,6 +48,11 @@ public struct BrewxPortCommands: Commands {
                 .disabled(model == nil || model?.confirmingRemoval == true)
         }
         CommandGroup(after: .sidebar) {
+            Toggle("Group by Package Manager", isOn: Binding(
+                get: { model?.groupByPackageManager ?? true },
+                set: { model?.groupByPackageManager = $0 }))
+                .keyboardShortcut("g", modifiers: [.command, .option])
+                .disabled(model == nil)
             Button("Refresh") { model?.refreshLists() }
                 .keyboardShortcut("r")
                 .disabled(model == nil || model?.confirmingRemoval == true)

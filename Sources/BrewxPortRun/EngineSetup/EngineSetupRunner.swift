@@ -28,6 +28,20 @@ public enum PathInfo: Equatable, Sendable {
     }
 }
 
+/// What reading one small text file found.
+public enum FileRead: Equatable, Sendable {
+    case text(String)
+    /// Nothing to read: missing, not a plain file, outside the home folder, or too big.
+    case skipped
+    /// It's there, but reading it failed (for example a file still downloading from iCloud).
+    case unreadable
+
+    public var text: String? {
+        if case .text(let text) = self { return text }
+        return nil
+    }
+}
+
 /// The helper's side of "set up a package manager". Runs as root. The caller supplies only the target and the
 /// requester (from the XPC connection); the release, URL, checksum and paths are all worked out here.
 ///
@@ -57,12 +71,17 @@ public struct EngineSetupRunner: Sendable {
     public var downloads: URL
     /// The requester's home folder, looked up from their uid (never from the helper's own environment).
     public var homeDirectory: @Sendable (uid_t) -> String?
-    /// The text of `name` directly in `home`, or nil if it's missing, too big, or not a plain file inside `home`.
-    public var readStartupFile: @Sendable (_ home: String, _ name: String) -> String?
-    /// Every file in /etc/paths.d as (file name, text).
-    public var readPathsD: @Sendable () -> [(String, String)]
+    /// `name` directly in `home`: its text, skipped (missing, too big, or not a plain file inside `home`), or unreadable.
+    public var readStartupFile: @Sendable (_ home: String, _ name: String) -> FileRead
+    /// Every file in /etc/paths.d as (file name, what reading it found); nil if the folder couldn't be listed.
+    public var readPathsD: @Sendable () -> [(String, FileRead)]?
     public var homebrewPlistPath: String
     public var cltPlaceholderPath: String
+    #if DEBUG
+    /// Test hook, compiled out of release builds: makes nanobrew's folder preparation fail right after this many
+    /// folder steps (each `mkdir` and each hand-over counts as one), so a test can retry from every failure point.
+    var failAfterNanobrewSteps: Int?
+    #endif
 
     public static let defaultDownloads = URL(fileURLWithPath: "/Library/Application Support/BrewxPort/Downloads")
     static let opt = "/opt"
@@ -83,8 +102,8 @@ public struct EngineSetupRunner: Sendable {
                 removeDirectory: @escaping @Sendable (String) -> Bool = RootDirectories.remove,
                 host: HostInfo, downloads: URL = EngineSetupRunner.defaultDownloads,
                 homeDirectory: @escaping @Sendable (uid_t) -> String? = EngineSetupRunner.homeDirectory,
-                readStartupFile: @escaping @Sendable (String, String) -> String? = EngineSetupRunner.readStartupFile,
-                readPathsD: @escaping @Sendable () -> [(String, String)] = EngineSetupRunner.readPathsD,
+                readStartupFile: @escaping @Sendable (String, String) -> FileRead = EngineSetupRunner.startupFile,
+                readPathsD: @escaping @Sendable () -> [(String, FileRead)]? = EngineSetupRunner.readPathsD,
                 homebrewPlistPath: String = HomebrewPkgUser.path,
                 cltPlaceholderPath: String = CommandLineTools.placeholder) {
         self.fetch = fetch
@@ -213,10 +232,14 @@ public struct EngineSetupRunner: Sendable {
                 ? "Homebrew's installer added /opt/homebrew/bin to your PATH (/etc/paths.d/homebrew)."
                 : "Homebrew's installer didn't add itself to your PATH."
         case .macports:
-            if let file = macportsPathFile(uid: uid) {
+            switch macportsPathFile(uid: uid) {
+            case .found(let file):
                 return "MacPorts' installer added /opt/local/bin to your PATH (\(file))."
+            case .notFound:
+                return "MacPorts didn't add itself to your PATH. BrewxPort finds it at \(Self.installedPath(.macports)); to use port in Terminal, add /opt/local/bin to your PATH."
+            case .couldNotCheck:
+                return "BrewxPort couldn't check whether MacPorts is on your PATH. BrewxPort finds it at \(Self.installedPath(.macports)); to use port in Terminal, make sure /opt/local/bin is on your PATH."
             }
-            return "MacPorts didn't add itself to your PATH. BrewxPort finds it at \(Self.installedPath(.macports)); to use port in Terminal, add /opt/local/bin to your PATH."
         case .nanobrew: return "nanobrew isn't added to your PATH. BrewxPort finds it at \(Self.nanobrewBinary)."
         case .commandLineTools: return nil
         }
@@ -228,14 +251,38 @@ public struct EngineSetupRunner: Sendable {
 
     /// Where MacPorts' bin folder is put on the PATH, if anywhere: one of the requester's shell startup files
     /// or an /etc/paths.d entry. The pkg runs as root, so this looks at what is on disk for the requester.
-    private func macportsPathFile(uid: uid_t) -> String? {
+    /// A file that names it wins; otherwise anything that couldn't be read (or no home folder) means it couldn't check.
+    private func macportsPathFile(uid: uid_t) -> PathSearch {
+        var complete = true
         if let home = homeDirectory(uid) {
             for name in Self.startupFiles {
-                if let text = readStartupFile(home, name), Self.namesMacportsBin(text) { return "~/\(name)" }
+                switch readStartupFile(home, name) {
+                case .text(let text): if Self.namesMacportsBin(text) { return .found("~/\(name)") }
+                case .skipped: break
+                case .unreadable: complete = false
+                }
             }
+        } else {
+            complete = false
         }
-        for (name, text) in readPathsD() where Self.namesMacportsBin(text) { return "/etc/paths.d/\(name)" }
-        return nil
+        if let entries = readPathsD() {
+            for (name, read) in entries {
+                switch read {
+                case .text(let text): if Self.namesMacportsBin(text) { return .found("/etc/paths.d/\(name)") }
+                case .skipped: break
+                case .unreadable: complete = false
+                }
+            }
+        } else {
+            complete = false
+        }
+        return complete ? .notFound : .couldNotCheck
+    }
+
+    private enum PathSearch {
+        case found(String)
+        case notFound
+        case couldNotCheck
     }
 
     /// True if an uncommented line mentions `/opt/local/bin`.
@@ -246,42 +293,87 @@ public struct EngineSetupRunner: Sendable {
         }
     }
 
+    /// The requester's home folder from the user database (`getpwuid_r`), or nil if it has none or it isn't absolute.
     public static func homeDirectory(_ uid: uid_t) -> String? {
-        guard let entry = getpwuid(uid), let dir = entry.pointee.pw_dir else { return nil }
-        let home = String(cString: dir)
-        return home.hasPrefix("/") ? home : nil
+        guard let home = UserDatabase.entry(for: uid)?.home, home.hasPrefix("/") else { return nil }
+        return home
     }
 
     /// Reads `home/name`, following links only while the real path stays inside the real home. Read-only; gives up
-    /// on anything that isn't a regular file or is over `maxStartupFileBytes`.
+    /// on anything that isn't a regular file or is over `maxStartupFileBytes`. Nil for anything but text.
     public static func readStartupFile(home: String, name: String) -> String? {
-        guard let realHome = realpath(home), let real = realpath(home + "/" + name),
-              real.hasPrefix(realHome.hasSuffix("/") ? realHome : realHome + "/") else { return nil }
+        startupFile(home: home, name: name).text
+    }
+
+    /// `readStartupFile`, telling a file that isn't there (or doesn't count) apart from one that couldn't be read.
+    public static func startupFile(home: String, name: String) -> FileRead {
+        let realHome: String
+        let real: String
+        switch (realpath(home), realpath(home + "/" + name)) {
+        case (.success(let h), .success(let r)): (realHome, real) = (h, r)
+        case (.failure(.unreadable), _), (_, .failure(.unreadable)): return .unreadable
+        default: return .skipped
+        }
+        guard real.hasPrefix(realHome.hasSuffix("/") ? realHome : realHome + "/") else { return .skipped }
         return readSmallFile(real)
     }
 
-    public static func readPathsD() -> [(String, String)] {
+    /// Every entry in /etc/paths.d; empty if the folder isn't there, nil if it is but couldn't be listed.
+    public static func readPathsD() -> [(String, FileRead)]? {
         let dir = "/etc/paths.d"
-        let names = ((try? FileManager.default.contentsOfDirectory(atPath: dir)) ?? []).sorted()
-        return names.compactMap { name in readSmallFile(dir + "/" + name).map { (name, $0) } }
+        if PathInfo.lstat(dir) == .missing { return [] }
+        guard let names = try? FileManager.default.contentsOfDirectory(atPath: dir) else { return nil }
+        return names.sorted().map { name in (name, readSmallFile(dir + "/" + name)) }
     }
 
-    private static func realpath(_ path: String) -> String? {
-        guard let resolved = Darwin.realpath(path, nil) else { return nil }
+    private enum Missing: Error { case skipped, unreadable }
+
+    /// Errors that mean "nothing there to read", as opposed to "couldn't read it".
+    private static func meansMissing(_ code: Int32) -> Bool {
+        code == ENOENT || code == ENOTDIR || code == ELOOP
+    }
+
+    private static func realpath(_ path: String) -> Result<String, Missing> {
+        guard let resolved = Darwin.realpath(path, nil) else {
+            return .failure(meansMissing(errno) ? .skipped : .unreadable)
+        }
         defer { free(resolved) }
-        return String(cString: resolved)
+        return .success(String(cString: resolved))
     }
 
-    /// A regular file's text, opened without following a final link; nil if it isn't one or is too big.
-    private static func readSmallFile(_ path: String) -> String? {
-        let fd = open(path, O_RDONLY | O_NOFOLLOW | O_NONBLOCK)
-        guard fd >= 0 else { return nil }
+    /// read(2), swappable in tests to simulate a read error.
+    typealias ReadFD = @Sendable (_ fd: Int32, _ buffer: UnsafeMutableRawPointer, _ count: Int) -> Int
+
+    /// A regular file's text, opened without following a final link. Skipped if it isn't one or is too big;
+    /// unreadable if opening or reading it fails. Plain POSIX calls only, so a read error can't raise.
+    static func readSmallFile(_ path: String,
+                              read: ReadFD = { fd, buffer, count in Darwin.read(fd, buffer, count) }) -> FileRead {
+        let fd = open(path, O_RDONLY | O_NOFOLLOW | O_NONBLOCK | O_CLOEXEC)
+        guard fd >= 0 else { return meansMissing(errno) ? .skipped : .unreadable }
         defer { close(fd) }
         var info = stat()
-        guard fstat(fd, &info) == 0, info.st_mode & S_IFMT == S_IFREG, info.st_size <= maxStartupFileBytes else { return nil }
-        let data = FileHandle(fileDescriptor: fd, closeOnDealloc: false).readData(ofLength: maxStartupFileBytes + 1)
-        guard data.count <= maxStartupFileBytes else { return nil }
-        return String(decoding: data, as: UTF8.self)
+        guard fstat(fd, &info) == 0 else { return .unreadable }
+        guard info.st_mode & S_IFMT == S_IFREG, info.st_size <= maxStartupFileBytes else { return .skipped }
+        // One byte over the limit, so a file that grew since fstat is caught.
+        let capacity = maxStartupFileBytes + 1
+        var bytes = [UInt8](repeating: 0, count: capacity)
+        var filled = 0
+        let ok = bytes.withUnsafeMutableBytes { buffer -> Bool in
+            while filled < capacity {
+                let count = read(fd, buffer.baseAddress! + filled, capacity - filled)
+                if count > 0 {
+                    filled += min(count, capacity - filled)
+                } else if count == 0 {
+                    return true
+                } else if errno != EINTR {
+                    return false
+                }
+            }
+            return true
+        }
+        guard ok else { return .unreadable }
+        guard filled <= maxStartupFileBytes else { return .skipped }
+        return .text(String(decoding: bytes[0..<filled], as: UTF8.self))
     }
 
     // MARK: Steps
@@ -430,16 +522,21 @@ public struct EngineSetupRunner: Sendable {
                 throw .installFailed("\(Self.opt) isn't a root-owned folder, so BrewxPort won't set up nanobrew in it.")
             }
             var failure: SetupError?
+            var steps = 0
             do throws(SetupError) {
                 for path in [Self.nanobrewRoot, Self.nanobrewPrefix, Self.nanobrewBin] {
                     guard makeDirectory(path) else { throw .installFailed("BrewxPort couldn't create \(path).") }
                     created.append(path)
+                    steps += 1
+                    try injectedFault(afterSteps: steps)
                 }
                 for path in [Self.nanobrewBin, Self.nanobrewPrefix, Self.nanobrewRoot] {
                     guard giveDirectory(path, uid) else {
                         throw .installFailed("BrewxPort couldn't give \(path) to your account.")
                     }
                     handedOver.insert(path)
+                    steps += 1
+                    try injectedFault(afterSteps: steps)
                 }
             } catch {
                 failure = error
@@ -465,6 +562,16 @@ public struct EngineSetupRunner: Sendable {
             await removeCreated(created, handedOver: handedOver, uid: uid, log: log)
             throw failure
         }
+    }
+
+    /// The `failAfterNanobrewSteps` hook. In a release build it's an empty function the compiler drops.
+    /// `afterSteps` counts this run's steps on nanobrew's own folders so far: three mkdirs, then three hand-overs.
+    private func injectedFault(afterSteps steps: Int) throws(SetupError) {
+        #if DEBUG
+        if let limit = failAfterNanobrewSteps, steps >= limit {
+            throw .installFailed("Injected failure after \(steps) nanobrew folder steps.")
+        }
+        #endif
     }
 
     private func unpackNanobrew(archive: URL, uid: uid_t) async throws(SetupError) {

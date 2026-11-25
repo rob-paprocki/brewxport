@@ -75,6 +75,16 @@ public enum UpdateHiddenReason: Sendable, Equatable { case ignored, skipped }
         requests(list.rows.filter { hiddenReason($0) == nil })
     }
 
+    /// What a section's "Update N" acts on: Update all's rows from one engine, collapsed section or not.
+    public func updateAllRequests(for engine: EngineID) -> [ActionRequest] {
+        updateAllRequests().filter { $0.package.id.engine == engine }
+    }
+
+    /// The N in a section's "Update N"; the button is hidden at 0.
+    public func updateCount(for engine: EngineID) -> Int {
+        updateAllRequests(for: engine).count
+    }
+
     /// The given refs that are rows on screen and neither ignored nor skipped, in list order.
     public func requests(for refs: Set<PackageRef>) -> [ActionRequest] {
         let wanted = list.onScreen(refs)

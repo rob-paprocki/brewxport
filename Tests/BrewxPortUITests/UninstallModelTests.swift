@@ -133,7 +133,8 @@ import BrewxPortRun
         s.model.uninstall.confirm()
         #expect(await waitUntil { s.executor.runs.count == 1 })
         #expect(s.executor.runs[0].steps.map(\.spec.arguments) == [["uninstall", "--cask", "droid"],
-                                                                   ["uninstall", "ripgrep"], ["uninstall", "pcre2"]])
+                                                                   ["uninstall", "--formula", "ripgrep"],
+                                                                   ["uninstall", "--formula", "pcre2"]])
     }
 
     @Test func untickingLeavesTheLeftovers() async throws {

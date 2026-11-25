@@ -337,8 +337,9 @@ public struct HomebrewEngine: Engine, TapListing, DependentsListing {
         var args = [verb]
         if first.kind == .cask {
             args.append("--cask")
-        } else if op == .install, first.kind == .formula {
-            // A formula entry named like a cask must not install the cask.
+        } else if (op == .install || op == .remove), first.kind == .formula {
+            // A formula entry named like a cask must not install the cask. For a removal it matters more:
+            // with the formula already gone, a bare `uninstall foo` removes an installed cask `foo` and exits 0.
             args.append("--formula")
         }
         args += options.extraArgs

@@ -120,7 +120,7 @@ enum PlanFixtures {
         #expect(plan.problems.isEmpty)
         #expect(Self.shapes(plan) == [
             ["nanobrew", "formula", F.nbPath, "remove", "bat"],
-            ["homebrew", "formula", F.brewPath, "uninstall", "wget"],
+            ["homebrew", "formula", F.brewPath, "uninstall", "--formula", "wget"],
             ["homebrew", "cask", F.brewPath, "uninstall", "--cask", "zoom"],
             ["nanobrew", "formula", F.nbPath, "install", "fd"],
             ["macports", "port", F.portPath, "-N", "install", "figlet"],
