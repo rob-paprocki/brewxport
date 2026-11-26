@@ -106,6 +106,33 @@ These three pages group packages by package manager. Each section shows how many
 
 When Homebrew updates a package, it also updates the out-of-date packages that depend on it, including ones you've ignored or skipped here. Homebrew does that so they keep working.
 
+## Menu bar and background updates
+
+BrewxPort stays in the menu bar when you close its window, and checks for updates every 12 hours. The icon shows how many updates are waiting. Its menu lists them by package manager, with an Update button for each one, Update All…, Check Now, Refresh MacPorts… and Settings…. A … means the step asks for your password.
+
+The first time you open this version, a short sheet says so and lets you turn on notifications and Open BrewxPort at login. Change any of it later in Settings (⌘,):
+
+| Setting | Choices |
+|---------|---------|
+| Check for updates | Every hour, Every 4 hours, Every 12 hours (default), Every 24 hours, Never |
+| When updates are found | Notify me (default), Update what doesn't need a password, Update everything |
+| Show notifications | On (default) or off. Off still updates the badge |
+| Open BrewxPort at login | Off by default. It shows up in System Settings > General > Login Items |
+
+The three modes:
+
+- **Notify me** only tells you. Nothing is installed until you choose.
+- **Update what doesn't need a password** installs Homebrew formulae and nanobrew packages by itself. Everything else is left for you, and you get a notification.
+- **Update everything** also runs the updates that need a password (MacPorts, Mac App Store apps and Homebrew casks). The ones that don't need a password run at once. The rest wait until you're back at the Mac, then BrewxPort opens with the password sheet. If BrewxPort can't come to the front, you get a notification, "N updates need your password", and clicking it opens the sheet. If you walk away without answering the sheet, it closes and comes back when you return.
+
+Automatic updates leave out a package when updating it would also update one you ignored or skipped. Homebrew and MacPorts bring a package's out-of-date dependencies along when they update it, and Homebrew also updates the out-of-date packages that depend on it. If you ignore or skip an update, an automatic run also leaves out the packages that depend on it and the packages it depends on. Those get their own notification, "N updates need your attention", and stay on Updates for you to run.
+
+If you cancel the password sheet or stop an automatic run, nothing updates by itself until the next scheduled check, password-free updates included. Check Now still checks and notifies. A failed update is tried again at the next check. Scheduled checks and automatic updates wait while the Mac is on battery below 20% or in Low Power Mode. If a check came due while BrewxPort wasn't running, it checks soon after you open it.
+
+MacPorts only learns about new versions when its catalogue is refreshed, and that needs your password. Every MacPorts update run refreshes it first with `port selfupdate`, which may update MacPorts itself. If that step fails, the upgrades are skipped and the run log says why. Until a refresh happens, checks show only what MacPorts already knows about. Refresh MacPorts… does just the refresh, from the menu bar menu or the Updates page.
+
+To turn all of this off, set Settings > Check for updates to Never. BrewxPort then quits when you close its window, as before. With checks on, Quit BrewxPort (stops update checks) really quits.
+
 ## Uninstall a package
 
 Choose Uninstall… from a package's right-click menu or the Package menu, or press Delete on Installed or Updates. BrewxPort works out what goes before anything runs:

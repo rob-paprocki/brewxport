@@ -2,7 +2,8 @@ import Foundation
 import BrewxPortCore
 import BrewxPortRun
 
-/// What demo mode has "installed": read once from the fixtures, then changed only by `DemoRunExecutor`.
+/// What demo mode has "installed": read once from the fixtures, then changed only by `DemoRunExecutor`, until a
+/// Check Now puts it back (`reset()`).
 public actor DemoInventory {
     private var installed: [EngineID: [Package]]
     private var outdated: [EngineID: [Package]]
@@ -10,11 +11,20 @@ public actor DemoInventory {
     private var taps: [String]
     /// Every row a search has shown, so an install knows the package's name, summary and version.
     private var known: [PackageRef: Package] = [:]
+    /// The lists as the fixtures had them at launch.
+    private let launch: (installed: [EngineID: [Package]], outdated: [EngineID: [Package]], taps: [String])
 
     public init(installed: [EngineID: [Package]], outdated: [EngineID: [Package]], taps: [String] = []) {
         self.installed = installed
         self.outdated = outdated
         self.taps = taps
+        launch = (installed, outdated, taps)
+    }
+
+    /// The demo's Check Now: back to the lists the fixtures had at launch, so a check finds the fixture updates
+    /// again. Installed and the taps go back too, so Installed agrees with Updates; what searches showed is kept.
+    func reset() {
+        (installed, outdated, taps) = launch
     }
 
     func installed(_ engine: EngineID) -> [Package] { installed[engine] ?? [] }
@@ -109,7 +119,7 @@ public actor DemoInventory {
 ///
 /// Searches go through the real engine's parser on the captured search and keep the rows whose name contains the
 /// query. Commands and privileges are the real engine's, so the steps a demo run shows are the ones BrewxPort would run.
-public final class DemoEngine: Engine, TapListing, DependentsListing {
+public final class DemoEngine: Engine, TapListing, DependentsListing, CatalogRefreshing {
     public let runner: FixtureRunner
     let wrapped: any Engine
     let inventory: DemoInventory
@@ -184,5 +194,14 @@ public final class DemoEngine: Engine, TapListing, DependentsListing {
 
     public func command(for op: PackageOperation, _ refs: [PackageRef], options: InstallOptions) throws -> CommandSpec {
         try wrapped.command(for: op, refs, options: options)
+    }
+
+    /// The real engine's catalogue refresh, so a demo MacPorts update run shows the step BrewxPort would run (the demo
+    /// executor only simulates it). Throws for an engine without one.
+    public func selfupdateCommand() throws -> CommandSpec {
+        guard let refreshing = wrapped as? any CatalogRefreshing else {
+            throw EngineError(engine: id, message: "\(id.displayName) has no catalogue to refresh")
+        }
+        return try refreshing.selfupdateCommand()
     }
 }

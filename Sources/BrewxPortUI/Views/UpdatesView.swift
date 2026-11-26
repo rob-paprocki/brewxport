@@ -2,8 +2,9 @@ import BrewxPortCore
 import SwiftUI
 
 /// Updates: every engine's outdated packages with checkboxes, sortable columns, Update all, Update N (the checked
-/// rows), Refresh and "Show ignored". Ignored rows carry `bell.slash` and skipped ones `forward`. With Group by
-/// Package Manager on, rows sit in one collapsible section per engine whose header has its own "Update N".
+/// rows), Refresh (with "Refresh MacPorts…" in its menu when MacPorts is there) and "Show ignored". Ignored rows
+/// carry `bell.slash` and skipped ones `forward`. With Group by Package Manager on, rows sit in one collapsible
+/// section per engine whose header has its own "Update N".
 struct UpdatesView: View {
     @Bindable var model: BrewxPortAppModel
 
@@ -30,8 +31,22 @@ struct UpdatesView: View {
                     .help("Show ignored packages and skipped versions")
             }
             ToolbarItem {
-                Button("Refresh", systemImage: "arrow.clockwise") { model.refreshLists() }
-                    .help("Check every engine for updates again (⌘R)")
+                if model.showsRefreshMacPorts {
+                    // A click checks again, as without MacPorts; the menu adds MacPorts' own catalogue refresh.
+                    Menu {
+                        Button("Refresh MacPorts…") { model.refreshMacPortsCatalogue() }
+                            .disabled(!model.canRefreshMacPorts)
+                            .help("Refresh MacPorts' port catalogue (asks for your password), then check again")
+                    } label: {
+                        Label("Refresh", systemImage: "arrow.clockwise")
+                    } primaryAction: {
+                        model.refreshLists()
+                    }
+                    .help("Check every engine for updates again (⌘R). Its menu has Refresh MacPorts…")
+                } else {
+                    Button("Refresh", systemImage: "arrow.clockwise") { model.refreshLists() }
+                        .help("Check every engine for updates again (⌘R)")
+                }
             }
             ToolbarItem {
                 Button(updates.updateCheckedTitle, systemImage: "checkmark.circle") { model.updateChecked() }

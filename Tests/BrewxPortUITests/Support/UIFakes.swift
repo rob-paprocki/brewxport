@@ -129,6 +129,17 @@ final class FakeRunExecutor: RunExecuting, @unchecked Sendable {
         pending?.yield(.done)
         pending?.finish()
     }
+
+    /// Ends a hanging run the way it would end on its own: yields `events`, then finishes its stream. Later runs
+    /// still hang while `hang` is set.
+    func finish(_ events: [RunEvent] = [.done]) {
+        let pending = lock.withLock { () -> AsyncStream<RunEvent>.Continuation? in
+            defer { continuation = nil }
+            return continuation
+        }
+        for event in events { pending?.yield(event) }
+        pending?.finish()
+    }
 }
 
 /// Holds async work until the test releases it, so a test orders events without racing sleeps. `release()` lets
@@ -348,4 +359,105 @@ final class FakeHelperManager: HelperManaging, @unchecked Sendable {
         guard let password else { return nil }
         return SecretBuffer(copying: Array(password.utf8))
     }
+}
+
+// MARK: Background seams
+
+/// `BackgroundScheduling` that keeps the schedule and runs it only when a test calls `fire()`.
+@MainActor final class FakeScheduler: BackgroundScheduling {
+    /// The current schedule's interval; nil when there's none.
+    private(set) var interval: TimeInterval?
+    /// How long after scheduling the current schedule's first run is due; nil when there's none.
+    private(set) var firstDelay: TimeInterval?
+    private(set) var work: (@MainActor () async -> Void)?
+    private(set) var scheduleCount = 0
+    private(set) var cancelCount = 0
+
+    func schedule(every seconds: TimeInterval, firstAfter delay: TimeInterval,
+                  _ work: @escaping @MainActor () async -> Void) {
+        scheduleCount += 1
+        interval = seconds
+        firstDelay = delay
+        self.work = work
+    }
+
+    func cancel() {
+        cancelCount += 1
+        interval = nil
+        firstDelay = nil
+        work = nil
+    }
+
+    /// Runs the scheduled work once, as the system would when the interval is up.
+    func fire() async { await work?() }
+}
+
+/// `UpdateNotifying` that answers `requestPermission()` with `permission` and keeps every post.
+@MainActor final class FakeNotifier: UpdateNotifying {
+    struct Post: Equatable {
+        let id: String
+        let title: String
+        let body: String
+        let target: NotificationTarget
+    }
+
+    var permission: Bool
+    private(set) var permissionRequests = 0
+    private(set) var posts: [Post] = []
+    var onOpen: (@MainActor (NotificationTarget, String) -> Void)?
+
+    init(permission: Bool = true) { self.permission = permission }
+
+    func requestPermission() async -> Bool {
+        permissionRequests += 1
+        return permission
+    }
+
+    func post(id: String, title: String, body: String, target: NotificationTarget) {
+        posts.append(Post(id: id, title: title, body: body, target: target))
+    }
+
+    /// The person clicks a notification with this target (and an id no post had).
+    func click(_ target: NotificationTarget) { onOpen?(target, "") }
+
+    /// The person clicks this post.
+    func click(_ post: Post) { onOpen?(post.target, post.id) }
+}
+
+/// `LoginItemControlling` with a settable system state. `setEnabled` throws `error` when it's set (and then changes
+/// nothing); otherwise it sets `isEnabled`, or, with `approvalNeededOnRegister`, registers it waiting for approval.
+@MainActor final class FakeLoginItem: LoginItemControlling {
+    var isEnabled: Bool
+    var needsApproval: Bool
+    var error: (any Error)?
+    /// Registering leaves the item waiting for the person's approval in System Settings, not enabled.
+    var approvalNeededOnRegister = false
+    private(set) var changes: [Bool] = []
+
+    init(isEnabled: Bool = false, needsApproval: Bool = false) {
+        self.isEnabled = isEnabled
+        self.needsApproval = needsApproval
+    }
+
+    func setEnabled(_ enabled: Bool) throws {
+        changes.append(enabled)
+        if let error { throw error }
+        let waits = enabled && approvalNeededOnRegister
+        isEnabled = enabled && !waits
+        needsApproval = waits
+    }
+}
+
+/// `SystemConditions` a test sets. `idleSeconds` is the time since the last input; `change()` sends `onChange`.
+@MainActor final class FakeConditions: SystemConditions {
+    var idleSeconds: TimeInterval = 0
+    var screenLocked = false
+    var batteryLow = false
+    var lowPowerMode = false
+    var onChange: (@MainActor () -> Void)?
+
+    func userIsActive(within seconds: TimeInterval) -> Bool { idleSeconds < seconds }
+
+    /// The system reports a change (lock, unlock, wake, power).
+    func change() { onChange?() }
 }

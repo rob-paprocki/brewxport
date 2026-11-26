@@ -41,6 +41,9 @@ public struct ActionPlan: Sendable, Equatable {
 ///
 /// Each step's command comes from the engine's own `command(for:…)`. An engine that can't build its command is
 /// reported in `problems` and left out; the other steps still run.
+///
+/// MacPorts' upgrades start with a refresh of its port catalogue (`port -N selfupdate`), which they wait on: when the
+/// refresh fails, they're skipped and every other engine's steps still run.
 public enum ActionPlanner {
     private struct Item {
         let operation: PackageOperation
@@ -132,6 +135,8 @@ public enum ActionPlanner {
                 let taps = mine.filter { $0.ref.kind == .tap }
                 let packages = mine.filter { $0.ref.kind != .tap && $0.ref.kind != .cask }
                 let casks = mine.filter { $0.ref.kind == .cask }
+                let refreshesFirst = operation == .upgrade && engine.id == .macports
+                var planned: [RunStep] = []
                 // Taps first, so formulae from them resolve; `brew tap` takes one tap per command.
                 for batch in taps.map({ [$0] }) + batches(packages) + batches(casks) {
                     let refs = batch.map(\.ref)
@@ -140,14 +145,19 @@ public enum ActionPlanner {
                         : Self.title(engine.id, kind: kind, names: batch.map(\.name))
                     do {
                         let spec = try engine.command(for: operation, refs, options: batch[0].options)
-                        steps.append(RunStep(engine: engine.id, kind: kind, operation: operation, spec: spec,
-                                             title: stepTitle))
+                        planned.append(RunStep(engine: engine.id, kind: kind, operation: operation, spec: spec,
+                                               title: stepTitle, requiresAllEarlier: refreshesFirst,
+                                               gateGroup: refreshesFirst ? RunStep.macPortsCatalogueRefreshGroup : nil))
                     } catch let error as EngineError {
                         problems.append("\(stepTitle): \(error.message)")
                     } catch {
                         problems.append("\(stepTitle): \(error)")
                     }
                 }
+                if refreshesFirst, !planned.isEmpty {
+                    planned = withCatalogueRefresh(planned, engine: engine, problems: &problems)
+                }
+                steps += planned
             }
         }
 
@@ -158,6 +168,27 @@ public enum ActionPlanner {
 
         let operations = Set(steps.isEmpty ? unique.map(\.operation) : steps.map(\.operation))
         return ActionPlan(steps: steps, problems: problems, notes: notes, reason: reason(for: operations))
+    }
+
+    /// MacPorts only learns of new versions when its catalogue is refreshed, so `upgrades` (already waiting on the
+    /// refresh's group) get the refresh step in front. When the refresh can't be built they're left out, each named in
+    /// `problems`, rather than run against a stale catalogue.
+    private static func withCatalogueRefresh(_ upgrades: [RunStep], engine: any Engine,
+                                             problems: inout [String]) -> [RunStep] {
+        let reason: String
+        if let refreshing = engine as? any CatalogRefreshing {
+            do {
+                return [RunStep.macPortsCatalogueRefresh(try refreshing.selfupdateCommand())] + upgrades
+            } catch let error as EngineError {
+                reason = "MacPorts can't refresh its port catalogue: \(error.message)"
+            } catch {
+                reason = "MacPorts can't refresh its port catalogue: \(error)"
+            }
+        } else {
+            reason = "MacPorts can't refresh its port catalogue here."
+        }
+        problems += upgrades.map { "\($0.title): left out, because \(reason)" }
+        return []
     }
 
     /// Requests with default options share one step; each request with its own options gets its own.

@@ -30,7 +30,7 @@ struct DemoApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) private var delegate
 
     var body: some Scene {
-        Window(DemoLaunch.model?.windowTitle ?? "BrewxPort (demo)", id: "main") {
+        Window(DemoLaunch.model?.windowTitle ?? "BrewxPort (demo)", id: MainWindowScene.id) {
             Group {
                 if let model = DemoLaunch.model {
                     RootView(model: model)
@@ -48,5 +48,16 @@ struct DemoApp: App {
         }
         .mainWindowPlacement()
         .commands { BrewxPortCommands(model: DemoLaunch.model) }
+        MenuBarScene(model: DemoLaunch.model)
+        // Demo settings live in memory for this launch only (`MemoryStore`), and touch nothing on this Mac.
+        Settings {
+            if let model = DemoLaunch.model {
+                SettingsView(model: model)
+            } else {
+                Text(DemoLaunch.problem ?? DemoServices.noFixturesMessage)
+                    .padding(24)
+                    .frame(width: 480)
+            }
+        }
     }
 }

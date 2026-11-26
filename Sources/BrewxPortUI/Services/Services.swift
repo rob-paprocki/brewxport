@@ -61,6 +61,14 @@ public struct Services: Sendable {
     public let receipts: any InstallerReceiptReading
     public let setupProblem: String?
     public let isDemo: Bool
+    /// Times the background checks. Demo: never fires.
+    public let scheduler: any BackgroundScheduling
+    /// macOS notifications. Demo: grants and keeps posts, shows nothing.
+    public let notifier: any UpdateNotifying
+    /// Open BrewxPort at login. Demo: remembers the choice, registers nothing.
+    public let loginItem: any LoginItemControlling
+    /// Screen lock, recent input, battery and Low Power Mode. Demo: at the Mac, on power.
+    public let conditions: any SystemConditions
     /// The move preview's "Add to PATH". Defaults to copy-only, which never writes.
     public let shellPath: ShellPathEditor
 
@@ -70,7 +78,8 @@ public struct Services: Sendable {
         store: any KeyValueStoring, path: any PathResolving, fileExists: @escaping @Sendable (String) -> Bool,
         host: Arch, hostInfo: HostInfo, cltPresent: @escaping @Sendable () -> Bool,
         receipts: any InstallerReceiptReading, setupProblem: String?, isDemo: Bool,
-        shellPath: ShellPathEditor? = nil
+        scheduler: any BackgroundScheduling, notifier: any UpdateNotifying, loginItem: any LoginItemControlling,
+        conditions: any SystemConditions, shellPath: ShellPathEditor? = nil
     ) {
         self.engines = engines
         self.catalog = catalog
@@ -87,6 +96,10 @@ public struct Services: Sendable {
         self.receipts = receipts
         self.setupProblem = setupProblem
         self.isDemo = isDemo
+        self.scheduler = scheduler
+        self.notifier = notifier
+        self.loginItem = loginItem
+        self.conditions = conditions
         self.shellPath = shellPath ?? .copyOnly
     }
 }

@@ -6,7 +6,7 @@ import BrewxPortCore
 import BrewxPortRun
 @testable import BrewxPortUI
 
-/// Services for the app-model tests: fake engines, catalog, executor and helper.
+/// Services for the app-model tests: fake engines, catalog, executor, helper and background seams.
 @MainActor enum AppFixtures {
     static let path = "/opt/homebrew/bin/brew"
 
@@ -21,7 +21,9 @@ import BrewxPortRun
                          receipts: any InstallerReceiptReading = NoReceipts(),
                          store: MemoryStore = MemoryStore(),
                          engines: [any Engine] = PlanFixtures.engines, path: any PathResolving = NoPath(),
-                         shellPath: ShellPathEditor? = nil) -> Services {
+                         shellPath: ShellPathEditor? = nil, scheduler: FakeScheduler = FakeScheduler(),
+                         notifier: FakeNotifier = FakeNotifier(), loginItem: FakeLoginItem = FakeLoginItem(),
+                         conditions: FakeConditions = FakeConditions()) -> Services {
         // The model loads Installed and Updates on its own; a test that doesn't script them gets empty lists.
         catalog.scriptEmpty(.installed)
         catalog.scriptEmpty(.outdated)
@@ -29,6 +31,7 @@ import BrewxPortRun
                  passwords: PromptPasswordProvider(), isAdministrator: { isAdministrator }, store: store,
                  path: path, fileExists: { _ in true }, host: host, hostInfo: hostInfo,
                  cltPresent: { cltPresent }, receipts: receipts, setupProblem: setupProblem, isDemo: isDemo,
+                 scheduler: scheduler, notifier: notifier, loginItem: loginItem, conditions: conditions,
                  shellPath: shellPath)
     }
 
@@ -334,6 +337,8 @@ import BrewxPortRun
         let executor = FakeRunExecutor(events: [.started(0)], hang: true)
         let helper = FakeHelperManager()
         let model = BrewxPortAppModel(services: F.services(executor: executor, helper: helper))
+        // With background checks off, closing the window quits, as before they existed.
+        model.background.settings.interval = .never
         #expect(model.quitsWhenLastWindowCloses)
         _ = await F.source([F.package(.homebrew, .formula, "wget")], in: model)
         model.perform(.install, on: [F.wget])
@@ -351,6 +356,290 @@ import BrewxPortRun
         #expect(await waitUntil { ended == 1 })
         model.openLoginItems()
         #expect(helper.openCount == 1)
+    }
+
+    // MARK: Quit, Dock and login
+
+    @Test func closingWindowKeepsRunningWhenChecksOn() async {
+        // Background checks are on by default: closing the window leaves BrewxPort running in the menu bar.
+        let executor = FakeRunExecutor(events: [.started(0)], hang: true)
+        let model = BrewxPortAppModel(services: F.services(executor: executor))
+        #expect(model.background.settings.checksOn)
+        #expect(!model.quitsWhenLastWindowCloses)
+        _ = await F.source([F.package(.homebrew, .formula, "wget")], in: model)
+        model.perform(.install, on: [F.wget])
+        #expect(await waitUntil { model.run.isRunning })
+        #expect(!model.quitsWhenLastWindowCloses)
+        model.run.cancel()
+        #expect(await waitUntil { !model.run.isRunning })
+        #expect(!model.quitsWhenLastWindowCloses)
+        // The demo's menu bar always shows, so it keeps running whatever its interval says.
+        let demo = BrewxPortAppModel(services: F.services(isDemo: true))
+        demo.background.settings.interval = .never
+        #expect(!demo.quitsWhenLastWindowCloses)
+    }
+
+    @Test func closingWindowQuitsWhenChecksOff() async {
+        let executor = FakeRunExecutor(events: [.started(0)], hang: true)
+        let model = BrewxPortAppModel(services: F.services(executor: executor))
+        model.background.settings.interval = .never
+        #expect(model.quitsWhenLastWindowCloses)
+        // Except during a run, as before.
+        _ = await F.source([F.package(.homebrew, .formula, "wget")], in: model)
+        model.perform(.install, on: [F.wget])
+        #expect(await waitUntil { model.run.isRunning })
+        #expect(!model.quitsWhenLastWindowCloses)
+        model.run.cancel()
+        #expect(await waitUntil { !model.run.isRunning })
+        #expect(model.quitsWhenLastWindowCloses)
+        // Turning checks on again keeps it running.
+        model.background.settings.interval = .daily
+        #expect(!model.quitsWhenLastWindowCloses)
+    }
+
+    @Test func dockHidesWithoutWindowWhenChecksOn() {
+        let model = BrewxPortAppModel(services: F.services())
+        // Nothing has shown yet; the app sets this as the window opens and closes.
+        #expect(!model.mainWindowShowing)
+        model.mainWindowShowing = true
+        #expect(model.showsDockIcon)
+        // The app follows `showsDockIcon` by observing it: closing the window changes it.
+        nonisolated(unsafe) var closeSeen = false
+        withObservationTracking { _ = model.showsDockIcon } onChange: { closeSeen = true }
+        model.mainWindowShowing = false
+        #expect(closeSeen)
+        #expect(!model.showsDockIcon)
+        // Checks off: the Dock icon stays without a window, as before (BrewxPort quits when the window closes,
+        // unless a run is going). Turning checks off from Settings changes it too.
+        nonisolated(unsafe) var checksOffSeen = false
+        withObservationTracking { _ = model.showsDockIcon } onChange: { checksOffSeen = true }
+        model.background.settings.interval = .never
+        #expect(checksOffSeen)
+        #expect(model.showsDockIcon)
+        model.mainWindowShowing = true
+        #expect(model.showsDockIcon)
+        // The demo keeps its Dock icon: a scripted demo has to stay a regular app to be driven and photographed.
+        let demo = BrewxPortAppModel(services: F.services(isDemo: true))
+        #expect(demo.background.settings.checksOn)
+        #expect(!demo.mainWindowShowing)
+        #expect(demo.showsDockIcon)
+    }
+
+    @Test func dockRuleAppliesOnceLaunchSettles() {
+        // A launch at login with checks on (VM finding 1): no window ever showed, so nothing changed `showsDockIcon`
+        // and no window event would set the activation policy. Once launch has settled, the rule says no Dock icon.
+        let login = BrewxPortAppModel(services: F.services())
+        #expect(!login.launchSettled(mainWindowOnScreen: false, afterLoginLaunch: true))
+        #expect(!login.mainWindowShowing)
+        // Not recognised as a login launch (no login-item flag in the launch event), and still no window: the same.
+        let unrecognised = BrewxPortAppModel(services: F.services())
+        #expect(!unrecognised.launchSettled(mainWindowOnScreen: false, afterLoginLaunch: false))
+        // The system put the window up, the login launch closed it before its content appeared, and the content said
+        // it appeared afterwards: what's on screen wins, and the change reaches the app's observation.
+        let closed = BrewxPortAppModel(services: F.services())
+        closed.mainWindowShowing = true
+        nonisolated(unsafe) var changed = false
+        withObservationTracking { _ = closed.showsDockIcon } onChange: { changed = true }
+        #expect(!closed.launchSettled(mainWindowOnScreen: false, afterLoginLaunch: true))
+        #expect(changed)
+        #expect(!closed.mainWindowShowing)
+        #expect(!closed.showsDockIcon)
+        // Any other launch has its window up by then: the icon stays, even before the content has said so.
+        let normal = BrewxPortAppModel(services: F.services())
+        #expect(normal.launchSettled(mainWindowOnScreen: true, afterLoginLaunch: false))
+        #expect(normal.mainWindowShowing)
+        // A window restored minimized isn't on screen, yet it's open: after a launch that closed nothing, the content's
+        // word stands.
+        let minimized = BrewxPortAppModel(services: F.services())
+        minimized.mainWindowShowing = true
+        #expect(minimized.launchSettled(mainWindowOnScreen: false, afterLoginLaunch: false))
+        #expect(minimized.mainWindowShowing)
+        // Settings open counts as a window.
+        let settings = BrewxPortAppModel(services: F.services())
+        settings.settingsWindowShowing = true
+        #expect(settings.launchSettled(mainWindowOnScreen: false, afterLoginLaunch: true))
+        // Checks off (Never): the Dock icon stays without a window.
+        let off = BrewxPortAppModel(services: F.services())
+        off.background.settings.interval = .never
+        #expect(off.launchSettled(mainWindowOnScreen: false, afterLoginLaunch: true))
+        // The demo always keeps it.
+        let demo = BrewxPortAppModel(services: F.services(isDemo: true))
+        #expect(demo.launchSettled(mainWindowOnScreen: false, afterLoginLaunch: false))
+    }
+
+    @Test func quitTitleMentionsChecks() {
+        let model = BrewxPortAppModel(services: F.services())
+        #expect(model.quitTitle == "Quit BrewxPort (stops update checks)")
+        model.background.settings.interval = .never
+        #expect(model.quitTitle == "Quit BrewxPort")
+        model.background.settings.interval = .hourly
+        #expect(model.quitTitle == "Quit BrewxPort (stops update checks)")
+    }
+
+    @Test func loginItemToggleCallsSeam() throws {
+        struct Refused: Error {}
+        let store = MemoryStore()
+        let loginItem = FakeLoginItem()
+        let model = BrewxPortAppModel(services: F.services(store: store, loginItem: loginItem))
+        let settings = model.background.settings
+        #expect(!settings.openAtLogin)
+        try model.background.setOpenAtLogin(true)
+        #expect(loginItem.changes == [true])
+        #expect(settings.openAtLogin)
+        #expect(store.data(forKey: "openAtLogin") == Data("1".utf8))
+        try model.background.setOpenAtLogin(false)
+        #expect(loginItem.changes == [true, false])
+        #expect(!settings.openAtLogin)
+        // The system refuses: the error reaches the caller (Settings shows it) and nothing changes.
+        loginItem.error = Refused()
+        #expect(throws: Refused.self) { try model.background.setOpenAtLogin(true) }
+        #expect(loginItem.changes == [true, false, true])
+        #expect(!loginItem.isEnabled)
+        #expect(!settings.openAtLogin)
+        #expect(store.data(forKey: "openAtLogin") == Data("0".utf8))
+        // Registered but waiting for approval in System Settings: the switch stays on, and Settings says to approve.
+        loginItem.error = nil
+        loginItem.approvalNeededOnRegister = true
+        try model.background.setOpenAtLogin(true)
+        #expect(!loginItem.isEnabled)
+        #expect(loginItem.needsApproval)
+        #expect(settings.openAtLogin)
+    }
+
+    @Test func openAtLoginFollowsSystemState() {
+        func launch(stored: Bool?, isEnabled: Bool = false, needsApproval: Bool = false) -> (Bool, FakeLoginItem) {
+            let store = MemoryStore()
+            if let stored { store.set(Data((stored ? "1" : "0").utf8), forKey: "openAtLogin") }
+            let loginItem = FakeLoginItem(isEnabled: isEnabled, needsApproval: needsApproval)
+            let model = BrewxPortAppModel(services: F.services(store: store, loginItem: loginItem))
+            model.start()
+            return (model.background.settings.openAtLogin, loginItem)
+        }
+        // Removed in System Settings > General > Login Items: the switch turns off at the next launch.
+        let (removed, removedItem) = launch(stored: true)
+        #expect(!removed)
+        // Waiting for approval keeps the person's choice; Settings says to approve it.
+        #expect(launch(stored: true, needsApproval: true).0)
+        // Registered and allowed, though the setting says otherwise (a reset store, say): the switch says so.
+        #expect(launch(stored: false, isEnabled: true).0)
+        #expect(launch(stored: nil, isEnabled: true).0)
+        #expect(!launch(stored: nil).0)
+        #expect(launch(stored: true, isEnabled: true).0)
+        // Launch only reads: it never registers or unregisters anything.
+        #expect(removedItem.changes.isEmpty)
+    }
+
+    // MARK: Running without the window
+
+    @Test func startRunsWithoutAView() async {
+        // Launch calls start() before any window shows, and a launch at login may never show one: start() alone
+        // detects the engines and loads Updates and Installed.
+        let catalog = Self.outdatedCatalog([F.package(.homebrew, .formula, "jq", installed: "1")])
+        let model = BrewxPortAppModel(services: F.services(catalog: catalog))
+        #expect(model.listReloadCount == 0)
+        model.start()
+        #expect(await waitUntil {
+            model.enginesChecked && model.updates.list.rows.map(\.name) == ["jq"] && !model.installed.list.loading
+        })
+        #expect(catalog.queries.contains(.installed))
+        #expect(model.listReloadCount == 1)
+        // The window's own call, once it appears, does nothing more.
+        model.start()
+        try? await Task.sleep(for: .milliseconds(50))
+        #expect(model.listReloadCount == 1)
+        #expect(Self.outdatedQueries(catalog) == 1)
+    }
+
+    @Test func backgroundRunDoesNotReopenWindow() async {
+        let executor = FakeRunExecutor(events: [.started(0), .finished(0, 0), .done])
+        let model = BrewxPortAppModel(services: F.services(executor: executor))
+        let wget = ActionRequest(operation: .upgrade, package: F.package(.homebrew, .formula, "wget", installed: "1"))
+        #expect(model.lastRunOrigin == .user)
+        #expect(model.reopensWindowAfterRun)
+        // What the app's run-ended observer reads when it decides whether to bring the window back.
+        var reopenAtEnd: [Bool] = []
+        model.addRunEndedObserver { reopenAtEnd.append(model.reopensWindowAfterRun) }
+        #expect(model.installRequests([wget], origin: .background))
+        #expect(model.lastRunOrigin == .background)
+        #expect(!model.reopensWindowAfterRun)
+        #expect(await waitUntil { reopenAtEnd.count == 1 })
+        #expect(reopenAtEnd == [false])
+        #expect(executor.runs.count == 1)
+    }
+
+    @Test func userRunStillReopensWindow() async {
+        let executor = FakeRunExecutor(events: [.started(0), .finished(0, 0), .done])
+        let model = BrewxPortAppModel(services: F.services(
+            executor: executor, helper: FakeHelperManager(),
+            hostInfo: HostInfo(appleSilicon: true, macOSMajor: 15), cltPresent: true))
+        let wget = F.package(.homebrew, .formula, "wget", installed: "1")
+        _ = await F.source([wget], in: model)
+        var reopenAtEnd: [Bool] = []
+        model.addRunEndedObserver { reopenAtEnd.append(model.reopensWindowAfterRun) }
+        let update = ActionRequest(operation: .upgrade, package: wget)
+        let background = { model.installRequests([update], origin: .background) }
+        // A row's Update after a background run.
+        #expect(background())
+        #expect(await waitUntil { reopenAtEnd.count == 1 })
+        model.perform(.update, on: [wget.id])
+        #expect(await waitUntil { reopenAtEnd.count == 2 })
+        // Engine setup starts its run without installRequests, and is the user's too.
+        #expect(background())
+        #expect(await waitUntil { reopenAtEnd.count == 3 })
+        #expect(model.setUpEngine(.homebrew))
+        #expect(await waitUntil { reopenAtEnd.count == 4 })
+        #expect(reopenAtEnd == [false, true, false, true])
+        #expect(model.lastRunOrigin == .user)
+        #expect(executor.runs.count == 4)
+    }
+
+    @Test func installRequestsReportsWhetherARunStarted() async {
+        // A standard account: a cask's update needs an administrator, a formula's doesn't.
+        let executor = FakeRunExecutor(events: [.started(0), .finished(0, 0), .done])
+        let model = BrewxPortAppModel(services: F.services(executor: executor, isAdministrator: false))
+        let wget = ActionRequest(operation: .upgrade, package: F.package(.homebrew, .formula, "wget", installed: "1"))
+        let firefox = ActionRequest(operation: .upgrade,
+                                    package: F.package(.homebrew, .cask, "firefox", installed: "1"))
+        #expect(model.installRequests([wget], origin: .user))
+        #expect(await waitUntil { executor.runs.count == 1 && !model.run.isRunning })
+        model.run.dismissPanel()
+        let log = model.run.log, steps = model.run.steps, runNumber = model.run.runNumber
+        // A background run left with nothing it may run doesn't start: no panel, and the last run's log stays.
+        #expect(!model.installRequests([firefox], origin: .background))
+        #expect(!model.run.panelVisible)
+        #expect(model.run.log == log)
+        #expect(model.run.steps == steps)
+        #expect(model.run.runNumber == runNumber)
+        #expect(model.lastRunOrigin == .user)
+        #expect(executor.runs.count == 1)
+        // Asked for by the user, the same request still says in the panel why nothing ran.
+        #expect(!model.installRequests([firefox], origin: .user))
+        #expect(model.run.panelVisible)
+        #expect(model.run.headline == "Nothing ran")
+        #expect(model.run.problems.contains { $0.contains("administrator account") })
+        // Nothing starts while a run is going, from either origin.
+        executor.events = [.started(0)]
+        executor.hang = true
+        #expect(model.installRequests([wget], origin: .background))
+        #expect(await waitUntil { model.run.isRunning })
+        #expect(!model.installRequests([wget], origin: .background))
+        #expect(!model.installRequests([wget]))
+        #expect(model.lastRunOrigin == .background)
+        model.run.cancel()
+        #expect(await waitUntil { !model.run.isRunning })
+        #expect(executor.runs.count == 2)
+    }
+
+    @Test func mainWindowIsKnownByItsSceneIdentifier() {
+        // SwiftUI gives the `Window(id: "main")` scene's window the identifier "main"; the Settings window's is
+        // "com_apple_SwiftUI_Settings_window". Both can be main, so being main-capable doesn't pick the main window.
+        #expect(MainWindowScene.id == "main")
+        #expect(MainWindowScene.matches("main"))
+        #expect(MainWindowScene.matches("main-AppWindow-1"))
+        #expect(!MainWindowScene.matches("com_apple_SwiftUI_Settings_window"))
+        #expect(!MainWindowScene.matches("notice"))
+        #expect(!MainWindowScene.matches("mainly"))
+        #expect(!MainWindowScene.matches(nil))
     }
 
     @Test func setupRunRechecksEngines() async {
@@ -410,6 +699,95 @@ import BrewxPortRun
         #expect(executor.runs.count == 1)
         // The run failed (nothing appeared after the recheck): the screen says so rather than going away.
         #expect(await waitUntil { if case .failed = model.setup.stage { true } else { false } })
+    }
+
+    // MARK: Refresh MacPorts
+
+    static let portPresent: EngineStatus = .present(path: URL(fileURLWithPath: PlanFixtures.portPath), version: "2.12.7")
+
+    func refreshModel(macports: EngineStatus, executor: FakeRunExecutor) async -> BrewxPortAppModel {
+        let model = BrewxPortAppModel(services: F.services(
+            catalog: FakeCatalog(engines: [.homebrew: .missing, .macports: macports, .nanobrew: .missing, .mas: .missing]),
+            executor: executor, helper: FakeHelperManager()))
+        model.checkEnginesAgain()
+        _ = await waitUntil { model.enginesChecked }
+        return model
+    }
+
+    @Test func refreshMacPortsRunsOnlySelfupdate() async {
+        let executor = FakeRunExecutor(events: [.needsPassword, .started(0), .finished(0, 0), .done])
+        let model = await refreshModel(macports: Self.portPresent, executor: executor)
+        #expect(model.showsRefreshMacPorts)
+        #expect(model.canRefreshMacPorts)
+        let reloads = model.listReloadCount
+        #expect(model.refreshMacPortsCatalogue())
+        #expect(model.lastRunOrigin == .user)
+        #expect(await waitUntil { executor.runs.count == 1 && !model.run.isRunning })
+        let steps = executor.runs[0].steps
+        #expect(steps.map(\.spec.arguments) == [["-N", "selfupdate"]])
+        #expect(steps.map(\.spec.executable.path) == [PlanFixtures.portPath])
+        #expect(steps.map(RunRouting.route(for:)) == [.helper])
+        #expect(steps.map(\.title) == ["MacPorts: refresh the port catalogue"])
+        #expect(executor.runs[0].reason
+                == "BrewxPort needs an administrator password to refresh MacPorts' port catalogue.")
+        #expect(model.run.headline == "Finished")
+        // The run's end reloads the lists, so Updates shows what the refreshed catalogue knows.
+        #expect(await waitUntil { model.listReloadCount == reloads + 1 })
+
+        // Not while a run is going.
+        executor.events = [.started(0)]
+        executor.hang = true
+        #expect(model.refreshMacPortsCatalogue())
+        #expect(await waitUntil { executor.runs.count == 2 })
+        #expect(!model.canRefreshMacPorts)
+        #expect(!model.refreshMacPortsCatalogue())
+        model.run.cancel()
+        #expect(await waitUntil { !model.run.isRunning })
+
+        // Nor while a sheet is up.
+        model.run.showingPasswordSheet = true
+        #expect(!model.canRefreshMacPorts)
+        #expect(!model.refreshMacPortsCatalogue())
+        model.run.showingPasswordSheet = false
+        #expect(model.canRefreshMacPorts)
+        #expect(executor.runs.count == 2)
+    }
+
+    @Test func refreshMacPortsSaysWhyNothingRan() async {
+        // MacPorts was found, then went missing: its refresh can't be built. The panel says so instead of nothing.
+        let executor = FakeRunExecutor()
+        let engines: [any Engine] = PlanFixtures.engines.map {
+            $0.id == .macports ? MacPortsEngine(runner: PlanFixtures.runner, executable: nil) : $0
+        }
+        let model = BrewxPortAppModel(services: F.services(
+            catalog: FakeCatalog(engines: [.macports: Self.portPresent]), executor: executor,
+            helper: FakeHelperManager(), engines: engines))
+        model.checkEnginesAgain()
+        _ = await waitUntil { model.enginesChecked }
+        #expect(model.canRefreshMacPorts)
+        #expect(!model.refreshMacPortsCatalogue())
+        #expect(executor.runs.isEmpty)
+        #expect(!model.run.isRunning)
+        #expect(model.run.panelVisible)
+        #expect(model.run.headline == "Nothing ran")
+        #expect(model.run.problems == ["The port catalogue wasn't refreshed: MacPorts isn't installed"])
+    }
+
+    @Test func refreshMacPortsHiddenWithoutMacPorts() async {
+        let executor = FakeRunExecutor(events: [.started(0), .finished(0, 0), .done])
+        let unusable = EngineStatus.unusable(path: URL(fileURLWithPath: PlanFixtures.portPath), reason: "bad")
+        for status in [EngineStatus.missing, unusable] {
+            let model = await refreshModel(macports: status, executor: executor)
+            #expect(!model.showsRefreshMacPorts)
+            #expect(!model.canRefreshMacPorts)
+            #expect(!model.refreshMacPortsCatalogue())
+            #expect(!model.run.panelVisible)
+        }
+        // Before the engines have been checked nothing is known, so it stays hidden then too.
+        let unchecked = BrewxPortAppModel(services: F.services(executor: executor, helper: FakeHelperManager()))
+        #expect(!unchecked.showsRefreshMacPorts)
+        #expect(!unchecked.refreshMacPortsCatalogue())
+        #expect(executor.runs.isEmpty)
     }
 
     // MARK: Set Up buttons
@@ -1563,6 +1941,32 @@ import BrewxPortRun
         #expect(executor.runs[0].steps.map(\.operation) == [.remove])
         #expect(Self.names(executor.runs[0].steps) == ["jq"])
         #expect(!model.confirmingRemoval)
+    }
+
+    @Test func nothingRunsBehindTheSetupSheet() async {
+        // No package manager was found, so the launch shows the setup offer as a sheet.
+        let catalog = FakeCatalog(engines: [.homebrew: .missing, .macports: .missing, .nanobrew: .missing,
+                                            .mas: .missing])
+        let executor = FakeRunExecutor()
+        let services = F.services(catalog: catalog, executor: executor, helper: FakeHelperManager())
+        let model = await F.updatesModel([F.package(.homebrew, .formula, "wget")], catalog: catalog,
+                                         services: services)
+        model.start()
+        #expect(await waitUntil { model.setup.sheetShown })
+        // The menu bar's Update items are off, and no run starts under it (automatic ones included).
+        #expect(model.modalUp)
+        #expect(!model.canMenuUpdate)
+        #expect(!model.installRequests(model.updates.updateAllRequests(), origin: .background))
+        #expect(executor.runs.isEmpty)
+        // Its own Set up button still works.
+        #expect(model.canSetUpEngines)
+        // A file the Finder opens waits for it, then opens once it's gone.
+        let file = URL(fileURLWithPath: "/tmp/BrewxPortTests-none.brewxportbundle")
+        model.openFromFinder(file)
+        #expect(model.pendingOpenURL == file)
+        model.setup.notNow()
+        #expect(await waitUntil { model.pendingOpenURL == nil })
+        #expect(model.sidebar == .bundles)
     }
 
     @Test func showDetailsTogglesTheInspectorOnTheSelection() async {

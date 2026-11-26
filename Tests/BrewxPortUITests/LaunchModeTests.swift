@@ -51,4 +51,26 @@ import Foundation
         #expect(LaunchMode.parse([Self.program, "--demo", "--demo-bundle"]) == .demo(DemoOptions()))
         #expect(LaunchMode.parse([Self.program, "--demo-bundle", "inventory"]) == .normal)
     }
+
+    /// The launch event the way loginwindow sends it: an open-application event whose property data says "login item".
+    static func openEvent(_ property: NSAppleEventDescriptor?,
+                          eventID: AEEventID = AEEventID(kAEOpenApplication)) -> NSAppleEventDescriptor {
+        let event = NSAppleEventDescriptor(eventClass: AEEventClass(kCoreEventClass), eventID: eventID,
+                                           targetDescriptor: nil, returnID: AEReturnID(kAutoGenerateReturnID),
+                                           transactionID: AETransactionID(kAnyTransactionID))
+        if let property { event.setParam(property, forKeyword: AEKeyword(keyAEPropData)) }
+        return event
+    }
+
+    @Test func loginItemLaunchIsReadFromTheLaunchEvent() {
+        let loginItem = NSAppleEventDescriptor(enumCode: OSType(keyAELaunchedAsLogInItem))
+        #expect(LaunchMode.isLoginItemLaunch(Self.openEvent(loginItem)))
+        // A plain launch (Finder, Dock, `open`), no event at all, or a reopen are not.
+        #expect(!LaunchMode.isLoginItemLaunch(Self.openEvent(nil)))
+        #expect(!LaunchMode.isLoginItemLaunch(nil))
+        #expect(!LaunchMode.isLoginItemLaunch(Self.openEvent(loginItem, eventID: AEEventID(kAEReopenApplication))))
+        // Another enum in the same place (a service launch, say) is not a login item either.
+        #expect(!LaunchMode.isLoginItemLaunch(Self.openEvent(NSAppleEventDescriptor(
+            enumCode: OSType(keyAELaunchedAsServiceItem)))))
+    }
 }

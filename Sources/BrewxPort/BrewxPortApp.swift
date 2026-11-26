@@ -36,13 +36,14 @@ struct BrewxPortApp: App {
     @State private var model: BrewxPortAppModel
 
     init() {
-        let model = BrewxPortAppModel(services: LiveServices.make())
+        let model = BrewxPortAppModel(services: LiveServices.make(),
+                                      testIntervalOverride: BackgroundSettings.testIntervalOverride())
         _model = State(initialValue: model)
         delegate.model = model
     }
 
     var body: some Scene {
-        Window("BrewxPort", id: "main") {
+        Window("BrewxPort", id: MainWindowScene.id) {
             RootView(model: model)
                 .frame(minWidth: 900, minHeight: 560)
                 .onAppear { delegate.model = model }
@@ -50,6 +51,36 @@ struct BrewxPortApp: App {
         }
         .mainWindowPlacement()
         .commands { BrewxPortCommands(model: model) }
+        MenuBarScene(model: model)
+        // BrewxPort > Settings… (⌘,), which the scene adds by itself. Not in the notice-only app.
+        Settings { SettingsView(model: model) }
+    }
+}
+
+/// The menu bar icon and its menu, while BrewxPort stays in the menu bar (`keepsRunningInMenuBar`; always in the
+/// demo). Added to the live and demo apps, never to the notice-only one. With no model (a demo that couldn't
+/// start) there's none.
+///
+/// The icon and the menu both save their scene's `openWindow` for `MainWindow`. The icon is drawn at launch, so the
+/// menu's Open BrewxPort, a notification click and a password run can open the window even when it has never
+/// shown, as after a login launch.
+struct MenuBarScene: Scene {
+    let model: BrewxPortAppModel?
+
+    var body: some Scene {
+        // Read here, so turning the checks off or on removes or adds the icon. Setting it does nothing: taking the
+        // icon out of the menu bar never turns the checks off.
+        let inserted = model?.keepsRunningInMenuBar ?? false
+        MenuBarExtra(isInserted: Binding(get: { inserted }, set: { _ in })) {
+            if let model {
+                MenuBarContent(model: model)
+                    .keepsMainWindowOpener()
+            }
+        } label: {
+            MenuBarLabel(count: model?.updates.badgeCount ?? 0, running: model?.run.isRunning ?? false)
+                .keepsMainWindowOpener()
+        }
+        .menuBarExtraStyle(.menu)
     }
 }
 

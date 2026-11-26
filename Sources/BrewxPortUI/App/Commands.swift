@@ -1,6 +1,11 @@
+import AppKit
 import SwiftUI
 
-/// The menu commands. File › Open Bundle… (⌘O) shows Bundles and its open panel; Export Bundle… (⇧⌘E)
+/// The menu commands. BrewxPort › Quit (⌘Q) adds "(stops update checks)" while background checks are on
+/// (`quitTitle`); it quits the usual way, so a run in progress still asks first, and a sheet that would hold the quit
+/// up is dealt with first (`MenuBarItems.quit`).
+///
+/// File › Open Bundle… (⌘O) shows Bundles and its open panel; Export Bundle… (⇧⌘E)
 /// and Export Brewfile… save what's installed, after listing anything they leave out; Include Dependencies in Exports
 /// (a checkmark, on by default and remembered) decides whether packages that came in as dependencies are in them.
 /// All four are off
@@ -23,6 +28,11 @@ public struct BrewxPortCommands: Commands {
     public init(model: BrewxPortAppModel?) { self.model = model }
 
     public var body: some Commands {
+        // Replacing the group drops the system's ⌘Q, so the item sets it again.
+        CommandGroup(replacing: .appTermination) {
+            Button(model?.quitTitle ?? "Quit BrewxPort") { MenuBarItems.quit(model: model) }
+                .keyboardShortcut("q")
+        }
         // BrewxPort has one window, so File has no New; it opens and exports bundles instead.
         CommandGroup(replacing: .newItem) {
             Button("Open Bundle…") { model?.showOpenPanel() }

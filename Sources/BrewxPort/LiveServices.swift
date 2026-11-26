@@ -39,6 +39,8 @@ enum LiveServices {
             cltPresent: { FileManager.default.fileExists(atPath: CommandLineTools.marker) },
             receipts: PkgutilReceipts(runner: runner), setupProblem: setupProblem,
             isDemo: false,
+            scheduler: LiveBackgroundScheduler(), notifier: LiveUpdateNotifier(), loginItem: LiveLoginItem(),
+            conditions: LiveSystemConditions(),
             // The same login shell the PATH resolver asks; nothing extra is run to find it.
             shellPath: ShellPathEditor(home: FileManager.default.homeDirectoryForCurrentUser, shell: path.loginShell))
     }

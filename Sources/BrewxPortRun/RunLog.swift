@@ -14,22 +14,34 @@ public struct RunLog: Sendable, Equatable {
     public private(set) var openStep: Int?
     private let titles: [String]
     private let operations: [PackageOperation]
-    /// Which steps are check steps. Their titles say what they do, so they're logged without a verb.
-    private let checks: [Bool]
+    /// Which steps are check steps or MacPorts' catalogue refresh. Their titles say what they do, so they're logged
+    /// without a verb.
+    private let titledAlone: [Bool]
+    /// Which steps are a MacPorts catalogue refresh that later upgrades wait on. When one fails, `RunSession` skips
+    /// those upgrades without a word, so the log says why.
+    private let refreshesGatingUpgrades: [Bool]
+
+    private static let catalogueRefreshSkipNote = "Skipped: the MacPorts catalogue refresh failed."
 
     /// Every step is worded as an update.
     public init(titles: [String] = []) {
         self.titles = titles
         self.operations = titles.map { _ in .upgrade }
-        self.checks = titles.map { _ in false }
+        self.titledAlone = titles.map { _ in false }
+        self.refreshesGatingUpgrades = titles.map { _ in false }
     }
 
-    /// Each step is worded by its operation: "Installing", "Updating" or "Removing". A check step is logged by its
-    /// title alone.
+    /// Each step is worded by its operation: "Installing", "Updating" or "Removing". A check step and MacPorts'
+    /// catalogue refresh are logged by their titles alone.
     public init(steps: [RunStep]) {
         self.titles = steps.map(\.title)
         self.operations = steps.map(\.operation)
-        self.checks = steps.map { $0.verifyInstalled != nil }
+        self.titledAlone = steps.map { $0.verifyInstalled != nil || $0.isMacPortsCatalogueRefresh }
+        self.refreshesGatingUpgrades = steps.indices.map { index in
+            steps[index].isMacPortsCatalogueRefresh && steps[(index + 1)...].contains {
+                $0.requiresAllEarlier && $0.gateGroup == RunStep.macPortsCatalogueRefreshGroup
+            }
+        }
     }
 
     public mutating func note(_ text: String, isError: Bool = false) {
@@ -60,8 +72,8 @@ public struct RunLog: Sendable, Equatable {
             note("Nothing was changed.", isError: true)
         case .started(let index):
             openStep = index
-            let isCheck = checks.indices.contains(index) && checks[index]
-            note(isCheck ? title(index) : "\(verb(index)) \(title(index))")
+            let alone = titledAlone.indices.contains(index) && titledAlone[index]
+            note(alone ? title(index) : "\(verb(index)) \(title(index))")
         case .output(_, .stdout(let line)):
             note(line)
         case .output(_, .stderr(let line)):
@@ -72,6 +84,9 @@ public struct RunLog: Sendable, Equatable {
                 note("Finished \(title(index)).")
             } else {
                 note("\(title(index)) failed (exit code \(code)).", isError: true)
+                if refreshesGatingUpgrades.indices.contains(index), refreshesGatingUpgrades[index] {
+                    note(Self.catalogueRefreshSkipNote, isError: true)
+                }
             }
         case .cancelled:
             // A step that started and never finished was stopped part way.

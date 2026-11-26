@@ -22,6 +22,9 @@ import BrewxPortCore
     public private(set) var errors: [String] = []
     /// The engines whose latest answer was an error (the ones `errors` names).
     public private(set) var failedEngines: Set<EngineID> = []
+    /// The engines whose answer the list holds, an error included. Once a load has ended, exactly the ones that
+    /// answered it: an engine that didn't answer has no rows, but they weren't reported gone.
+    public var answeredEngines: Set<EngineID> { Set(outcomes.keys) }
     public private(set) var loading = false
     public private(set) var byRef: [PackageRef: PackageRow] = [:]
 

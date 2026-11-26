@@ -7,6 +7,27 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-11-26
+
+**Upgrading:** BrewxPort now stays in the menu bar when you close its window and checks for updates every 12 hours. To keep the old behaviour, set Settings > Check for updates to Never.
+
+### Added
+
+- A menu bar icon with an update count, and a menu with per-manager Update buttons, Update All…, Check Now and Refresh MacPorts….
+- Scheduled update checks, every 12 hours by default, or every hour, 4 hours or 24 hours.
+- Notifications when new updates are found and after automatic updates.
+- Automatic updates in three modes: Notify me, Update what doesn't need a password, and Update everything.
+- Automatic updates leave out a package when updating it would also update one you ignored or skipped, and a notification says so.
+- A Settings window (⌘,) and a one-time sheet on first launch that explains background checks.
+- Open BrewxPort at login.
+- Refresh MacPorts… on the Updates page and in the menu bar menu.
+
+### Changed
+
+- MacPorts updates show up after MacPorts refreshes its own list. Every MacPorts update run does that first, and so does Refresh MacPorts….
+- Every MacPorts update run starts by refreshing the port catalogue with `port selfupdate`, which may update MacPorts itself. If that fails, the upgrades are skipped.
+- The Updates toolbar's Refresh button has a menu with Refresh MacPorts….
+
 ## [0.6.0] - 2026-11-25
 
 **Upgrading:** nothing to do.

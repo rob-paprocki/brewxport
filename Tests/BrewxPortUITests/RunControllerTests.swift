@@ -449,6 +449,35 @@ extension RunController {
         #expect(await third.value == nil)
     }
 
+    @Test func lateSheetDismissalDoesNotCancelARetryWaitingForFocus() async {
+        // A run nobody clicked for (the automatic password run): its sheet shows only while BrewxPort has the focus.
+        let executor = FakeRunExecutor(events: [], hang: true)
+        let run = Self.controller(executor)
+        let focus = BackgroundUpdaterTests.Focus()
+        run.canPresentPasswordSheet = { focus.value }
+        run.nextRunPromptNeedsFocus = true
+        #expect(run.start(Self.plan([F.cask()]), ensureHelper: Self.enabled))
+        let first = Task { await run.askForPassword(reason: "r", previousAttemptFailed: false) }
+        #expect(await waitUntil { run.showingPasswordSheet })
+        run.finishPassword(SecretBuffer(copying: Array("wrong".utf8)))
+        _ = await first.value
+        // The person is in another app when the retry asks, so its sheet waits for the focus.
+        focus.value = false
+        let retry = Task { await run.askForPassword(reason: "r", previousAttemptFailed: true) }
+        #expect(await waitUntil { run.passwordWaitsForFocus })
+        // The first sheet's dismissal finishes only now: it must not cancel the retry that's waiting.
+        run.sheetDismissed()
+        #expect(run.passwordWaitsForFocus)
+        focus.value = true
+        run.presentWaitingPrompt()
+        #expect(run.showingPasswordSheet)
+        let secret = SecretBuffer(copying: Array("right".utf8))
+        run.finishPassword(secret)
+        #expect(await retry.value === secret)
+        run.cancel()
+        #expect(await waitUntil { !run.isRunning })
+    }
+
     // MARK: Helper and finish
 
     @Test func ensureHelperOnlyForHelperSteps() async {

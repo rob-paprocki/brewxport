@@ -64,6 +64,22 @@ extension RunStep {
                 spec: CommandSpec(executable: URL(fileURLWithPath: "/usr/bin/false"), arguments: [], needsRoot: false),
                 title: title, verifyInstalled: refs)
     }
+
+    /// The gate group of a MacPorts update run: its catalogue refresh, and the upgrades that wait for it.
+    public static let macPortsCatalogueRefreshGroup = "macports-selfupdate"
+
+    /// MacPorts' catalogue refresh (`port -N selfupdate`, from `CatalogRefreshing.selfupdateCommand()`): the first
+    /// MacPorts step of every MacPorts update run, and all of a "Refresh MacPorts…" run. The upgrades after it carry
+    /// `requiresAllEarlier` in its group, so a failed refresh skips them and nothing else.
+    public static func macPortsCatalogueRefresh(_ spec: CommandSpec) -> RunStep {
+        RunStep(engine: .macports, kind: .port, operation: .upgrade, spec: spec,
+                title: "MacPorts: refresh the port catalogue", gateGroup: macPortsCatalogueRefreshGroup)
+    }
+
+    /// True for the step `macPortsCatalogueRefresh` makes: in its group, and waiting on nothing itself.
+    var isMacPortsCatalogueRefresh: Bool {
+        gateGroup == Self.macPortsCatalogueRefreshGroup && !requiresAllEarlier
+    }
 }
 
 /// How a step gets the privileges it needs.

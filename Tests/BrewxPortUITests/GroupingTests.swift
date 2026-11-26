@@ -63,21 +63,6 @@ import BrewxPortCore
 
     private typealias F = AppFixtures
 
-    /// A demo-mode model whose Updates page holds `packages` (each outdated), loaded and settled.
-    private func updatesModel(_ packages: [Package], executor: FakeRunExecutor = FakeRunExecutor())
-        async -> BrewxPortAppModel {
-        let catalog = FakeCatalog()
-        for (engine, found) in Dictionary(grouping: packages, by: \.id.engine) {
-            catalog.script(.outdated, engine, packages: found)
-        }
-        let m = BrewxPortAppModel(services: F.services(catalog: catalog, executor: executor, isDemo: true))
-        m.refreshLists()
-        _ = await waitUntil {
-            !m.updates.list.loading && !m.updates.pruning && m.updates.list.all.count == packages.count
-        }
-        return m
-    }
-
     private static func arguments(_ executor: FakeRunExecutor, run: Int = 0) -> [String] {
         executor.runs[run].steps.flatMap(\.spec.arguments)
     }
@@ -89,7 +74,7 @@ import BrewxPortCore
 
     @Test func updateNOnlyThatManager() async {
         let executor = FakeRunExecutor()
-        let m = await updatesModel([wget, jq, curl], executor: executor)
+        let m = await F.updatesModel([wget, jq, curl], executor: executor)
         #expect(Set(m.updates.updateAllRequests(for: .homebrew).map(\.package.id)) == [wget.id, jq.id])
         #expect(m.updates.updateAllRequests(for: .homebrew).allSatisfy { $0.operation == .upgrade })
         #expect(m.updates.updateCount(for: .homebrew) == 2)
@@ -102,7 +87,7 @@ import BrewxPortCore
     }
 
     @Test func updateNSkipsIgnoredShown() async {
-        let m = await updatesModel([wget, jq, curl])
+        let m = await F.updatesModel([wget, jq, curl])
         m.perform(.ignore, on: [wget.id])
         m.updates.showHidden = true
         // Shown in its section, but neither counted nor updated.
@@ -116,7 +101,7 @@ import BrewxPortCore
 
     @Test func updateNActsOnCollapsedSection() async {
         let executor = FakeRunExecutor()
-        let m = await updatesModel([wget, jq, curl], executor: executor)
+        let m = await F.updatesModel([wget, jq, curl], executor: executor)
         m.updates.list.selection = PackageSelection(selected: [wget.id], checked: [wget.id, curl.id])
         m.setCollapsed(true, .homebrew, on: .updates)
         // Collapsing hides rows; it doesn't take them out of the list, the counts or the checked Update.
@@ -132,7 +117,7 @@ import BrewxPortCore
 
     @Test func updateNHiddenAtZero() async {
         let executor = FakeRunExecutor()
-        let m = await updatesModel([wget, curl], executor: executor)
+        let m = await F.updatesModel([wget, curl], executor: executor)
         m.perform(.ignore, on: [curl.id])
         #expect(m.updates.updateCount(for: .macports) == 0)
         #expect(m.updates.updateCount(for: .nanobrew) == 0)
@@ -145,7 +130,7 @@ import BrewxPortCore
 
     @Test func updateNDisabledWhileRunning() async {
         let executor = FakeRunExecutor(events: [.started(0)], hang: true)
-        let m = await updatesModel([wget, curl], executor: executor)
+        let m = await F.updatesModel([wget, curl], executor: executor)
         #expect(m.canUpdateAll)
         m.updateAll(engine: .homebrew)
         #expect(await waitUntil { m.run.isRunning && executor.runs.count == 1 })
@@ -160,7 +145,7 @@ import BrewxPortCore
 
     @Test func updateNOnePassword() async {
         let executor = FakeRunExecutor()
-        let m = await updatesModel([wget, curl, zlib], executor: executor)
+        let m = await F.updatesModel([wget, curl, zlib], executor: executor)
         m.updateAll(engine: .macports)
         #expect(await waitUntil { executor.runs.count == 1 && !m.run.isRunning })
         try? await Task.sleep(for: .milliseconds(50))
@@ -272,7 +257,7 @@ import BrewxPortCore
 
     @Test func groupingOnWithCollapsedSectionDropsHiddenHighlight() async {
         let executor = FakeRunExecutor()
-        let m = await updatesModel([wget, jq, curl], executor: executor)
+        let m = await F.updatesModel([wget, jq, curl], executor: executor)
         m.sidebar = .updates
         m.setCollapsed(true, .homebrew, on: .updates)
         m.groupByPackageManager = false

@@ -77,10 +77,12 @@ enum PlanFixtures {
             ["nanobrew", "formula", F.nbPath, "upgrade", "ripgrep"],
             ["homebrew", "formula", F.brewPath, "upgrade", "wget", "jq"],
             ["homebrew", "cask", F.brewPath, "upgrade", "--cask", "blackhole-2ch"],
+            ["macports", "port", F.portPath, "-N", "selfupdate"],
             ["macports", "port", F.portPath, "-N", "upgrade", "curl"],
             ["mas", "app", F.masPath, "upgrade", "497799835"],
         ])
-        #expect(plan.steps.map(RunRouting.route(for:)) == [.user, .user, .userWithAskpass, .helper, .sudoAskpass])
+        #expect(plan.steps.map(RunRouting.route(for:)) == [.user, .user, .userWithAskpass, .helper, .helper,
+                                                           .sudoAskpass])
         #expect(plan.steps[2].title == "Homebrew casks: blackhole-2ch")
         #expect(plan.steps.allSatisfy { $0.operation == .upgrade })
     }
@@ -91,7 +93,8 @@ enum PlanFixtures {
             MacPortsEngine(runner: F.runner, executable: URL(fileURLWithPath: F.portPath)),
         ]
         let plan = ActionPlanner.make(Self.upgrades(Self.outdated), engines: engines, order: [.homebrew, .macports])
-        #expect(plan.steps.map(\.engine) == [.macports])
+        #expect(plan.steps.map(\.engine) == [.macports, .macports])
+        #expect(plan.steps.map(\.spec.arguments) == [["-N", "selfupdate"], ["-N", "upgrade", "curl"]])
         #expect(plan.problems.count == 4)  // brew formulae, brew casks, then nanobrew and mas with no engine
         #expect(plan.problems[0].hasPrefix("Homebrew: wget, jq: "))
         #expect(plan.problems[1].hasPrefix("Homebrew casks: blackhole-2ch: "))
@@ -250,8 +253,70 @@ enum PlanFixtures {
         #expect(plan.problems.isEmpty)
         #expect(Self.shapes(plan) == [
             ["nanobrew", "formula", F.nbPath, "upgrade", "figlet"],
+            ["macports", "port", F.portPath, "-N", "selfupdate"],
             ["macports", "port", F.portPath, "-N", "upgrade", "figlet"],
         ])
+    }
+
+    // MARK: MacPorts catalogue refresh
+
+    @Test func macportsUpgradeStartsWithSelfupdate() {
+        let requests = [
+            F.request(.upgrade, .macports, .port, "curl"),
+            F.request(.upgrade, .homebrew, .formula, "wget"),
+            F.request(.upgrade, .macports, .port, "figlet"),
+            F.request(.upgrade, .macports, .port, "bzip2", options: InstallOptions(extraArgs: ["-s"])),
+        ]
+        let plan = ActionPlanner.make(requests, engines: F.engines, order: F.order)
+        #expect(plan.problems.isEmpty)
+        #expect(Self.shapes(plan) == [
+            ["homebrew", "formula", F.brewPath, "upgrade", "wget"],
+            ["macports", "port", F.portPath, "-N", "selfupdate"],
+            ["macports", "port", F.portPath, "-N", "upgrade", "curl", "figlet"],
+            ["macports", "port", F.portPath, "-N", "upgrade", "-s", "bzip2"],
+        ])
+        let refresh = plan.steps[1]
+        #expect(refresh.title == "MacPorts: refresh the port catalogue")
+        #expect(refresh.operation == .upgrade)
+        #expect(RunRouting.route(for: refresh) == .helper)
+        #expect(refresh.gateGroup == "macports-selfupdate")
+        #expect(!refresh.requiresAllEarlier)
+        // Every MacPorts upgrade waits on the refresh's group; Homebrew's step waits on nothing.
+        #expect(plan.steps[2...].allSatisfy { $0.requiresAllEarlier && $0.gateGroup == "macports-selfupdate" })
+        #expect(plan.steps[0].gateGroup == nil)
+        #expect(!plan.steps[0].requiresAllEarlier)
+        #expect(plan.reason == "BrewxPort needs an administrator password to update these packages.")
+    }
+
+    @Test func noSelfupdateWithoutMacportsUpgrades() {
+        let requests = [
+            F.request(.install, .macports, .port, "figlet"),
+            F.request(.remove, .macports, .port, "curl"),
+            F.request(.upgrade, .homebrew, .formula, "wget"),
+            F.request(.upgrade, .homebrew, .cask, "blackhole-2ch"),
+            F.request(.upgrade, .nanobrew, .formula, "ripgrep"),
+            F.request(.upgrade, .mas, .app, "497799835"),
+        ]
+        let plan = ActionPlanner.make(requests, engines: F.engines, order: F.order)
+        #expect(plan.problems.isEmpty)
+        #expect(plan.steps.count == 6)
+        #expect(!plan.steps.contains { $0.spec.arguments.contains("selfupdate") })
+        #expect(plan.steps.allSatisfy { $0.gateGroup == nil && !$0.requiresAllEarlier })
+
+        // A MacPorts upgrade that can't be planned leaves no refresh behind it.
+        let variants = F.request(.upgrade, .macports, .port, "curl", options: InstallOptions(variants: ["+universal"]))
+        let refused = ActionPlanner.make([variants], engines: F.engines, order: F.order)
+        #expect(refused.steps.isEmpty)
+        #expect(refused.problems == ["MacPorts: curl: Variants only apply to install"])
+    }
+
+    @Test func macportsUpgradesWithoutARefreshAreLeftOut() {
+        // An engine that can't refresh its catalogue (only a stand-in can't) never updates against a stale one.
+        let engines: [any Engine] = [F.engines[0], MoveFakeEngine(wrapping: F.engines[2])]
+        let requests = [F.request(.upgrade, .macports, .port, "curl"), F.request(.upgrade, .homebrew, .formula, "wget")]
+        let plan = ActionPlanner.make(requests, engines: engines, order: F.order)
+        #expect(Self.shapes(plan) == [["homebrew", "formula", F.brewPath, "upgrade", "wget"]])
+        #expect(plan.problems == ["MacPorts: curl: left out, because MacPorts can't refresh its port catalogue here."])
     }
 
     // MARK: nanobrew casks

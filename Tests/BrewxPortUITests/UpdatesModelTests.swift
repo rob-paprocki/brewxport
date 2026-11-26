@@ -36,6 +36,26 @@ import Testing
         return catalog
     }
 
+    @Test func reloadedWaitsForLoadAndPrune() async {
+        let gate = Gate()
+        let catalog = FakeCatalog()
+        catalog.script(.outdated, .homebrew, FakeCatalog.Script(result: .success([Self.wget]), gate: gate))
+        let (model, _) = Self.model(catalog)
+        // Nothing going: returns at once.
+        await model.reloaded()
+        model.reload()
+        // A second reload while the first loads replaces the first one's prune.
+        model.reload()
+        let waiter = Task { await model.reloaded(); return (model.list.loading, model.pruning, model.list.all.count) }
+        #expect(await waitUntil { gate.waiting == 1 })
+        gate.release()
+        // The queued reload.
+        #expect(await waitUntil { gate.waiting == 1 })
+        gate.release()
+        let (loading, pruning, rows) = await waiter.value
+        #expect(!loading && !pruning && rows == 1)
+    }
+
     @Test func ignoredRowsHiddenAndExcludedFromUpdateAll() async {
         let (model, preferences) = Self.model(Self.catalog([Self.wget, Self.jq, Self.figlet]))
         preferences.ignore([Self.wget.id])

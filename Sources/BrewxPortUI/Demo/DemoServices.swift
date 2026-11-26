@@ -8,7 +8,8 @@ public enum DemoServicesError: Error, Equatable, Sendable {
 }
 
 /// Services for `--demo`: the real engines and parsers on captured output, simulated runs, no helper, nothing kept.
-/// Nothing here launches a process, talks to launchd or XPC, or reads or writes the user's preferences.
+/// Nothing here launches a process, talks to launchd or XPC, reads or writes the user's preferences, or schedules,
+/// notifies or registers a login item.
 public enum DemoServices {
     public static let helperText = "Demo mode: BrewxPort's helper isn't used."
     public static let passwordNote = "Demo mode: type anything. Nothing is checked or kept."
@@ -57,7 +58,9 @@ public enum DemoServices {
             fileExists: { files.contains($0) }, host: host,
             hostInfo: HostInfo(appleSilicon: host == .arm64,
                                macOSMajor: ProcessInfo.processInfo.operatingSystemVersion.majorVersion),
-            cltPresent: { true }, receipts: NoReceipts(), setupProblem: nil, isDemo: true)
+            cltPresent: { true }, receipts: NoReceipts(), setupProblem: nil, isDemo: true,
+            scheduler: DemoScheduler(), notifier: DemoNotifier(), loginItem: DemoLoginItem(),
+            conditions: DemoConditions())
     }
 
     /// Where each engine's tools live in demo mode. Homebrew's prefix follows the demo architecture.

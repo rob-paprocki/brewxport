@@ -986,6 +986,45 @@ final class VerifierProbe: @unchecked Sendable {
         #expect(Steps.remove().gateGroup == nil)
     }
 
+    /// A MacPorts upgrade as the planner makes it: through the helper, waiting on the catalogue refresh's group.
+    static func gatedPort(_ arguments: [String], title: String) -> RunStep {
+        RunStep(engine: .macports, kind: .port, operation: .upgrade,
+                spec: CommandSpec(executable: URL(fileURLWithPath: Steps.portPath),
+                                  arguments: ["-N", "upgrade"] + arguments, needsRoot: true),
+                title: title, requiresAllEarlier: true, gateGroup: RunStep.macPortsCatalogueRefreshGroup)
+    }
+
+    @Test func selfupdateFailureSkipsMacportsUpgradesOnly() async {
+        // The Intel order: MacPorts first, then Homebrew and the App Store, so the steps after the failed refresh
+        // show which ones it stops.
+        let h = Harness()
+        h.helper.runResults = [.code(1)]
+        let selfupdate = CommandSpec(executable: URL(fileURLWithPath: Steps.portPath), arguments: ["-N", "selfupdate"],
+                                     needsRoot: true)
+        let refresh = RunStep.macPortsCatalogueRefresh(selfupdate)
+        let steps = [refresh, Self.gatedPort(["curl", "figlet"], title: "MacPorts: curl, figlet"),
+                     Self.gatedPort(["-s", "bzip2"], title: "MacPorts: bzip2"), Steps.formula(), Steps.mas()]
+        let events = await collect(h.session().run(steps))
+        #expect(h.helper.runCalls.map(\.arguments) == [["-N", "selfupdate"]])
+        #expect(events == [
+            .needsPassword,
+            .started(0), .output(0, .stdout("port -N selfupdate")), .finished(0, 1),
+            .started(3), .finished(3, 0),
+            .started(4), .finished(4, 0),
+            .done,
+        ])
+        #expect(h.runner.calls.contains { $0.arguments == ["upgrade", "wget"] })
+
+        // The log says why the MacPorts upgrades didn't run, once, right after the refresh's failure.
+        var log = RunLog(steps: steps)
+        for event in events { log.apply(event) }
+        let texts = log.lines.map(\.text)
+        let failed = texts.firstIndex(of: "MacPorts: refresh the port catalogue failed (exit code 1).")
+        #expect(texts.filter { $0 == "Skipped: the MacPorts catalogue refresh failed." }.count == 1)
+        #expect(failed.map { texts[$0 + 1] } == "Skipped: the MacPorts catalogue refresh failed.")
+        #expect(log.lines.first { $0.text.hasPrefix("Skipped:") }?.isError == true)
+    }
+
     @Test func checkStepPassesWhenNothingMissing() async {
         let h = Harness()
         let probe = VerifierProbe()

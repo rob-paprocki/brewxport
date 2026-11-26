@@ -76,4 +76,13 @@ public enum LaunchMode: Equatable {
         if flags.contains(demoFlag) { return .demo(DemoOptions.parse(flags)) }
         return .normal
     }
+
+    /// macOS opened BrewxPort as a login item: the launch's open-application Apple event says so in its property
+    /// data (`keyAELaunchedAsLogInItem`). The app passes `NSAppleEventManager.shared().currentAppleEvent` from
+    /// `applicationDidFinishLaunching`, the first moment it's there: in `main` and `applicationWillFinishLaunching`
+    /// it's still nil.
+    public static func isLoginItemLaunch(_ event: NSAppleEventDescriptor?) -> Bool {
+        guard let event, event.eventID == kAEOpenApplication else { return false }
+        return event.paramDescriptor(forKeyword: keyAEPropData)?.enumCodeValue == keyAELaunchedAsLogInItem
+    }
 }

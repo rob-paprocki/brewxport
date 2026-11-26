@@ -1,7 +1,7 @@
 import Foundation
 
 /// MacPorts, driven through the `port` command line. Every install, upgrade and remove needs root.
-public struct MacPortsEngine: Engine, DependentsListing {
+public struct MacPortsEngine: Engine, DependentsListing, CatalogRefreshing {
     public let id: EngineID = .macports
     public let capabilities: EngineCapabilities = [.sourceBuilds]
 
@@ -244,6 +244,12 @@ public struct MacPortsEngine: Engine, DependentsListing {
         return CommandSpec(executable: exe,
                            arguments: ["-N", verb] + options.extraArgs + names + variants,
                            needsRoot: true)
+    }
+
+    /// `port -N selfupdate`, as root (the helper allows it): refreshes the port catalogue, so `port upgrade` and
+    /// `port outdated` see the newest versions.
+    public func selfupdateCommand() throws -> CommandSpec {
+        CommandSpec(executable: try requireExecutable(), arguments: ["-N", "selfupdate"], needsRoot: true)
     }
 
     // MARK: helpers

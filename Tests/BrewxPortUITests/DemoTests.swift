@@ -124,6 +124,45 @@ import BrewxPortRun
         #expect(!services.fileExists("/opt/homebrew/bin/jq"))
         #expect(!services.fileExists("/bin/sh"))
         #expect(!services.fileExists("/opt/local/bin/ripgrep"))
+        // The background seams never reach the system: no schedule, notification or login item is registered.
+        #expect(services.scheduler is DemoScheduler)
+        #expect(services.notifier is DemoNotifier)
+        #expect(services.loginItem is DemoLoginItem)
+        #expect(services.conditions is DemoConditions)
+        // The person is at the Mac, and it's on power.
+        #expect(services.conditions.userIsActive(within: 600))
+        #expect(services.conditions.screenLocked == false)
+        #expect(services.conditions.batteryLow == false)
+        #expect(services.conditions.lowPowerMode == false)
+    }
+
+    @Test func demoSeamsOnlyRecord() async throws {
+        let services = try DemoServices.make(Self.options())
+        let scheduler = try #require(services.scheduler as? DemoScheduler)
+        var fired = false
+        scheduler.schedule(every: 60, firstAfter: 30) { fired = true }
+        #expect(scheduler.interval == 60)
+        await Task.yield()
+        #expect(fired == false)
+        scheduler.cancel()
+        #expect(scheduler.interval == nil)
+
+        let notifier = try #require(services.notifier as? DemoNotifier)
+        // Granted, so a demo Notifications switch stays on.
+        #expect(await notifier.requestPermission())
+        notifier.post(id: "check-1", title: "3 updates available", body: "Homebrew 3", target: .updates)
+        #expect(notifier.permissionRequests == 1)
+        #expect(notifier.posted == [DemoNotifier.Post(id: "check-1", title: "3 updates available",
+                                                      body: "Homebrew 3", target: .updates)])
+
+        let loginItem = try #require(services.loginItem as? DemoLoginItem)
+        #expect(loginItem.isEnabled == false)
+        #expect(loginItem.needsApproval == false)
+        try loginItem.setEnabled(true)
+        #expect(loginItem.isEnabled)
+        try loginItem.setEnabled(false)
+        #expect(loginItem.isEnabled == false)
+        #expect(loginItem.changes == [true, false])
     }
 
     @Test func demoWithoutFixturesThrows() {
@@ -393,6 +432,35 @@ import BrewxPortRun
         let installed = await Self.merged(services, .installed)
         #expect(installed.packages.first { $0.id == Self.adaURL }?.installedVersion == latest)
         #expect(installed.packages.first { $0.id == Self.figlet }?.installedVersion == "2.2.6_0")
+    }
+
+    @Test func demoUpgradeKeepsSelfupdateStep() async throws {
+        let services = try Self.services()
+        let prompter = KeepingPrompter(password: "x")
+        services.passwords.prompter = prompter
+        let executor = try #require(services.executor)
+        let figlet = Package(id: Self.figlet, displayName: "figlet", installedVersion: "2.2.5_0", latestVersion: "2.2.6_0")
+        let plan = ActionPlanner.make([ActionRequest(operation: .upgrade, package: figlet)], engines: services.engines,
+                                      order: PackageCatalog.defaultOrder(for: services.host))
+        #expect(plan.problems.isEmpty)
+        #expect(plan.steps.map(\.spec.arguments) == [["-N", "selfupdate"], ["-N", "upgrade", "figlet"]])
+        #expect(plan.steps[0].title == "MacPorts: refresh the port catalogue")
+        #expect(plan.steps.map(RunRouting.route(for:)) == [.helper, .helper])
+
+        // Like any password step: one prompt, then the refresh succeeds and the upgrade runs after it.
+        let events = await Self.collect(executor.run(plan.steps, reason: plan.reason))
+        #expect(prompter.reasons == [plan.reason])
+        let note = "(demo mode: nothing was changed on this Mac)"
+        #expect(events == [
+            .needsPassword,
+            .started(0), .output(0, .stdout("Simulated: port -N selfupdate")), .output(0, .stdout(note)),
+            .finished(0, 0),
+            .started(1), .output(1, .stdout("Simulated: port -N upgrade figlet")), .output(1, .stdout(note)),
+            .finished(1, 0),
+            .done,
+        ])
+        let after = await Self.merged(services, .outdated)
+        #expect(!after.packages.contains { $0.id == Self.figlet })
     }
 
     @Test func demoInstallAndRemoveChangeInstalled() async throws {

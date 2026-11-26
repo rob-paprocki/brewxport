@@ -70,6 +70,15 @@ public enum UpdateHiddenReason: Sendable, Equatable { case ignored, skipped }
         }
     }
 
+    /// Returns once the latest `reload()` has loaded and its skips are pruned (at once when none is going). A reload
+    /// asked for meanwhile is waited for too: it replaces the earlier prune, which then ends without pruning.
+    public func reloaded() async {
+        await list.settled()
+        while pruning, let pruneTask {
+            await pruneTask.value
+        }
+    }
+
     /// Every row that is neither ignored nor skipped, in list order.
     public func updateAllRequests() -> [ActionRequest] {
         requests(list.rows.filter { hiddenReason($0) == nil })

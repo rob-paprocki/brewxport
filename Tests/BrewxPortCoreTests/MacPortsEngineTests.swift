@@ -210,6 +210,16 @@ private func ref(_ name: String, engine: EngineID = .macports, kind: PackageKind
         #expect(try e.command(for: .remove, [ref("a")], options: InstallOptions()).arguments == ["-N", "uninstall", "a"])
     }
 
+    @Test func selfupdateRunsAsRootWithoutPortNames() throws {
+        let (e, runner) = engine()
+        #expect(try e.selfupdateCommand()
+                == CommandSpec(executable: port, arguments: ["-N", "selfupdate"], needsRoot: true))
+        // Built, never run here: the run sends it through the helper.
+        #expect(runner.calls.isEmpty)
+        let missing = MacPortsEngine(runner: FakeRunner([:]), executable: nil)
+        #expect(throws: EngineError.self) { try missing.selfupdateCommand() }
+    }
+
     @Test func variantsAreSeparateArgs() throws {
         let (e, _) = engine()
         let spec = try e.command(for: .install, [ref("gtk3")], options: InstallOptions(variants: ["+universal", "-x11"]))

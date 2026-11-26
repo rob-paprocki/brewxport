@@ -129,6 +129,13 @@ public protocol TapListing: Sendable {
     func listTaps() async throws -> [String]
 }
 
+/// An engine whose package catalogue can be refreshed by a command (MacPorts' `port selfupdate`). Demo mode's wrapper
+/// forwards it.
+public protocol CatalogRefreshing: Sendable {
+    /// The command that refreshes the catalogue. Throws `EngineError` when it can't be built.
+    func selfupdateCommand() throws -> CommandSpec
+}
+
 /// An engine that can name the installed packages that directly depend on one package (Homebrew, MacPorts, nanobrew).
 /// Direct dependents only, named as the engine lists them; callers walk further themselves. Throws when the engine
 /// can't answer, so a caller never mistakes "couldn't ask" for "nobody depends on it". Demo mode's wrapper forwards it.

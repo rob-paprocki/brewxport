@@ -10,10 +10,13 @@ extension AppDelegate {
     var demo: DemoOptions? { DemoLaunch.isActive ? DemoLaunch.options : nil }
 
     /// A demo started from a script must still be a regular app with a Dock icon, so it can be driven and
-    /// photographed. `--appearance` forces light or dark.
+    /// photographed; `showsDockIcon` keeps it one after its window closes. `--appearance` forces light or dark.
+    /// The demo's settings start fresh every launch, so it shows the one-time sheet each time, except in a
+    /// `--snapshot` run: the pictures are of the pages.
     func demoWillFinishLaunching() {
         guard let demo else { return }
         model = DemoLaunch.model
+        if demo.snapshot != nil { DemoLaunch.model?.background.settings.introShown = true }
         NSApp.setActivationPolicy(.regular)
         switch demo.appearance {
         case .light?: NSApp.appearance = NSAppearance(named: .aqua)
@@ -57,10 +60,12 @@ extension AppDelegate {
         }
     }
 
-    /// The scene's window once it's on screen, or nil after 10 s.
+    /// The main window once it's on screen, or nil after 10 s. Matched by its identifier, so a Settings window that
+    /// happens to be open is never the one photographed.
     private func sceneWindow() async -> NSWindow? {
         for _ in 0..<200 {
-            if let window = NSApp.windows.first(where: { $0.isVisible && $0.canBecomeMain }) { return window }
+            let main = NSApp.windows.first { $0.isVisible && MainWindowScene.matches($0.identifier?.rawValue) }
+            if let main { return main }
             try? await Task.sleep(for: .milliseconds(50))
         }
         return nil

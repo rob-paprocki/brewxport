@@ -35,6 +35,8 @@ public final class RunController: PasswordPrompting {
     public private(set) var passwordRejected = false
     /// Why the last run couldn't make admin changes for a reason other than the password, or nil.
     public private(set) var privilegeProblem: String?
+    /// The last run was cancelled: its password prompt, or the run itself. Cleared when a run starts.
+    public private(set) var cancelled = false
 
     public var showingPasswordSheet = false {
         didSet { if oldValue, !showingPasswordSheet { onPasswordSheetClosed?() } }
@@ -45,16 +47,47 @@ public final class RunController: PasswordPrompting {
     /// The open prompt follows a rejected password in the same run, so the sheet says to try again. Set by each
     /// prompt, so a new run's first prompt never shows it.
     public private(set) var passwordRetry = false
+    /// Set just before starting a run nobody clicked for (the automatic password run), and taken by the next
+    /// `start` (whether or not it starts): that run's prompts need the focus (`promptNeedsFocus`).
+    @ObservationIgnored public var nextRunPromptNeedsFocus = false
+    /// The current run's password sheet only shows while BrewxPort is the active app with its main window key
+    /// (`canPresentPasswordSheet`). Otherwise the prompt waits (`passwordWaitsForFocus`), and so does the run, until
+    /// `presentWaitingPrompt()` finds the focus there: a sheet on a window without the keyboard could take a password
+    /// typed for another app. Runs the person started show their sheet at once, as always.
+    public private(set) var promptNeedsFocus = false
+    /// A password was asked for, but its sheet waits for BrewxPort to be active with its main window key.
+    public private(set) var passwordWaitsForFocus = false
+    /// The current run has the password it last asked for. False from the start of a run until a password is handed
+    /// over, and again while it asks once more (after a wrong one): until then its prompt is unanswered, whether it's
+    /// still to come, waiting for the focus or up.
+    public private(set) var hasPassword = false
+    /// True while BrewxPort is the active app with its main window key. The app sets it; nil counts as false.
+    @ObservationIgnored public var canPresentPasswordSheet: (@MainActor () -> Bool)?
+    /// Called when a prompt starts waiting for the focus. Background updates post their "need your password"
+    /// notification from it.
+    @ObservationIgnored public var onPromptWaitingForFocus: (@MainActor () -> Void)?
+
+    /// The app calls it when BrewxPort becomes active and when a window becomes key: a prompt waiting for the focus
+    /// shows its sheet once it's there.
+    public func presentWaitingPrompt() {
+        guard passwordWaitsForFocus, canPresentPasswordSheet?() == true else { return }
+        passwordWaitsForFocus = false
+        showingPasswordSheet = true
+    }
 
     /// Why something the user asked for won't run: the plan's problems and the preflight's notes. The panel shows
     /// these without the log being opened.
     public private(set) var problems: [String] = []
 
-    /// The panel's header: "Running", "Nothing ran" when the plan and preflight left no step, "Finished with
-    /// problems" when a step failed or was skipped or something is listed in `problems` (a step the preflight left
-    /// out, a package still outdated after the run), else "Finished".
+    /// What the panel and the menu bar menu say while a prompt waits for the focus (`passwordWaitsForFocus`).
+    public static let waitingForPassword = "Waiting for your password"
+
+    /// The panel's header: "Running" ("Waiting for your password" while its prompt waits for the focus), "Nothing
+    /// ran" when the plan and preflight left no step, "Finished with problems" when a step failed or was skipped or
+    /// something is listed in `problems` (a step the preflight left out, a package still outdated after the run),
+    /// else "Finished".
     public var headline: String {
-        if isRunning { return "Running" }
+        if isRunning { return passwordWaitsForFocus ? Self.waitingForPassword : "Running" }
         if steps.isEmpty { return "Nothing ran" }
         let stepWentWrong = steps.contains {
             switch $0.state {
@@ -105,6 +138,13 @@ public final class RunController: PasswordPrompting {
         panelVisible = false
     }
 
+    /// Shows the panel again with the last run's steps and log (the notification about an automatic run was
+    /// clicked). Nothing before the first run.
+    public func showPanel() {
+        guard generation > 0 else { return }
+        panelVisible = true
+    }
+
     // MARK: Run
 
     /// False (and nothing starts) when a run is already going, there's no executor, or no step is left after the
@@ -118,13 +158,18 @@ public final class RunController: PasswordPrompting {
     public func start(_ plan: ActionPlan, helperUnavailableReason: String? = nil,
                       verify: @escaping InstalledVerifier = RunSession.failClosed,
                       ensureHelper: @escaping @MainActor () async -> HelperState?) -> Bool {
+        let needsFocus = nextRunPromptNeedsFocus
+        nextRunPromptNeedsFocus = false
         guard !isRunning, let executor else { return false }
         // Before any await, so a second click can't start a second run.
         isRunning = true
+        promptNeedsFocus = needsFocus
+        hasPassword = false
         panelVisible = true
         cancelRequested = false
         passwordRejected = false
         privilegeProblem = nil
+        cancelled = false
         generation += 1
         let run = generation
 
@@ -205,6 +250,7 @@ public final class RunController: PasswordPrompting {
         case .finished(let index, let code):
             setState(index, code == 0 ? .succeeded : .failed(code))
         case .cancelled:
+            cancelled = true
             for index in steps.indices {
                 switch steps[index].state {
                 case .running: steps[index].state = .stopped
@@ -245,12 +291,18 @@ public final class RunController: PasswordPrompting {
         finishPassword(nil)  // never two prompts at once
         promptToken += 1
         let token = promptToken
+        hasPassword = false
         return await withTaskCancellationHandler {
             await withCheckedContinuation { continuation in
                 pendingPassword = (token, continuation)
                 passwordReason = reason
                 passwordRetry = previousAttemptFailed
-                showingPasswordSheet = true
+                if promptNeedsFocus, canPresentPasswordSheet?() != true {
+                    passwordWaitsForFocus = true
+                    onPromptWaitingForFocus?()
+                } else {
+                    showingPasswordSheet = true
+                }
             }
         } onCancel: {
             Task { @MainActor in self.endPrompt(token: token) }
@@ -260,20 +312,23 @@ public final class RunController: PasswordPrompting {
     /// Ends the prompt with `secret` (nil means cancelled). A secret nobody is waiting for is wiped.
     public func finishPassword(_ secret: SecretBuffer?) {
         showingPasswordSheet = false
+        passwordWaitsForFocus = false
         guard let pending = pendingPassword else {
             secret?.wipe()
             return
         }
         pendingPassword = nil
+        hasPassword = secret != nil
         pending.continuation.resume(returning: secret)
     }
 
     /// The password sheet finished going away (its `onDismiss`): Esc, the close button or anything else ends the
     /// prompt as cancelled, so the run never waits on a sheet that's gone. A no-op once the secret was handed over,
-    /// and while the sheet is meant to be showing: after a wrong password the retry's sheet is asked for before the
-    /// first one has finished going away, and that late dismissal must not cancel the retry.
+    /// and while the next prompt is meant to be showing or waits for the focus to show: after a wrong password the
+    /// retry is asked for before the first sheet has finished going away, and that late dismissal must not cancel
+    /// the retry.
     public func sheetDismissed() {
-        guard !showingPasswordSheet else { return }
+        guard !showingPasswordSheet, !passwordWaitsForFocus else { return }
         finishPassword(nil)
     }
 

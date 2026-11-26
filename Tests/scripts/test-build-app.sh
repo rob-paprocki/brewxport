@@ -21,13 +21,19 @@ bash -n "$0" && pass "bash -n Tests/scripts/test-build-app.sh" || fail "bash -n 
 bash -n "$ROOT/scripts/make-dmg.sh" && pass "bash -n scripts/make-dmg.sh" || fail "bash -n scripts/make-dmg.sh"
 bash -n "$ROOT/scripts/demo.sh" && pass "bash -n scripts/demo.sh" || fail "bash -n scripts/demo.sh"
 
-# Demo mode builds none of the live services: no forbidden name on any non-comment line of Sources/BrewxPortUI/Demo.
-forbidden="$(grep -EnR 'ProcessRunner|RunSession\(|HelperRegistration|LiveDaemonService|NSXPCConnection|SMAppService' \
+# Demo mode builds none of the live services, and touches none of the OS facilities only the live background seams
+# use (notifications, the scheduler, screen-lock events, power sources): no forbidden name on any non-comment line of
+# Sources/BrewxPortUI/Demo.
+live_names='ProcessRunner|RunSession\(|HelperRegistration|LiveDaemonService|NSXPCConnection|SMAppService'
+live_names="$live_names|UNUserNotificationCenter|NSBackgroundActivityScheduler|DistributedNotificationCenter"
+# The power-source calls by name (reading them, the providing source, change notices), never a bare prefix.
+live_names="$live_names|IOPSCopyPowerSources|IOPSGetProvidingPowerSourceType|IOPSNotifyPowerSource"
+forbidden="$(grep -EnR "$live_names" \
     "$ROOT/Sources/BrewxPortUI/Demo" | grep -Ev '^[^:]+:[0-9]+:[[:space:]]*//' || true)"
 [ -z "$forbidden" ] && pass "Sources/BrewxPortUI/Demo builds no live services" ||
     fail "a live service is named in Sources/BrewxPortUI/Demo: $forbidden"
 # The app's demo launch (DemoLaunch, DemoApp, the delegate's demo paths) doesn't either, nor the live engines.
-forbidden="$(grep -EnH 'ProcessRunner|RunSession\(|HelperRegistration|LiveDaemonService|NSXPCConnection|SMAppService|LiveServices|Engines\.make' \
+forbidden="$(grep -EnH "$live_names|LiveServices|Engines\.make" \
     "$ROOT/Sources/BrewxPort/DemoApp.swift" "$ROOT/Sources/BrewxPort/AppDelegate+Demo.swift" |
     grep -Ev '^[^:]+:[0-9]+:[[:space:]]*//' || true)"
 [ -z "$forbidden" ] && pass "the app's demo launch builds no live services" ||

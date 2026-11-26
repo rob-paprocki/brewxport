@@ -4,6 +4,9 @@ import Observation
 import BrewxPortCore
 import BrewxPortRun
 
+/// Who started a run: the person (a click, a menu item, a file), or BrewxPort's own background updates.
+public enum RunOrigin: Sendable { case user, background }
+
 /// The window's state: the sidebar, the engines, the helper, the run, the inspector, and the one entry point for
 /// every row action. Views bind to it and call its methods; they never build a step or decide what's allowed.
 @MainActor @Observable public final class BrewxPortAppModel {
@@ -58,9 +61,66 @@ import BrewxPortRun
     /// Shown above the password field. Demo mode says the password isn't checked or kept.
     public var passwordNote: String? { services.isDemo ? DemoServices.passwordNote : nil }
     public var windowTitle: String { services.isDemo ? "BrewxPort (demo)" : "BrewxPort" }
-    /// Closing the window quits BrewxPort, except during a run: then the window goes and the run carries on, rather
-    /// than the quit confirmation's "Keep running" leaving BrewxPort without a window.
-    public var quitsWhenLastWindowCloses: Bool { !run.isRunning }
+    /// BrewxPort stays in the menu bar without a window: background checks are on, or this is the demo, whose menu
+    /// bar always shows (whatever its interval says).
+    public var keepsRunningInMenuBar: Bool { services.isDemo || background.settings.checksOn }
+    /// Closing the window leaves BrewxPort running while it stays in the menu bar (`keepsRunningInMenuBar`) and
+    /// during a run (the window goes and the run carries on). Otherwise closing the window quits.
+    public var quitsWhenLastWindowCloses: Bool { !run.isRunning && !keepsRunningInMenuBar }
+    /// The main window is open. Its content (`RootView`) sets it as it appears and goes; nothing else does. The
+    /// one-time sheet goes with the window, unread, and comes back with it.
+    public internal(set) var mainWindowShowing = false {
+        didSet { if !mainWindowShowing, showingBackgroundIntro { showingBackgroundIntro = false } }
+    }
+    /// The Settings window is open. Its content (`SettingsView`) sets it as it appears and goes.
+    public internal(set) var settingsWindowShowing = false
+    /// A launch as a login item shows no window while BrewxPort stays in the menu bar (`keepsRunningInMenuBar`).
+    /// With checks off there's no menu bar and nothing else would show, so the window opens as at any launch.
+    public var opensWindowAtLoginLaunch: Bool { !keepsRunningInMenuBar }
+    /// The Dock icon shows while one of BrewxPort's windows is open (the main window or Settings), and always with
+    /// background checks off (BrewxPort then quits with its window, or runs on only for a run). The demo always keeps
+    /// it: a scripted demo has to stay a regular app to be driven and photographed. The app observes this and sets
+    /// the activation policy from it.
+    public var showsDockIcon: Bool {
+        services.isDemo || mainWindowShowing || settingsWindowShowing || !background.settings.checksOn
+    }
+    /// Launch has settled (the app calls this a moment after it finished launching) and AppKit says whether the main
+    /// window is on screen. A window on screen counts as showing, whatever its content has said so far. After a login
+    /// launch, one that isn't counts as gone: the launch closed it before its content appeared, and the content can
+    /// still report it as showing afterwards. After any other launch the content's word stands (a window restored
+    /// minimized isn't on screen, yet it's open). Returns `showsDockIcon`, for the app to apply whether or not it
+    /// changed: a launch that never showed a window never changes it, so no window event would set the Dock icon.
+    @discardableResult
+    public func launchSettled(mainWindowOnScreen: Bool, afterLoginLaunch: Bool) -> Bool {
+        if mainWindowOnScreen {
+            if !mainWindowShowing { mainWindowShowing = true }
+        } else if afterLoginLaunch, mainWindowShowing {
+            mainWindowShowing = false
+        }
+        return showsDockIcon
+    }
+    /// The Quit menu item. Quitting stops the background checks, so it says so while they're on.
+    public var quitTitle: String {
+        background.settings.checksOn ? "Quit BrewxPort (stops update checks)" : "Quit BrewxPort"
+    }
+    /// Who started the current run, or the last one. Set when a run starts, and kept after it ends so the run-ended
+    /// observers can read it.
+    public private(set) var lastRunOrigin: RunOrigin = .user
+    /// The window comes back when a run the person started ends (they closed it during the run), never after a
+    /// background run.
+    public var reopensWindowAfterRun: Bool { lastRunOrigin == .user }
+    /// Background checks and automatic updates, with their settings. Made at the end of `init`.
+    @ObservationIgnored public private(set) var background: BackgroundUpdater!
+    /// Ends the updater's own tasks (a check, a run's end, a poll) when the model goes away: they can outlive it.
+    @ObservationIgnored private let updaterStopper = UpdaterStopper()
+    /// Brings the main window back, or forward, in front of other apps: only for something the person clicked (the
+    /// menu bar's Open BrewxPort, Show and Update, a notification). The app sets it. A password run nobody clicked
+    /// for uses `presentForPassword` instead.
+    @ObservationIgnored public var openMainWindow: (@MainActor () -> Void)?
+    /// Puts the window up for a password run nobody clicked for (Update everything's password part): true only once
+    /// BrewxPort is the active app with the main window key, so the sheet gets the keyboard. It never puts the window
+    /// over another app the way `openMainWindow` does. The app sets it; nil counts as false, so nothing shows.
+    @ObservationIgnored public var presentForPassword: (@MainActor () async -> Bool)?
 
     /// The lists `package(for:)` looks in, in order: Updates, then Installed, then Discover.
     @ObservationIgnored var packageSources: [PackageListState] = []
@@ -73,6 +133,9 @@ import BrewxPortRun
     }
     @ObservationIgnored private var started = false
     @ObservationIgnored private var setupDecided = false
+    /// The setup decision made at launch is in (`setup.start()` returned): its sheet is up by now if it shows.
+    /// Observed, so the one-time sheet can follow it.
+    private var setupSettled = false
     @ObservationIgnored private var runEndedObservers: [@MainActor () -> Void] = []
     @ObservationIgnored private var enginesCheckedObservers: [@MainActor ([EngineID: EngineStatus]) -> Void] = []
     @ObservationIgnored private var helperFlight: (kind: HelperCall, task: Task<HelperState?, Never>)?
@@ -80,7 +143,10 @@ import BrewxPortRun
     private enum HelperCall { case refresh, ensure, reinstall }
 
     /// `notifications`: where "the app became active" is posted; tests pass their own center.
-    public init(services: Services, notifications: NotificationCenter = .default) {
+    /// `testIntervalOverride`: the hidden test check interval. Only the live app passes one
+    /// (`BackgroundSettings.testIntervalOverride()`); demo mode and tests never read the real preferences.
+    public init(services: Services, notifications: NotificationCenter = .default,
+                testIntervalOverride: TimeInterval? = nil) {
         self.services = services
         self.notifications = notifications
         run = RunController(executor: services.executor, isAdministrator: services.isAdministrator)
@@ -131,10 +197,15 @@ import BrewxPortRun
         setup.connect(statuses: { [weak self] in self?.engineStatuses ?? [:] },
                       runSetup: { [weak self] in self?.setUpEngine($0) ?? false },
                       planProblem: { [weak self] in self?.lastSetupPlanProblem })
+        background = BackgroundUpdater(
+            model: self,
+            settings: BackgroundSettings(store: services.store, testIntervalOverride: testIntervalOverride),
+            services: services)
+        updaterStopper.updater = background
     }
 
     /// Called after every run ends, after the lists' reload has started, in the order added. Bundles marks its
-    /// preview stale; the app reopens the window if it was closed during the run.
+    /// preview stale; the app reopens the window if it was closed during the run (`reopensWindowAfterRun`).
     public func addRunEndedObserver(_ observer: @escaping @MainActor () -> Void) {
         runEndedObservers.append(observer)
     }
@@ -144,9 +215,11 @@ import BrewxPortRun
         enginesCheckedObservers.append(observer)
     }
 
-    /// Once, when the window appears: detect engines, make sure the helper is registered (live only), load lists.
-    /// A standard account only reads the helper's state: registering asks for an administrator, and nothing it can
-    /// run uses the helper.
+    /// Once, at launch, whether or not a window shows: detect engines, make sure the helper is registered (live
+    /// only), load lists, schedule the background checks (one that fell due while BrewxPort wasn't running reads this
+    /// load), and read whether BrewxPort is a login item. The app delegate calls it; the window's own call when it
+    /// appears does nothing. A standard account only reads the helper's state: registering asks for an administrator,
+    /// and nothing it can run uses the helper.
     public func start() {
         guard !started else { return }
         started = true
@@ -156,7 +229,10 @@ import BrewxPortRun
             Task { _ = await self.helper(call) }
         }
         refreshLists()
+        background.scheduleFromSettings(afterLaunchLoad: true)
+        background.readLoginItem()
         openPendingFile()
+        watchBackgroundIntro()
     }
 
     // MARK: Engines
@@ -175,6 +251,7 @@ import BrewxPortRun
             if !setupDecided {
                 setupDecided = true
                 await setup.start()
+                setupSettled = true
             } else {
                 setup.enginesRechecked()
             }
@@ -193,9 +270,11 @@ import BrewxPortRun
 
     /// While the setup sheet waits for the helper's approval in System Settings, nothing else would notice it
     /// happen, so read the state (read-only, never registering) every couple of seconds until the stage moves on.
+    /// A file the Finder opened while the sheet was up opens once it's gone.
     private func setupStageChanged(_ stage: SetupModel.Stage) {
         approvalPoll?.cancel()
         approvalPoll = nil
+        openPendingFile()
         guard stage == .needsHelperApproval, services.helper != nil else { return }
         approvalPoll = pollHelper { $0.setup.stage == .needsHelperApproval }
     }
@@ -380,6 +459,22 @@ import BrewxPortRun
     public func updateAll(engine: EngineID) {
         updateRefs(updates.updateAllRequests(for: engine))
     }
+
+    /// The menu bar menu's "<Manager> Update" (`engine`) and Update All (nil): the same path as the section's
+    /// "Update N" and Update all, from whatever page the window was last on (Bundles' own Update does nothing, so
+    /// the window shows Updates first), as the person's own run. When any of the updates needs the password, the
+    /// window opens before the run starts: the password sheet is in it. Does nothing when Update all couldn't run
+    /// now (`canMenuUpdate`).
+    public func menuUpdate(engine: EngineID?) {
+        let requests = engine.map(updates.updateAllRequests(for:)) ?? updates.updateAllRequests()
+        guard canMenuUpdate, !requests.isEmpty else { return }
+        sidebar = .updates
+        if !requests.allSatisfy(background.isPasswordFree) { openMainWindow?() }
+        if let engine { updateAll(engine: engine) } else { updateAll() }
+    }
+
+    /// The menu bar's Update items are on with Update all, and off while anything modal is up.
+    public var canMenuUpdate: Bool { canUpdateAll && !modalUp }
 
     /// The toolbar's "Update N": the checked rows on screen that aren't ignored or skipped.
     public var canUpdateChecked: Bool {
@@ -636,12 +731,17 @@ import BrewxPortRun
     var busy: Bool { run.isRunning || preparing }
 
     /// Something modal is up: the password sheet, the uninstall sheet, the open panel, the export review sheet,
-    /// the save panel or the move sheet. The menu's Open Bundle, exports and package items are off meanwhile, and a
+    /// the save panel, the move sheet, the setup sheet or the one-time background sheet. The menu's Open Bundle,
+    /// exports and package items are off meanwhile, no run starts (the menu bar's and automatic ones included), and a
     /// file the Finder opens waits until it's gone (`openFromFinder`). The move sheet's own Move button doesn't check
-    /// this (`MoveModel.confirm`), and the sheet is gone once the move runs.
-    public var modalUp: Bool {
+    /// this (`MoveModel.confirm`), and the sheet is gone once the move runs; nor does the setup sheet's own Set up
+    /// button (`canSetUpEngines`).
+    public var modalUp: Bool { modalUpBesidesSetup || setup.sheetShown }
+
+    /// `modalUp`, less the setup sheet.
+    private var modalUpBesidesSetup: Bool {
         run.showingPasswordSheet || confirmingRemoval || showingOpenPanel || exportReview != nil
-            || exportToSave != nil || move.sheetShown
+            || exportToSave != nil || move.sheetShown || showingBackgroundIntro
     }
 
     /// True while the uninstall sheet is up (checking or showing its plan). The menu's Find, Refresh and package items
@@ -661,24 +761,29 @@ import BrewxPortRun
         })
     }
 
-    /// The one way a run starts from a page: nanobrew cask installs get their routes looked up first (`preparing`),
-    /// then the plan runs. Does nothing when this copy can't run anything, while a run or a lookup is going, or while
-    /// anything modal is up.
-    public func installRequests(_ requests: [ActionRequest]) {
-        guard canRun, !busy, !modalUp, !requests.isEmpty else { return }
+    /// The one way a run starts from a page or from background updates: nanobrew cask installs get their routes
+    /// looked up first (`preparing`), then the plan runs. Does nothing when this copy can't run anything, while a run
+    /// or a lookup is going, or while anything modal is up.
+    ///
+    /// True when a run started, or when the cask lookup it waits for started (the run follows unless another one
+    /// started meanwhile). A `.user` request that's left with nothing it may run still shows the panel saying why,
+    /// and returns false. A `.background` one returns false without touching the panel or the last run's log.
+    @discardableResult
+    public func installRequests(_ requests: [ActionRequest], origin: RunOrigin = .user) -> Bool {
+        guard canRun, !busy, !modalUp, !requests.isEmpty else { return false }
         let casks = requests.filter { $0.operation == .install }.map(\.package.id)
             .filter { $0.engine == .nanobrew && $0.kind == .cask }
         guard !casks.isEmpty else {
-            startRun(requests, caskRoutes: [:])
-            return
+            return startRun(requests, caskRoutes: [:], origin: origin)
         }
         preparing = true
         Task {
             let routes = await caskRoutes(for: casks)
             preparing = false
             guard !run.isRunning else { return }
-            startRun(requests, caskRoutes: routes)
+            startRun(requests, caskRoutes: routes, origin: origin)
         }
+        return true
     }
 
     /// Where each nanobrew cask install goes. Homebrew's own cask info when Homebrew is there (it's what would
@@ -700,17 +805,26 @@ import BrewxPortRun
         }
     }
 
-    private func startRun(_ requests: [ActionRequest], caskRoutes: [PackageRef: CaskRoute]) {
+    /// A background run that the account check would leave empty (a standard account and only steps that need an
+    /// administrator) never reaches the run controller, whose refusal would show the panel and replace the last log.
+    @discardableResult
+    private func startRun(_ requests: [ActionRequest], caskRoutes: [PackageRef: CaskRoute], origin: RunOrigin) -> Bool {
         let plan = ActionPlanner.make(requests, engines: services.engines, order: engineOrder, caskRoutes: caskRoutes)
+        if origin == .background,
+           RunPreflight.filter(plan.steps, helperState: .enabled, isAdministrator: services.isAdministrator()).steps
+               .isEmpty {
+            return false
+        }
         requestedUpgrades = requests.filter { $0.operation == .upgrade }
             .map { (ref: $0.package.id, name: $0.package.displayName) }
-        start(plan)
+        return start(plan, origin: origin)
     }
 
     // MARK: Engine setup
 
-    /// False in demo mode (nothing is set up there), while a run or a lookup is going, or while a dialog is up.
-    public var canSetUpEngines: Bool { canRun && !services.isDemo && !busy && !modalUp }
+    /// False in demo mode (nothing is set up there), while a run or a lookup is going, or while a dialog is up (not the
+    /// setup sheet: its own Set up button comes here).
+    public var canSetUpEngines: Bool { canRun && !services.isDemo && !busy && !modalUpBesidesSetup }
 
     /// Plans "set up this engine" and runs it through the same run controller as every other change. Once the run
     /// ends, however it ends, the engines are detected again, so a new one shows up without "Check again".
@@ -734,16 +848,66 @@ import BrewxPortRun
     /// The first problem of the last setup plan that had nothing to run; the setup screen words it.
     @ObservationIgnored private(set) var lastSetupPlanProblem: String?
 
-    /// True when a run started. `verify` answers the plan's check steps (only a move has any).
+    /// True when a run started; only then does `origin` become `lastRunOrigin`. Every run goes through here, so a
+    /// user's setup, uninstall or move after a background run brings the window back again. `verify` answers the
+    /// plan's check steps (only a move has any).
     @discardableResult
-    private func start(_ plan: ActionPlan, verify: @escaping InstalledVerifier = RunSession.failClosed) -> Bool {
+    private func start(_ plan: ActionPlan, origin: RunOrigin = .user,
+                       verify: @escaping InstalledVerifier = RunSession.failClosed) -> Bool {
+        let didStart: Bool
         if services.isDemo {
-            return run.start(plan, verify: verify) { .enabled }
+            didStart = run.start(plan, verify: verify) { .enabled }
         } else if services.helper == nil {
-            return run.start(plan, helperUnavailableReason: services.setupProblem, verify: verify) { nil }
+            didStart = run.start(plan, helperUnavailableReason: services.setupProblem, verify: verify) { nil }
         } else {
-            return run.start(plan, verify: verify) { [weak self] in await self?.helper(.ensure) }
+            didStart = run.start(plan, verify: verify) { [weak self] in await self?.helper(.ensure) }
         }
+        // The run ends later, from a task, so its end always sees this.
+        if didStart { lastRunOrigin = origin }
+        return didStart
+    }
+
+    // MARK: Refresh MacPorts
+
+    /// "Refresh MacPorts…" shows only once MacPorts was found and works.
+    public var showsRefreshMacPorts: Bool {
+        if case .present? = engineStatuses[.macports] { return true }
+        return false
+    }
+
+    /// Off while a run or a lookup is going, or while anything modal is up.
+    public var canRefreshMacPorts: Bool { showsRefreshMacPorts && canRun && !busy && !modalUp }
+
+    static let refreshMacPortsReason = "BrewxPort needs an administrator password to refresh MacPorts' port catalogue."
+
+    /// "Refresh MacPorts…": a run of MacPorts' catalogue refresh alone (`port -N selfupdate`, through the helper, so
+    /// it asks for the password like any MacPorts change). Its end reloads the lists like every run's, so Updates then
+    /// shows what MacPorts' own list knows. False when nothing started. When MacPorts can't build the command (it went
+    /// missing since the engine check), the run panel says "Nothing ran" and why.
+    @discardableResult
+    public func refreshMacPortsCatalogue() -> Bool {
+        guard canRefreshMacPorts else { return false }
+        requestedUpgrades = []
+        let plan: ActionPlan
+        do {
+            guard let refreshing = services.engines.first(where: { $0.id == .macports }) as? any CatalogRefreshing else {
+                throw EngineError(engine: .macports, message: "MacPorts can't refresh its port catalogue here")
+            }
+            plan = ActionPlan(steps: [RunStep.macPortsCatalogueRefresh(try refreshing.selfupdateCommand())],
+                              problems: [], notes: [], reason: Self.refreshMacPortsReason)
+        } catch {
+            let why: String
+            if let error = error as? EngineError {
+                why = EngineErrorText.line(error)
+            } else {
+                // Not an engine's own message, so not one to show; the log keeps it.
+                ModelLog.error("MacPorts refresh couldn't be prepared: \(String(describing: error))")
+                why = "MacPorts couldn't prepare the command"
+            }
+            plan = ActionPlan(steps: [], problems: ["The port catalogue wasn't refreshed: \(why)"], notes: [],
+                              reason: Self.refreshMacPortsReason)
+        }
+        return start(plan, origin: .user)
     }
 
     // MARK: Uninstall
@@ -907,8 +1071,8 @@ import BrewxPortRun
 
     /// The open panel (`fileImporter`) is up.
     public var showingOpenPanel = false { didSet { openPendingFile() } }
-    /// A file the Finder opened while something modal was up, or before the window started: opened once neither
-    /// holds. The latest one wins.
+    /// A file the Finder opened while something modal was up, or before `start()` ran at launch: opened once
+    /// neither holds. The latest one wins.
     public private(set) var pendingOpenURL: URL?
     /// An export is being gathered (the engines' installed lists). The File menu's exports are off meanwhile.
     public private(set) var exporting = false
@@ -1017,20 +1181,83 @@ import BrewxPortRun
         bundles.close()
     }
 
-    /// A file from the Finder (double-click, the Dock icon). Opened now when the window has started and nothing
-    /// modal is up; otherwise held in `pendingOpenURL` and opened when that clears, so nothing is swapped behind a
-    /// confirmation or the password sheet.
+    /// A file from the Finder (double-click, the Dock icon). Opened now when BrewxPort has started (`start()`, at
+    /// launch) and nothing modal is up; otherwise held in `pendingOpenURL` and opened when that clears, so nothing
+    /// is swapped behind a confirmation or the password sheet.
     public func openFromFinder(_ url: URL) {
         pendingOpenURL = url
         openPendingFile()
     }
 
-    /// Opens `pendingOpenURL` once the window has started and nothing modal is up.
+    /// Opens `pendingOpenURL` once BrewxPort has started (`start()`) and nothing modal is up.
     func openPendingFile() {
         guard started, !modalUp, let url = pendingOpenURL else { return }
         pendingOpenURL = nil
         openBundle(url)
     }
+
+    // MARK: The one-time background sheet
+
+    /// "BrewxPort now checks for updates" is up on the window: shown once (`BackgroundSettings.introShown`), to new
+    /// installs and upgraders alike, when `backgroundIntroDue`. It counts as modal while it's up.
+    public private(set) var showingBackgroundIntro = false
+
+    /// The one-time sheet can show now. It hasn't been shown yet, and checks are on (with Never there's nothing to
+    /// announce). The window is open: a login launch has none, and the sheet waits for it rather than holding
+    /// anything back unseen. The setup decision made at launch is in and its sheet is gone, with no setup waiting for
+    /// the helper. Nothing modal is up, and no run is going, since its password sheet could come at any moment.
+    var backgroundIntroDue: Bool {
+        !background.settings.introShown && background.settings.checksOn && mainWindowShowing && setupSettled
+            && setup.stage == .hidden && !setup.waitingForHelper && !modalUp && !busy && !quitting
+    }
+
+    /// Shows the one-time sheet as soon as it's due, reading `backgroundIntroDue` again whenever anything it depends
+    /// on changes, so no sheet or run closing can be missed. Started by `start()`; stops once the sheet has been
+    /// closed.
+    private func watchBackgroundIntro() {
+        guard !background.settings.introShown else { return }
+        let due = withObservationTracking { backgroundIntroDue } onChange: { [weak self] in
+            // Called before the change lands: read it again once it has.
+            Task { @MainActor in self?.watchBackgroundIntro() }
+        }
+        if due { showingBackgroundIntro = true }
+    }
+
+    /// The one-time sheet's Done, its Settings… and anything else that closes it (Esc): it never shows again, and its
+    /// switches keep what they show. Open at login changed as it was switched; with notifications on (as they are
+    /// unless switched off), macOS is asked for permission now, and if it refuses they're turned off.
+    public func closeBackgroundIntro() {
+        guard showingBackgroundIntro else { return }
+        showingBackgroundIntro = false
+        background.settings.introShown = true
+        // A check that was due at launch waited for this sheet; it runs once macOS has answered about notifications.
+        let background = background!
+        if background.settings.notificationsOn {
+            Task {
+                await background.turnOnNotifications()
+                background.introClosed()
+            }
+        } else {
+            background.introClosed()
+        }
+        openPendingFile()
+    }
+
+    /// Quit (the menu bar's, or ⌘Q) is about to ask AppKit, which doesn't quit while a sheet is on the window. The
+    /// one-time sheet goes first, without counting as seen: it shows again at the next launch. Any other sheet needs
+    /// an answer first (the password, a setup screen, a confirmation), so the window comes forward with it and Quit
+    /// isn't silent.
+    public func prepareToQuit() {
+        if showingBackgroundIntro {
+            quitting = true
+            showingBackgroundIntro = false
+        } else if modalUp {
+            openMainWindow?()
+        }
+    }
+
+    /// Quit took the one-time sheet away: it doesn't come back this launch.
+    @ObservationIgnored private var quitting = false
 
     /// File > Export Bundle: shows Bundles and exports everything installed (dependencies per
     /// `exportIncludesDependencies`).
@@ -1275,4 +1502,16 @@ private final class NotificationToken: @unchecked Sendable {
     }
 
     deinit { center.removeObserver(token) }
+}
+
+/// Stops the background updater (`BackgroundUpdater.stop()`) when it goes away with its owner, the model. The
+/// model's own deinit isn't on the main actor, so it can't reach the updater itself.
+private final class UpdaterStopper: @unchecked Sendable {
+    /// Set once, at the end of the model's init, before anything else can read it.
+    var updater: BackgroundUpdater?
+
+    deinit {
+        guard let updater else { return }
+        Task { @MainActor in updater.stop() }
+    }
 }
