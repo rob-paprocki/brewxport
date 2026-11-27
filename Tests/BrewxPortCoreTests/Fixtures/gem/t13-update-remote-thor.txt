@@ -1,0 +1,4 @@
+Updating installed gems
+Updating thor
+Successfully installed thor-1.5.0
+Gems updated: thor

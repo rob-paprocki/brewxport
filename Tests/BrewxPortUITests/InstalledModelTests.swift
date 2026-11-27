@@ -60,9 +60,9 @@ import Testing
 
         let rows = model.list.byRef
         #expect(model.duplicateHelp(rows[Self.nbFiglet.id]!)
-                == "Also installed by MacPorts. MacPorts's copy runs first on your PATH.")
+                == "Also installed by MacPorts. MacPorts' copy runs first on your PATH.")
         #expect(model.duplicateHelp(rows[Self.portFiglet.id]!)
-                == "Also installed by nanobrew. MacPorts's copy runs first on your PATH.")
+                == "Also installed by nanobrew. MacPorts' copy runs first on your PATH.")
         #expect(model.duplicateHelp(rows[Self.brewRipgrep.id]!) == "Also installed by nanobrew.")
         #expect(model.duplicateHelp(rows[Self.jq.id]!) == nil)
         #expect(model.runsFirst(rows[Self.portFiglet.id]!))
@@ -71,6 +71,141 @@ import Testing
                 == "BrewxPort can't tell which copy runs: its command has a different name.")
         #expect(model.whichCopyRunsNote(rows[Self.nbFiglet.id]!) == nil)
         #expect(model.whichCopyRunsNote(rows[Self.jq.id]!) == nil)
+    }
+
+    /// The same tool from two managers (ripgrep from Homebrew and Cargo, typescript from npm and Bun) is a duplicate,
+    /// and the copy the login shell runs is the one whose bin folder comes first on its PATH with the tool's command
+    /// in it: `rg` and `tsc`, which the language engines name. Two copies in one shared folder (npm's globals in
+    /// Homebrew's bin) can't be told apart.
+    @Test func sameToolFromTwoManagersWarns() async {
+        let cargoBin = "/Users/someone/.cargo/bin"
+        let bunBin = "/Users/someone/.bun/bin"
+        let cargo = FakeLanguageEngine(.cargo, binLocation: URL(fileURLWithPath: cargoBin, isDirectory: true),
+                                       commands: ["ripgrep": ["rg"]])
+        let npm = FakeLanguageEngine(.npm, binLocation: URL(fileURLWithPath: "/opt/homebrew/bin", isDirectory: true),
+                                     commands: ["typescript": ["tsc", "tsserver"]])
+        let bun = FakeLanguageEngine(.bun, binLocation: URL(fileURLWithPath: bunBin, isDirectory: true),
+                                     commands: ["typescript": ["tsc", "tsserver"]])
+        let brewRipgrep = Self.brewRipgrep
+        let cargoRipgrep = Self.package(.cargo, .tool, "ripgrep")
+        let npmTypescript = Self.package(.npm, .tool, "typescript")
+        let bunTypescript = Self.package(.bun, .tool, "typescript")
+        let list = PackageListState(order: PackageCatalog.defaultOrder(for: .arm64), archFor: { _ in .arm64 })
+        let files: Set<String> = ["/opt/homebrew/bin/rg", cargoBin + "/rg", "/opt/homebrew/bin/tsc", bunBin + "/tsc"]
+        let model = InstalledModel(
+            catalog: Self.catalog([brewRipgrep, cargoRipgrep, npmTypescript, bunTypescript]),
+            path: FixedPath(entries: [cargoBin, "/opt/homebrew/bin", bunBin, "/usr/bin"]),
+            engines: P.engines + [cargo, npm, bun], fileExists: { files.contains($0) }, list: list)
+        model.reload()
+        await model.settled()
+        #expect(model.duplicates["ripgrep"] == [brewRipgrep.id, cargoRipgrep.id])
+        #expect(model.duplicates["typescript"] == [npmTypescript.id, bunTypescript.id])
+        #expect(model.winners["ripgrep"] == .cargo)
+        #expect(model.winners["typescript"] == .npm)
+        let rows = model.list.byRef
+        #expect(model.duplicateHelp(rows[brewRipgrep.id]!) == "Also installed by Cargo. Cargo's copy runs first on your PATH.")
+        #expect(model.duplicateHelp(rows[cargoRipgrep.id]!)
+                == "Also installed by Homebrew. Cargo's copy runs first on your PATH.")
+        #expect(model.duplicateHelp(rows[bunTypescript.id]!) == "Also installed by npm. npm's copy runs first on your PATH.")
+        #expect(model.runsFirst(rows[cargoRipgrep.id]!))
+        #expect(!model.runsFirst(rows[brewRipgrep.id]!))
+
+        // Homebrew's typescript formula and npm's typescript both put tsc in /opt/homebrew/bin.
+        let brewTypescript = Self.package(.homebrew, .formula, "typescript")
+        let shared = InstalledModel(
+            catalog: Self.catalog([brewTypescript, npmTypescript]),
+            path: FixedPath(entries: ["/opt/homebrew/bin", "/usr/bin"]),
+            engines: P.engines + [npm], fileExists: { files.contains($0) },
+            list: PackageListState(order: PackageCatalog.defaultOrder(for: .arm64), archFor: { _ in .arm64 }))
+        shared.reload()
+        await shared.settled()
+        #expect(shared.winners["typescript"] == nil)
+        #expect(shared.whichCopyRunsNote(shared.list.byRef[npmTypescript.id]!)
+                == "These copies share /opt/homebrew/bin, so BrewxPort can't tell which one runs.")
+    }
+
+    /// Final review: copies are matched by the commands they put on the PATH, where the engine names them (a crate's
+    /// binaries, a Mint tool's executables, an npm or Bun global's `bin`), with a formula's or port's own name as its
+    /// command and the package name as the fallback. So Cargo's fd-find (`fd`) is Homebrew's fd, and Mint's
+    /// realm/SwiftLint (`swiftlint`) is Homebrew's swiftlint, though their package names differ; ripgrep still pairs
+    /// by name, and its copy is found by `rg`. A copy's row is found by its group, whatever its own name.
+    @Test func sameCommandFromTwoManagersWarns() async {
+        let cargoBin = "/Users/someone/.cargo/bin"
+        let mintBin = "/Users/someone/.mint/bin"
+        let cargo = FakeLanguageEngine(.cargo, binLocation: URL(fileURLWithPath: cargoBin, isDirectory: true),
+                                       commands: ["fd-find": ["fd"], "ripgrep": ["rg"]])
+        let mint = FakeLanguageEngine(.mint, binLocation: URL(fileURLWithPath: mintBin, isDirectory: true),
+                                      commands: ["realm/SwiftLint": ["swiftlint"]])
+        let brewFd = Self.package(.homebrew, .formula, "fd")
+        let fdFind = Self.package(.cargo, .tool, "fd-find")
+        let brewSwiftlint = Self.package(.homebrew, .formula, "swiftlint")
+        let mintSwiftlint = Self.package(.mint, .tool, "realm/SwiftLint")
+        let brewRipgrep = Self.brewRipgrep
+        let cargoRipgrep = Self.package(.cargo, .tool, "ripgrep")
+        let files: Set<String> = ["/opt/homebrew/bin/fd", cargoBin + "/fd", "/opt/homebrew/bin/swiftlint",
+                                  mintBin + "/swiftlint", "/opt/homebrew/bin/rg", cargoBin + "/rg"]
+        let model = InstalledModel(
+            catalog: Self.catalog([brewFd, fdFind, brewSwiftlint, mintSwiftlint, brewRipgrep, cargoRipgrep, Self.jq]),
+            path: FixedPath(entries: [cargoBin, "/opt/homebrew/bin", mintBin, "/usr/bin"]),
+            engines: P.engines + [cargo, mint], fileExists: { files.contains($0) },
+            list: PackageListState(order: PackageCatalog.defaultOrder(for: .arm64), archFor: { _ in .arm64 }))
+        model.reload()
+        await model.settled()
+        // Copies in list order (by name); a group is keyed by its first plain name.
+        #expect(model.duplicates == ["fd": [brewFd.id, fdFind.id], "swiftlint": [mintSwiftlint.id, brewSwiftlint.id],
+                                     "ripgrep": [brewRipgrep.id, cargoRipgrep.id]])
+        #expect(model.winners["fd"] == .cargo)
+        #expect(model.winners["swiftlint"] == .homebrew)
+        #expect(model.winners["ripgrep"] == .cargo)
+        let rows = model.list.byRef
+        #expect(model.duplicateHelp(rows[fdFind.id]!) == "Also installed by Homebrew. Cargo's copy runs first on your PATH.")
+        #expect(model.duplicateHelp(rows[brewFd.id]!) == "Also installed by Cargo. Cargo's copy runs first on your PATH.")
+        #expect(model.duplicateHelp(rows[mintSwiftlint.id]!)
+                == "Also installed by Homebrew. Homebrew's copy runs first on your PATH.")
+        #expect(model.runsFirst(rows[fdFind.id]!))
+        #expect(!model.runsFirst(rows[brewFd.id]!))
+        #expect(model.runsFirst(rows[brewSwiftlint.id]!))
+        #expect(!model.runsFirst(rows[mintSwiftlint.id]!))
+        #expect(model.duplicateHelp(rows[Self.jq.id]!) == nil)
+        #expect(model.winners["jq"] == nil)  // jq's command isn't in any folder here
+        #expect(model.whichCopyRunsNote(rows[mintSwiftlint.id]!) == nil)
+    }
+
+    /// npm and Bun name the commands a package.json declares: corepack (Node 24 and earlier) declares pnpm, pnpx,
+    /// yarn and yarnpkg, which aren't in npm's bin folder until `corepack enable`. A command counts for grouping only
+    /// when it's a file in its engine's bin folder, so corepack isn't Homebrew's pnpm or yarn. Once enabled, corepack's
+    /// pnpm is: the copy that runs is the one whose folder comes first on the PATH with a command both copies hold
+    /// (pnpm), never `corepack`, which only npm has. Not captures: the bin folders, made up for this model test.
+    @Test func commandsCountOnlyWhenInTheBinFolder() async {
+        let nvmBin = "/Users/someone/.nvm/versions/node/v24.11.0/bin"
+        let npm = FakeLanguageEngine(.npm, binLocation: URL(fileURLWithPath: nvmBin, isDirectory: true),
+                                     commands: ["corepack": ["corepack", "pnpm", "pnpx", "yarn", "yarnpkg"]])
+        let corepack = Self.package(.npm, .tool, "corepack")
+        let pnpm = Self.package(.homebrew, .formula, "pnpm")
+        let yarn = Self.package(.homebrew, .formula, "yarn")
+        func model(_ files: Set<String>) async -> InstalledModel {
+            let model = InstalledModel(
+                catalog: Self.catalog([corepack, pnpm, yarn]),
+                path: FixedPath(entries: ["/opt/homebrew/bin", nvmBin, "/usr/bin"]),
+                engines: P.engines + [npm], fileExists: { files.contains($0) },
+                list: PackageListState(order: PackageCatalog.defaultOrder(for: .arm64), archFor: { _ in .arm64 }))
+            model.reload()
+            await model.settled()
+            return model
+        }
+        let homebrew: Set<String> = ["/opt/homebrew/bin/pnpm", "/opt/homebrew/bin/yarn"]
+        let plain = await model(homebrew.union([nvmBin + "/corepack"]))
+        #expect(plain.duplicates.isEmpty)
+        #expect(plain.duplicateHelp(plain.list.byRef[pnpm.id]!) == nil)
+
+        let enabled = await model(homebrew.union([nvmBin + "/corepack", nvmBin + "/pnpm", nvmBin + "/pnpx"]))
+        #expect(enabled.duplicates.values.map { Set($0) } == [[corepack.id, pnpm.id]])
+        let rows = enabled.list.byRef
+        #expect(enabled.runsFirst(rows[pnpm.id]!))
+        #expect(!enabled.runsFirst(rows[corepack.id]!))
+        #expect(enabled.duplicateHelp(rows[corepack.id]!)
+                == "Also installed by Homebrew. Homebrew's copy runs first on your PATH.")
+        #expect(enabled.duplicateHelp(rows[yarn.id]!) == nil)
     }
 
     @Test func masAppsNeverDuplicates() async {
@@ -207,7 +342,7 @@ import Testing
         #expect(after != before)
         #expect(after.first { $0.id == Self.portFiglet.id }?.runsFirst == true)
         #expect(after.first { $0.id == Self.portFiglet.id }?.duplicateHelp
-                == "Also installed by nanobrew. MacPorts's copy runs first on your PATH.")
+                == "Also installed by nanobrew. MacPorts' copy runs first on your PATH.")
         #expect(after.map(\.name) == ["figlet", "figlet", "jq"])
         model.sortOrder = [KeyPathComparator(\InstalledRow.name, order: .reverse)]
         #expect(model.rows.map(\.name) == ["jq", "figlet", "figlet"])

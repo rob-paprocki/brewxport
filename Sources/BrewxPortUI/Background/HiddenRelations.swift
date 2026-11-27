@@ -27,15 +27,28 @@ struct HiddenRelations: Sendable {
     /// Nothing worked out: every update from a package manager with a hidden row counts as related.
     static let none = HiddenRelations()
 
+    /// How updating a package relates to the hidden rows.
+    enum Relation: Equatable, Sendable {
+        case unrelated
+        case related
+        /// The package manager's relations couldn't be read: it may be related.
+        case unknown
+    }
+
     /// True when updating `ref` could also change an ignored or skipped package. `hidden`: the ignored and skipped
     /// rows on Updates now. A package manager with a hidden row that wasn't there when this was worked out counts as
     /// unread.
     func holds(_ ref: PackageRef, hidden: Set<PackageRef>) -> Bool {
+        relation(ref, hidden: hidden) != .unrelated
+    }
+
+    /// `holds`, telling a relation that was read from one that couldn't be.
+    func relation(_ ref: PackageRef, hidden: Set<PackageRef>) -> Relation {
         let hiddenHere = hidden.filter { $0.engine == ref.engine }
-        guard !hiddenHere.isEmpty else { return false }
+        guard !hiddenHere.isEmpty else { return .unrelated }
         guard let entry = entries[ref.engine], hiddenHere.isSubset(of: entry.hidden),
-              let related = entry.related else { return true }
-        return related.contains(ref.name.lowercased())
+              let related = entry.related else { return .unknown }
+        return related.contains(ref.name.lowercased()) ? .related : .unrelated
     }
 
     /// Works it out for each package manager in `engineIDs` that has a hidden row, all at once.

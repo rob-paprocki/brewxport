@@ -43,6 +43,10 @@ struct DetailsInspector: View {
                             if !info.variants.isEmpty {
                                 LabeledContent("Variants", value: info.variants.joined(separator: ", "))
                             }
+                            if let executables = info.executables {
+                                LabeledContent("Executables",
+                                               value: executables.isEmpty ? "None" : executables.joined(separator: ", "))
+                            }
                         }
                     }
                     if let fields = model.inspectorOptions, installReady {
@@ -60,16 +64,21 @@ struct DetailsInspector: View {
     @ViewBuilder private func installRow(_ row: PackageRow) -> some View {
         switch model.details.installAvailability(isRunning: model.run.isRunning || model.preparing,
                                                  homebrewPresent: model.homebrewPresent,
-                                                 isOutdated: model.outdatedRefs.contains(row.id)) {
+                                                 isOutdated: model.outdatedRefs.contains(row.id)
+                                                    || model.hasReadOnlyUpdate(row.id)) {
         case .updateAvailable(let installed, let latest):
+            // A language engine this account can't change: Update is off, saying why.
+            let readOnly = model.readOnlyReason(for: row.id.engine)
             VStack(alignment: .leading, spacing: 6) {
                 Text("Update available: \(installed) → \(latest)")
                 Button("Update") { model.updateFromInspector() }
-                    .disabled(!model.canRun || model.confirmingRemoval)
+                    .disabled(!model.canRun || model.confirmingRemoval || readOnly != nil)
+                    .help(readOnly ?? "")
             }
         case .ready:
             Button("Install") { model.installFromInspector() }
                 .disabled(!model.canInstallFromInspector)
+                .help(model.readOnlyReason(for: row.id.engine) ?? "")
         case .running:
             Button("Install") {}.disabled(true)
         case .alreadyInstalled:
@@ -129,5 +138,7 @@ struct DetailsInspector: View {
 
 private extension PackageDetails {
     /// False when the engine gave nothing for the About section, so no empty heading is drawn.
-    var hasAbout: Bool { summary != nil || homepage != nil || dependencies != nil || !variants.isEmpty }
+    var hasAbout: Bool {
+        summary != nil || homepage != nil || dependencies != nil || !variants.isEmpty || executables != nil
+    }
 }

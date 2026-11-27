@@ -1,0 +1,39 @@
+Environment variables (set by user):
+
+PIPX_HOME=
+PIPX_GLOBAL_HOME=
+PIPX_BIN_DIR=
+PIPX_GLOBAL_BIN_DIR=
+PIPX_MAN_DIR=
+PIPX_COMPLETION_DIR=
+PIPX_GLOBAL_MAN_DIR=
+PIPX_GLOBAL_COMPLETION_DIR=
+PIPX_SHARED_LIBS=
+PIPX_DEFAULT_PYTHON=
+PIPX_DEFAULT_BACKEND=
+PIPX_COOLDOWN=
+PIPX_FETCH_MISSING_PYTHON=
+PIPX_FETCH_PYTHON=
+PIPX_DISABLE_SHARED_LIBS_AUTO_UPGRADE=
+PIPX_USE_EMOJI=
+PIPX_MAX_LOGS=
+
+Derived values (computed by pipx):
+
+PIPX_HOME=/Users/tester/Library/Application Support/pipx
+PIPX_BIN_DIR=/Users/tester/.local/bin
+PIPX_MAN_DIR=/Users/tester/.local/share/man
+PIPX_COMPLETION_DIR=/Users/tester/.local/share
+PIPX_SHARED_LIBS=/Users/tester/Library/Application Support/pipx/shared
+PIPX_LOCAL_VENVS=/Users/tester/Library/Application Support/pipx/venvs
+PIPX_LOG_DIR=/Users/tester/Library/Logs/pipx
+PIPX_TRASH_DIR=/Users/tester/Library/Application Support/pipx/trash
+PIPX_VENV_CACHEDIR=/Users/tester/Library/Caches/pipx
+PIPX_STANDALONE_PYTHON_CACHEDIR=/Users/tester/Library/Application Support/pipx/py
+PIPX_DEFAULT_PYTHON=/opt/homebrew/opt/python@3.15/bin/python3.15
+PIPX_RESOLVED_BACKEND=uv
+PIPX_BACKEND_SOURCE=auto-path
+PIPX_UV_BINARY=/opt/homebrew/bin/uv
+UV_CACHE_DIR=
+PIPX_DISABLE_SHARED_LIBS_AUTO_UPGRADE=false
+PIPX_USE_EMOJI=true

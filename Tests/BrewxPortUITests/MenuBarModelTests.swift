@@ -150,6 +150,38 @@ import BrewxPortRun
         #expect(MenuBarItems.make(model: model).first == .text("No updates found. Couldn't check MacPorts"))
     }
 
+    /// R6: a manager whose check answered but couldn't look some packages up isn't "couldn't check" here (only one that
+    /// failed as a whole is), but nothing is "up to date" either: the menu follows Updates' own empty page
+    /// (`UpdatesModel.emptyTitle`), and names the managers it couldn't fully check.
+    @Test func partialCheckIsntCouldntCheck() async {
+        let catalog = FakeCatalog()
+        catalog.script(.outdated, .pipx, FakeCatalog.Script(
+            result: .success([]), unchecked: UncheckedPackages(reasons: ["black": "PyPI didn't answer"])))
+        catalog.script(.outdated, .cargo, FakeCatalog.Script(
+            result: .success([]), unchecked: UncheckedPackages(reasons: ["ripgrep": "crates.io didn't answer"])))
+        let model = BrewxPortAppModel(services: F.services(catalog: catalog))
+        model.refreshLists()
+        #expect(await waitUntil { !model.updates.list.loading && model.updates.list.unchecked[.pipx] != nil })
+        #expect(MenuBarItems.make(model: model).first
+                == .text("Nothing else to update. Some pipx and Cargo tools couldn't be checked"))
+        #expect(model.updates.emptyTitle == "Nothing else to update")
+    }
+
+    /// Final review: updates held from every update (here Cargo's "Needs Rust") leave nothing to update, but they're
+    /// still updates: "Nothing else to update", as on Updates, never "Everything is up to date".
+    @Test func heldUpdatesArentUpToDate() async {
+        let catalog = FakeCatalog()
+        let ripgrep = Package(id: PackageRef(engine: .cargo, kind: .tool, name: "ripgrep"), displayName: "ripgrep",
+                              installedVersion: "14.1.0", latestVersion: "16.0.0")
+        let hold = UpdateHold(reason: "Needs Rust 1.96", blocksAutomatic: true, blocksManual: true)
+        catalog.script(.outdated, .cargo, FakeCatalog.Script(result: .success([]),
+                                                             held: [HeldUpdate(package: ripgrep, hold: hold)]))
+        let model = BrewxPortAppModel(services: F.services(catalog: catalog))
+        model.refreshLists()
+        #expect(await waitUntil { !model.updates.list.loading && model.updates.list.byRef[ripgrep.id] != nil })
+        #expect(MenuBarItems.make(model: model).first == .text("Nothing else to update"))
+    }
+
     @Test func refreshMacPortsBelowCheckNowWhenMacPortsWorks() async throws {
         let portPresent = EngineStatus.present(path: URL(fileURLWithPath: PlanFixtures.portPath), version: "2.12.7")
         let catalog = FakeCatalog(engines: [.macports: portPresent])
@@ -416,25 +448,27 @@ import BrewxPortRun
         let model = BrewxPortAppModel(services: try DemoServices.make(DemoTests.options(), delay: .zero))
         model.start()
         let adaURL = DemoTests.adaURL
+        // Homebrew's three, MacPorts' figlet, npm's two, pipx's two, uv's isort, Cargo's ripgrep, Bun's two,
+        // RubyGems' lolcat and thor (never Ruby's own bundled gems) and Mint's JohnSundell/Ink.
         #expect(await waitUntil {
-            !model.updates.list.loading && model.updates.badgeCount == 4 && !model.installed.list.loading
+            !model.updates.list.loading && model.updates.badgeCount == 15 && !model.installed.list.loading
                 && model.installed.list.byRef[adaURL] != nil
         })
         let launchVersion = try #require(model.installed.list.byRef[adaURL]?.package.installedVersion)
-        #expect(MenuBarItems.make(model: model).first == .text("4 updates"))
+        #expect(MenuBarItems.make(model: model).first == .text("15 updates"))
 
         // Homebrew's three formulae need no password, so the demo run finishes by itself.
         model.menuUpdate(engine: .homebrew)
         #expect(await waitUntil { model.run.runNumber == 1 && !model.run.isRunning })
-        #expect(await waitUntil { !model.updates.list.loading && model.updates.badgeCount == 1 })
+        #expect(await waitUntil { !model.updates.list.loading && model.updates.badgeCount == 12 })
         #expect(await waitUntil {
             model.installed.list.byRef[adaURL]?.package.installedVersion != launchVersion
         })
 
         // Check Now reads the fixtures again: the updates are back, and Installed agrees with them.
         await model.background.checkNow()
-        #expect(model.updates.badgeCount == 4)
-        #expect(MenuBarItems.make(model: model).first == .text("4 updates"))
+        #expect(model.updates.badgeCount == 15)
+        #expect(MenuBarItems.make(model: model).first == .text("15 updates"))
         #expect(await waitUntil {
             !model.installed.list.loading && model.installed.list.byRef[adaURL]?.package.installedVersion == launchVersion
         })

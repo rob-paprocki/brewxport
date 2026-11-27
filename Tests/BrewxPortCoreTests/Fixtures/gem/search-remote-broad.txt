@@ -1,0 +1,4 @@
+can-has-lolcat (1.1.1)
+lolcat (100.0.1)
+lolcation_client (0.2.7)
+remi-lolcats (0.1.1)

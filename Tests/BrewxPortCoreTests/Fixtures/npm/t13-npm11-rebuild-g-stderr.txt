@@ -1,0 +1,7 @@
+npm error code EEXIST
+npm error path /opt/homebrew/bin/npm
+npm error EEXIST: file already exists
+npm error File exists: /opt/homebrew/bin/npm
+npm error Remove the existing file and try again, or run npm
+npm error with --force to overwrite files recklessly.
+npm error A complete log of this run can be found in: /Users/tester/.npm/_logs/2026-11-27T12_25_42_101Z-debug-0.log

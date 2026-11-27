@@ -1,0 +1,9 @@
+
+Errors from uv install:
+    error: Request failed after 3 retries in 9.3s
+      cause: Failed to fetch: https://pypi.org/simple/httpie/
+      cause: error sending request for url (https://pypi.org/simple/httpie/)
+      cause: client error (Connect)
+      cause: tunnel error: failed to create underlying connection
+      cause: tcp connect error
+      cause: Connection refused (os error 61)

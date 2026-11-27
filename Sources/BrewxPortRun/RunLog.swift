@@ -58,6 +58,7 @@ public struct RunLog: Sendable, Equatable {
         case .upgrade: "Updating"
         case .remove: "Removing"
         case .markRequested, .markDependency: "Marking"
+        case .repair: "Repairing"
         }
     }
 

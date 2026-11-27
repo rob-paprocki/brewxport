@@ -1,0 +1,2 @@
+ERROR:  Could not find a valid gem 'thor' (>= 0), here is why:
+          Unable to download data from https://rubygems.org/ - Errno::ECONNREFUSED: Failed to open TCP connection to 127.0.0.1:9 (Connection refused - connect(2) for "127.0.0.1" port 9) (https://rubygems.org/specs.4.8.gz)

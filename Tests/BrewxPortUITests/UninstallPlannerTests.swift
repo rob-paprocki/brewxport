@@ -241,6 +241,28 @@ private func plan(_ picks: [Package], _ graphs: UninstallGraph...) -> UninstallP
         #expect(section.note == nil)
     }
 
+    /// npm and corepack came with Node: picked with other globals, they stay (with why) and the rest are removed, so a
+    /// refusal can't stop the others' removals. Their uninstall is refused at plan time.
+    @Test func npmCameWithNodeStays() throws {
+        func tool(_ name: String) -> Package {
+            Package(id: PackageRef(engine: .npm, kind: .tool, name: name), displayName: name, installedVersion: "1")
+        }
+        let section = try #require(UninstallPlanner.plan(picks: [tool("semver"), tool("npm"), tool("cowsay"),
+                                                                 tool("corepack")], facts: [:]).sections.first)
+        #expect(section.engine == .npm)
+        #expect(names(section.picks) == ["cowsay", "semver"])
+        #expect(section.blocked.map(UninstallSheetText.blockedLine) == [
+            "corepack stays: it came with Node; removing it would break Node's own corepack.",
+            "npm stays: it came with Node; removing it would break Node's own npm.",
+        ])
+        let alone = UninstallPlanner.plan(picks: [tool("npm")], facts: [:])
+        #expect(alone.sections.flatMap(\.picks).isEmpty)
+        #expect(UninstallSheetText.title(alone) == "Uninstall npm?")
+        // Another manager's tool named npm is nobody's Node.
+        let bun = Package(id: PackageRef(engine: .bun, kind: .tool, name: "npm"), displayName: "npm")
+        #expect(UninstallPlanner.plan(picks: [bun], facts: [:]).sections.first?.blocked.isEmpty == true)
+    }
+
     @Test func oneSectionPerManagerInManagerOrder() {
         let brew = wgetGraph()
         var port = UninstallGraph(.macports)

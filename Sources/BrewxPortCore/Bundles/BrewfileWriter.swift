@@ -27,6 +27,7 @@ public enum BrewfileWriter {
     static let pinReason = "Brewfiles can't pin a version"
     static let optionsReason = "Brewfiles from BrewxPort carry no install options"
     static let octalReason = "app ids starting with 0 read as octal in a Brewfile"
+    static let languageToolReason = "language tools aren't included in Brewfiles"
 
     public static func write(_ bundle: BundleFile, date: Date) -> (text: String, leftOut: [LeftOut]) {
         write(bundle, date: date, timeZone: .current)
@@ -45,6 +46,7 @@ public enum BrewfileWriter {
             switch entry.engine {
             case .nanobrew: leave(nanobrewReason); continue
             case .macports: leave(macPortsReason); continue
+            case .npm, .pipx, .uv, .cargo, .bun, .gem, .mint: leave(languageToolReason); continue
             case .homebrew, .mas: break
             }
             // The same check an import runs, on the package alone: pins and options are reported below instead.
@@ -67,6 +69,10 @@ public enum BrewfileWriter {
             case .port:
                 // BundleRules never accepts a port outside MacPorts, but nothing is skipped without a reason.
                 leave(macPortsReason)
+                continue
+            case .tool:
+                // Nor a tool, which only language engines have.
+                leave(languageToolReason)
                 continue
             }
             if entry.versionPin != nil { leave(pinReason) }

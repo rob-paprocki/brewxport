@@ -1,0 +1,2 @@
+Successfully installed mustache-1.1.3
+1 gem installed

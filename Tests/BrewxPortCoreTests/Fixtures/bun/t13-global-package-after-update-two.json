@@ -1,0 +1,11 @@
+{
+  "dependencies": {
+    "@antfu/ni": "0.21.0",
+    "capture-pkg": "/Users/tester/capture-pkg",
+    "cowsay": "1.5.0",
+    "he": "github:mathiasbynens/he",
+    "is-number": "7.0.0",
+    "ms": "2.1.3",
+    "semver": "7.8.0"
+  }
+}

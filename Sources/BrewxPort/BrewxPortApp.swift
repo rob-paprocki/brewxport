@@ -104,19 +104,41 @@ struct NoticeApp: App {
     }
 }
 
-/// The engines BrewxPort drives, found at their fixed paths.
+/// The engines BrewxPort drives: the system ones at their fixed paths, the language ones from the login shell's PATH
+/// first (`loginShell`), then their fixed folders.
 enum Engines {
     /// Each engine looks its executable up again every time it's used, so one installed while BrewxPort runs
-    /// (set up from the first-launch screen, say) is found by the next check without relaunching.
+    /// (set up from the first-launch screen, say) is found by the next check without relaunching. `loginShell` is the
+    /// app's one `LoginShellPath`, so the shell is asked once; without it (`--self-check`) the language engines look
+    /// only in their fixed folders. `registry` is how the language engines read package registries (pipx, uv: PyPI;
+    /// Cargo: crates.io; Bun: npm's; RubyGems: RubyGems.org); Mint reads GitHub's tags with git instead. Its default is
+    /// the app's one registry reader, which the live app and `--self-check` both use.
     static func make(runner: CommandRunning = ProcessRunner(), arch: Arch = .current,
-                     locator: EngineLocator = EngineLocator()) -> [any Engine] {
+                     locator: EngineLocator = EngineLocator(),
+                     loginShell: @escaping LoginShellContextProvider = { .none },
+                     registry: any RegistryFetching = LiveRegistryFetch(
+                        appVersion: BundleFile.appVersion(Bundle.main.infoDictionary))) -> [any Engine] {
         func path(_ id: EngineID) -> @Sendable () -> URL? { { locator.locate(id, arch: arch) } }
-        return [
+        let system: [any Engine] = [
             HomebrewEngine(runner: runner, locate: path(.homebrew), arch: arch),
             NanobrewEngine(runner: runner, locate: path(.nanobrew)),
             MacPortsEngine(runner: runner, locate: path(.macports)),
             MasEngine(runner: runner, locate: path(.mas)),
         ]
+        let languages: [any Engine] = EngineID.allCases.filter(\.isLanguage).map { id in
+            switch id {
+            case .npm: NpmEngine(runner: runner, loginShell: loginShell, arch: arch)
+            case .pipx: PipxEngine(runner: runner, registry: registry, loginShell: loginShell, arch: arch)
+            case .uv: UvEngine(runner: runner, registry: registry, loginShell: loginShell, arch: arch)
+            case .cargo: CargoEngine(runner: runner, registry: registry, loginShell: loginShell, arch: arch)
+            case .bun: BunEngine(runner: runner, registry: registry, loginShell: loginShell, arch: arch)
+            case .gem: GemEngine(runner: runner, registry: registry, loginShell: loginShell, arch: arch)
+            case .mint: MintEngine(runner: runner, loginShell: loginShell, arch: arch)
+            // Not reached: only language engines are in this list, and each has its engine.
+            case .homebrew, .nanobrew, .macports, .mas: NotInstalledEngine(id: id)
+            }
+        }
+        return system + languages
     }
 }
 
@@ -142,6 +164,8 @@ enum SelfCheck {
                 print("  present  \(id.rawValue) \(version) at \(path.path)")
             case .unusable(let path, let reason)?:
                 print("  unusable \(id.rawValue) at \(path.path): \(reason)")
+            case .unsupported(let path, let version, _)?:
+                print("  too old  \(id.rawValue) \(version) at \(path.path)")
             case .missing?, nil:
                 print("  missing  \(id.rawValue)")
             }

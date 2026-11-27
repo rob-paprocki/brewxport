@@ -1,0 +1,7 @@
+bun add v1.4.5 (826ef2a6f)
+
+installed cowsay@1.5.0 with binaries:
+ - cowsay
+ - cowthink
+
+33 packages installed [714.00ms]

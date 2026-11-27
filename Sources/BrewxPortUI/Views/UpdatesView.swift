@@ -3,8 +3,10 @@ import SwiftUI
 
 /// Updates: every engine's outdated packages with checkboxes, sortable columns, Update all, Update N (the checked
 /// rows), Refresh (with "Refresh MacPorts…" in its menu when MacPorts is there) and "Show ignored". Ignored rows
-/// carry `bell.slash` and skipped ones `forward`. With Group by Package Manager on, rows sit in one collapsible
-/// section per engine whose header has its own "Update N".
+/// carry `bell.slash` and skipped ones `forward`; a held row carries `pause.circle` with its reason, and one held
+/// from every update has its checkbox off. With Group by Package Manager on, rows sit in one collapsible section per
+/// engine whose header has its own "Update N", and says how many of its packages couldn't be checked. Those counts
+/// are also above the list, so a check that found nothing still says them.
 struct UpdatesView: View {
     @Bindable var model: BrewxPortAppModel
 
@@ -14,6 +16,10 @@ struct UpdatesView: View {
         VStack(spacing: 0) {
             if !list.errors.isEmpty {
                 ErrorBanner(lines: list.errors)
+                Divider()
+            }
+            if !updates.uncheckedLines.isEmpty {
+                ErrorBanner(lines: updates.uncheckedLines, systemImage: "questionmark.circle")
                 Divider()
             }
             content(updates, list)
@@ -40,11 +46,11 @@ struct UpdatesView: View {
                     } label: {
                         Label("Refresh", systemImage: "arrow.clockwise")
                     } primaryAction: {
-                        model.refreshLists()
+                        model.refresh()
                     }
                     .help("Check every engine for updates again (⌘R). Its menu has Refresh MacPorts…")
                 } else {
-                    Button("Refresh", systemImage: "arrow.clockwise") { model.refreshLists() }
+                    Button("Refresh", systemImage: "arrow.clockwise") { model.refresh() }
                         .help("Check every engine for updates again (⌘R)")
                 }
             }
@@ -69,8 +75,8 @@ struct UpdatesView: View {
                 ProgressView("Checking every engine for updates…")
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
-                ContentUnavailableView("Everything is up to date", systemImage: "checkmark.circle",
-                                       description: Text(emptyNote(updates)))
+                ContentUnavailableView(updates.emptyTitle, systemImage: "checkmark.circle",
+                                       description: Text(updates.emptyNote))
             }
         } else {
             UpdatesTable(model: model, updates: updates, list: list)
@@ -86,11 +92,6 @@ struct UpdatesView: View {
         }
     }
 
-    private func emptyNote(_ updates: UpdatesModel) -> String {
-        let hidden = updates.hiddenCount
-        if hidden == 0 { return "No engine has a newer version of anything you installed." }
-        return hidden == 1 ? "1 update is ignored or skipped." : "\(hidden) updates are ignored or skipped."
-    }
 }
 
 private struct UpdatesTable: View {
@@ -105,11 +106,18 @@ private struct UpdatesTable: View {
                 Toggle("Select \(row.name)", isOn: list.checkedBinding(row.id))
                     .toggleStyle(.checkbox)
                     .labelsHidden()
+                    .disabled(updates.blocksManual(row))
             }
             .width(24)
             TableColumn("Name", value: \.name) { (row: PackageRow) in
                 HStack(spacing: 4) {
                     Text(row.name).help(row.name)
+                    if let hold = updates.hold(for: row) {
+                        Image(systemName: "pause.circle")
+                            .foregroundStyle(.secondary)
+                            .help(hold.reason)
+                            .accessibilityLabel(hold.reason)
+                    }
                     switch updates.hiddenReason(row) {
                     case .ignored?:
                         Image(systemName: "bell.slash")
@@ -156,6 +164,12 @@ private struct UpdatesTable: View {
                         PackageSectionHeader(engine: engine, count: section.rows.count, isCollapsed: collapsed) {
                             model.setCollapsed(!collapsed, engine, on: .updates)
                         } trailing: {
+                            if let note = updates.uncheckedNote(for: engine) {
+                                Text(note)
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                                    .help(updates.uncheckedDetail(for: engine) ?? note)
+                            }
                             let n = updates.updateCount(for: engine)
                             if n > 0 {
                                 Button("Update \(n)") { model.updateAll(engine: engine) }

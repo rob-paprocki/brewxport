@@ -1,0 +1,5 @@
+Saved lockfile
+
+warn: To run "capture-pkg", add the global bin folder to $PATH:
+
+/Users/tester/.bun/bin

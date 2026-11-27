@@ -1,0 +1,11 @@
+[tool]
+requirements = [
+    { name = "black", extras = ["d"], specifier = ">=24,<24.3.0" },
+    { name = "click", specifier = ">=8" },
+    { name = "colorama" },
+]
+python = "3.12"
+entrypoints = [
+    { name = "black", install-path = "/Users/tester/.local/bin/black", from = "black" },
+    { name = "blackd", install-path = "/Users/tester/.local/bin/blackd", from = "black" },
+]

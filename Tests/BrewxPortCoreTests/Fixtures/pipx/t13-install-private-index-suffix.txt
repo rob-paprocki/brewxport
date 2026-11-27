@@ -1,0 +1,4 @@
+  installed package pyjokes 0.6.0 (pyjokes-private), installed using Python 3.15.2
+  These apps are now available
+    - pyjoke-private
+    - pyjokes-private

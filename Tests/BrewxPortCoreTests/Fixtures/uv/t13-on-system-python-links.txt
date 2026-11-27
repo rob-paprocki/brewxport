@@ -1,0 +1,2 @@
+lrwxr-xr-x  1 tester  staff  51 Nov 27 07:36 /Users/tester/.local/share/uv/tools/isort/bin/python -> /Library/Developer/CommandLineTools/usr/bin/python3
+lrwxr-xr-x  1 tester  staff  51 Nov 27 07:36 /Users/tester/.local/share/uv/tools/ruff/bin/python -> /Library/Developer/CommandLineTools/usr/bin/python3

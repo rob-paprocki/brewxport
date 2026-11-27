@@ -7,6 +7,7 @@ struct RunnerCall: Sendable {
     let executable: URL
     let arguments: [String]
     let environment: [String: String]?
+    let workingDirectory: String?
     let streamed: Bool
 }
 
@@ -99,7 +100,8 @@ final class FakeRunner: CommandRunning, @unchecked Sendable {
     private func record(_ executable: URL, _ arguments: [String], _ options: RunOptions, streamed: Bool) -> Response {
         lock.withLock {
             _calls.append(RunnerCall(executable: executable, arguments: arguments,
-                                     environment: options.environment, streamed: streamed))
+                                     environment: options.environment, workingDirectory: options.workingDirectory,
+                                     streamed: streamed))
             let argv = [executable.path] + arguments
             if var queued = onceResponses[argv], !queued.isEmpty {
                 let first = queued.removeFirst()

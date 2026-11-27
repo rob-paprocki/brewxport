@@ -1,0 +1,2 @@
+lrwxr-xr-x  1 tester  admin  29 Nov 26 19:24 /opt/homebrew/bin/gem -> ../Cellar/ruby/4.0.10/bin/gem
+lrwxr-xr-x  1 tester  admin  30 Nov 26 19:24 /opt/homebrew/bin/ruby -> ../Cellar/ruby/4.0.10/bin/ruby

@@ -9,7 +9,7 @@
 # starts it with `open -n`; --snapshot runs the bundle's binary directly instead, so the exit code comes back.
 #
 # usage: scripts/demo.sh [--appearance light|dark] [--snapshot DIR] [--demo-arch arm64|x86_64]
-#                        [--demo-bundle inventory|brewfile]
+#                        [--demo-bundle inventory|brewfile] [--demo-missing ENGINE]... [--demo-states]
 #
 #   --appearance  force the light or dark appearance
 #   --snapshot    write discover-, updates-, installed-, bundles- and setup-<appearance>.png into DIR, then quit (exit 0
@@ -18,12 +18,17 @@
 #   --demo-bundle open a sample on Bundles at launch (with --snapshot, in the Bundles picture): "inventory" is an
 #                 export of the demo's own packages, made in memory; "brewfile" is a real Brewfile written by
 #                 `brew bundle dump`, with its description comments
+#   --demo-missing show a language engine (npm, pipx, uv, cargo, bun, gem or mint) as not installed, so its page
+#                 shows Set Up; once per engine
+#   --demo-states add the states the captures can't show, partly invented (see DemoStates.swift): an update held
+#                 for the Rust it needs, tools a check couldn't look up, gems that came with Ruby, and Homebrew's
+#                 node held back for npm's tools
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 
 case "${1:-}" in
-    -h|--help) sed -n '2,20p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -h|--help) sed -n '2,25p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
 esac
 
 # Warns when this Mac isn't marked as a development Mac: a normal launch of a real BrewxPort.app here would register

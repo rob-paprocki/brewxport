@@ -1,0 +1,5 @@
+  Installing capture-crate v0.1.0 (/Users/tester/capcrate)
+    Finished `release` profile [optimized] target(s) in 0.01s
+   Replacing /Users/tester/.cargo/bin/cap-one
+   Replacing /Users/tester/.cargo/bin/cap-two
+    Replaced package `capture-crate v0.1.0 (file:///Users/tester/capcrate#7fa6e7b8)` with `capture-crate v0.1.0 (/Users/tester/capcrate)` (executables `cap-one`, `cap-two`)

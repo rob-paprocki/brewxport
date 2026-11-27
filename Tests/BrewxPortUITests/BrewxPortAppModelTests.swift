@@ -23,13 +23,14 @@ import BrewxPortRun
                          engines: [any Engine] = PlanFixtures.engines, path: any PathResolving = NoPath(),
                          shellPath: ShellPathEditor? = nil, scheduler: FakeScheduler = FakeScheduler(),
                          notifier: FakeNotifier = FakeNotifier(), loginItem: FakeLoginItem = FakeLoginItem(),
-                         conditions: FakeConditions = FakeConditions()) -> Services {
+                         conditions: FakeConditions = FakeConditions(),
+                         fileExists: @escaping @Sendable (String) -> Bool = { _ in true }) -> Services {
         // The model loads Installed and Updates on its own; a test that doesn't script them gets empty lists.
         catalog.scriptEmpty(.installed)
         catalog.scriptEmpty(.outdated)
         return Services(engines: engines, catalog: catalog, executor: executor, helper: helper,
                  passwords: PromptPasswordProvider(), isAdministrator: { isAdministrator }, store: store,
-                 path: path, fileExists: { _ in true }, host: host, hostInfo: hostInfo,
+                 path: path, fileExists: fileExists, host: host, hostInfo: hostInfo,
                  cltPresent: { cltPresent }, receipts: receipts, setupProblem: setupProblem, isDemo: isDemo,
                  scheduler: scheduler, notifier: notifier, loginItem: loginItem, conditions: conditions,
                  shellPath: shellPath)
@@ -72,10 +73,33 @@ import BrewxPortRun
         #expect(services.passwords.prompter === model.run)
     }
 
+    static let languages: [EngineID] = [.npm, .pipx, .uv, .cargo, .bun, .gem, .mint]
+
     @Test func sidebarEnginesFollowHostOrder() {
-        #expect(BrewxPortAppModel(services: F.services(host: .arm64)).engineOrder == [.nanobrew, .homebrew, .macports, .mas])
+        #expect(BrewxPortAppModel(services: F.services(host: .arm64)).engineOrder
+                == [.nanobrew, .homebrew, .macports, .mas] + Self.languages)
         #expect(BrewxPortAppModel(services: F.services(host: .x86_64)).engineOrder.first == .macports)
-        #expect(BrewxPortAppModel(services: F.services(host: .x86_64)).engineOrder == [.macports, .homebrew, .nanobrew, .mas])
+        #expect(BrewxPortAppModel(services: F.services(host: .x86_64)).engineOrder
+                == [.macports, .homebrew, .nanobrew, .mas] + Self.languages)
+    }
+
+    @Test func sidebarGroupsLanguages() {
+        let arm = BrewxPortAppModel(services: F.services(host: .arm64)).sidebarEngineGroups
+        #expect(arm.map(\.title) == ["Engines", "Languages"])
+        #expect(arm.map(\.group) == [.system, .languages])
+        #expect(arm.map(\.engines) == [[.nanobrew, .homebrew, .macports, .mas], Self.languages])
+        let intel = BrewxPortAppModel(services: F.services(host: .x86_64)).sidebarEngineGroups
+        #expect(intel.map(\.engines) == [[.macports, .homebrew, .nanobrew, .mas], Self.languages])
+        // A group with nothing in it isn't shown.
+        #expect(SidebarEngineGroup.make(order: [.homebrew, .mas]).map(\.group) == [.system])
+    }
+
+    @Test func everyEngineHasItsOwnSymbol() {
+        let symbols = EngineID.allCases.map(EngineRowText.symbol)
+        #expect(Set(symbols).count == symbols.count)
+        for symbol in symbols {
+            #expect(NSImage(systemSymbolName: symbol, accessibilityDescription: nil) != nil, "\(symbol)")
+        }
     }
 
     @Test func engineRowTextForEachStatus() {
@@ -90,6 +114,27 @@ import BrewxPortRun
         #expect(EngineRowText.statusSymbol(nil) == "ellipsis.circle")
         #expect([EngineID.homebrew, .nanobrew, .macports, .mas].map(EngineRowText.symbol)
                 == ["mug.fill", "hare.fill", "shippingbox.fill", "bag.fill"])
+    }
+
+    /// R15: a Bun too old to drive is "Too old" in the sidebar, not "Not working", with its own symbol and the reason
+    /// in the tooltip; its page shows the R15 sentence. A partial check's count goes in the tooltip too.
+    @Test func unsupportedEngineRowSaysTooOld() {
+        let bun = URL(fileURLWithPath: "/opt/homebrew/bin/bun")
+        let reason = "Bun 1.2.20 is too old for BrewxPort. Update Bun to 1.4.5 or later with brew upgrade bun or "
+            + "bun upgrade."
+        // Plain text in the tooltip and on the page: no Markdown backticks.
+        #expect(!reason.contains("`"))
+        let status = EngineStatus.unsupported(path: bun, version: "1.2.20", reason: reason)
+        #expect(EngineRowText.subtitle(status) == "Too old")
+        #expect(EngineRowText.statusSymbol(status) == "arrow.up.circle")
+        #expect(NSImage(systemSymbolName: "arrow.up.circle", accessibilityDescription: nil) != nil)
+        #expect(EngineRowText.help(status, unchecked: nil) == reason)
+        #expect(PackageCatalog.message(for: .bun, status: status) == reason)
+        #expect(EngineRowText.help(.present(path: bun, version: "1.4.5"), unchecked: "2 tools couldn't be checked")
+                == "Last check: 2 tools couldn't be checked")
+        #expect(EngineRowText.help(.present(path: bun, version: "1.4.5"), unchecked: nil) == nil)
+        #expect(NSImage(systemSymbolName: "pause.circle", accessibilityDescription: nil) != nil)
+        #expect(NSImage(systemSymbolName: "questionmark.circle", accessibilityDescription: nil) != nil)
     }
 
     @Test func startDetectsEnginesAndEnsuresTheHelperOnce() async {
@@ -795,15 +840,34 @@ import BrewxPortRun
     static let arm = HostInfo(appleSilicon: true, macOSMajor: 15)
     static let intel = HostInfo(appleSilicon: false, macOSMajor: 15)
 
+    /// What Installed has listed before a test looks: nothing yet, Homebrew's packages, or a Homebrew that failed.
+    enum Listing { case notLoaded, homebrew([Package]), homebrewFailed }
+
     func setupModel(_ engines: [EngineID: EngineStatus], host: HostInfo = arm, isDemo: Bool = false,
                     executor: FakeRunExecutor? = FakeRunExecutor(), problem: String? = nil,
-                    isAdministrator: Bool? = true) async -> BrewxPortAppModel {
+                    isAdministrator: Bool? = true, languages: [any Engine] = [],
+                    fileExists: @escaping @Sendable (String) -> Bool = { _ in true },
+                    listed: Listing = .notLoaded, path: any PathResolving = AppFixtures.NoPath())
+        async -> BrewxPortAppModel {
+        let catalog = FakeCatalog(engines: engines)
+        switch listed {
+        case .notLoaded: break
+        case .homebrew(let packages): catalog.script(.installed, .homebrew, packages: packages)
+        case .homebrewFailed:
+            catalog.script(.installed, .homebrew,
+                           FakeCatalog.Script(result: .failure(EngineError(engine: .homebrew, message: "failed"))))
+        }
         let model = BrewxPortAppModel(services: F.services(
-            catalog: FakeCatalog(engines: engines), executor: executor, helper: FakeHelperManager(), isDemo: isDemo,
+            catalog: catalog, executor: executor, helper: FakeHelperManager(), isDemo: isDemo,
             setupProblem: problem, isAdministrator: isAdministrator,
-            hostInfo: host, cltPresent: true))
+            hostInfo: host, cltPresent: true, engines: PlanFixtures.engines + languages, path: path,
+            fileExists: fileExists))
         model.checkEnginesAgain()
         _ = await waitUntil { model.enginesChecked }
+        if case .notLoaded = listed {} else {
+            model.refreshLists()
+            await model.installed.settled()
+        }
         return model
     }
 
@@ -814,6 +878,387 @@ import BrewxPortRun
         let model = await setupModel(Self.allMissing)
         #expect(model.setupButton(for: .homebrew) == .enabled(title: "Set Up Homebrew…"))
         #expect(model.setupButton(for: .macports) == .enabled(title: "Set Up MacPorts…"))
+    }
+
+    // MARK: Language engines' Set Up (Plan 9 Task 11)
+
+    static let brew = EngineStatus.present(path: URL(fileURLWithPath: "/opt/homebrew/bin/brew"), version: "4")
+    static let port = EngineStatus.present(path: URL(fileURLWithPath: "/opt/local/bin/port"), version: "2")
+    static let languagesMissing = Dictionary(uniqueKeysWithValues: languages.map { ($0, EngineStatus.missing) })
+
+    /// Every engine missing, except as `given`.
+    func statuses(_ given: [EngineID: EngineStatus]) -> [EngineID: EngineStatus] {
+        Self.allMissing.merging(Self.languagesMissing) { $1 }.merging(given) { $1 }
+    }
+
+    /// With Homebrew, each missing language engine's page offers Set Up and says what it installs. Homebrew installs
+    /// as the user, so a standard account can too; demo mode shows the button, off.
+    @Test func languageSetUpButtonsWithHomebrew() async {
+        let model = await setupModel(statuses([.homebrew: Self.brew]))
+        for engine in Self.languages {
+            #expect(model.setupButton(for: engine) == .enabled(title: "Set Up \(engine.displayName)…"))
+            // An import never needs one: bundles don't carry language tools.
+            #expect(EngineSetup.setup(for: engine, status: .missing) == nil)
+        }
+        #expect(model.setupLine(for: .npm) == "Set Up installs Homebrew's node, which includes npm.")
+        #expect(model.setupLine(for: .gem) == "Set Up installs Homebrew's ruby, which includes RubyGems.")
+        #expect(model.setupLine(for: .cargo) == "Set Up installs Homebrew's rustup, then Rust's stable toolchain.")
+        #expect(model.setupLine(for: .pipx) == "Set Up installs Homebrew's pipx.")
+        #expect(model.setupLine(for: .uv) == "Set Up installs Homebrew's uv.")
+        #expect(model.setupLine(for: .bun) == "Set Up installs Homebrew's bun.")
+        #expect(model.setupLine(for: .mint) == "Set Up installs Homebrew's mint.")
+        #expect(model.setupLine(for: .macports) == nil)
+        let standard = await setupModel(statuses([.homebrew: Self.brew]), isAdministrator: false)
+        #expect(standard.setupButton(for: .uv) == .enabled(title: "Set Up uv…"))
+        let demo = await setupModel(statuses([.homebrew: Self.brew]), isDemo: true)
+        #expect(demo.setupButton(for: .cargo) == .disabled(title: "Set Up Cargo…", help: "Not available in demo mode"))
+        #expect(demo.setupLine(for: .cargo) == "Set Up installs Homebrew's rustup, then Rust's stable toolchain.")
+        // Already there: nothing.
+        let present = await setupModel(statuses([.homebrew: Self.brew])
+            .merging([.uv: .present(path: URL(fileURLWithPath: "/opt/homebrew/bin/uv"), version: "0.13.4")]) { $1 })
+        #expect(present.setupButton(for: .uv) == .hidden)
+        #expect(present.setupLine(for: .uv) == nil)
+    }
+
+    /// Homebrew in /usr/local (an Intel Mac's) has no bottles for rustup: Cargo's line says the build takes a while.
+    @Test func intelHomebrewSaysRustBuildsTakeAWhile() async {
+        let intelBrew = EngineStatus.present(path: URL(fileURLWithPath: "/usr/local/bin/brew"), version: "4")
+        let model = await setupModel(statuses([.homebrew: intelBrew]), host: Self.intel)
+        #expect(model.setupButton(for: .cargo) == .enabled(title: "Set Up Cargo…"))
+        #expect(model.setupLine(for: .cargo) == "Set Up installs Homebrew's rustup, then Rust's stable toolchain. On "
+                + "an Intel Mac, Homebrew builds Rust from source first, which can take a while.")
+        #expect(model.setupLine(for: .pipx) == "Set Up installs Homebrew's pipx.")
+    }
+
+    /// MacPorts only: pipx, uv, Cargo and Mint go through MacPorts (an administrator's password), npm, Bun and
+    /// RubyGems aren't offered, and their pages say why.
+    @Test func languageSetUpButtonsWithMacPortsOnly() async {
+        let model = await setupModel(statuses([.macports: Self.port]), host: Self.intel)
+        for engine in [EngineID.pipx, .uv, .cargo, .mint] {
+            #expect(model.setupButton(for: engine) == .enabled(title: "Set Up \(engine.displayName)…"))
+        }
+        #expect(model.setupLine(for: .mint) == "Set Up installs MacPorts' mint. Needs an administrator password.")
+        #expect(model.setupLine(for: .cargo)
+                == "Set Up installs MacPorts' rustup, then Rust's stable toolchain. Needs an administrator password.")
+        for engine in [EngineID.npm, .bun, .gem] {
+            #expect(model.setupButton(for: engine) == .unavailable(note: SetupCopy.homebrewOnly(engine, appleSilicon: false)))
+            #expect(model.setupLine(for: engine) == nil)
+        }
+        let standard = await setupModel(statuses([.macports: Self.port]), host: Self.intel, isAdministrator: false)
+        #expect(standard.setupButton(for: .uv) == .disabled(title: "Set Up uv…", help: "Needs an administrator account."))
+    }
+
+    /// Neither Homebrew nor MacPorts: the button is off and the page says which to set up first.
+    @Test func languageSetUpNeedsHomebrewOrMacPorts() async {
+        let model = await setupModel(statuses([:]))
+        let first = SetupCopy.languageNeedsManager(.pipx, appleSilicon: true)
+        #expect(model.setupButton(for: .pipx) == .disabled(title: "Set Up pipx…", help: first))
+        #expect(model.setupLine(for: .pipx) == first)
+        #expect(model.setupButton(for: .npm) == .unavailable(note: SetupCopy.homebrewOnly(.npm, appleSilicon: true)))
+        #expect(!model.setUpEngine(.pipx))
+        #expect(model.lastSetupPlanProblem == first)
+    }
+
+    /// Set Up runs Homebrew's install like any other install (as the user, nothing for the helper), and its end asks
+    /// the login shell again and checks the engines again, so the new engine and its bin folder show up.
+    @Test func languageSetUpRunsThenReadsTheShellAndChecksAgain() async throws {
+        let path = ShellRecorder()
+        let catalog = FakeCatalog(engines: [.homebrew: Self.brew, .uv: .missing])
+        let executor = FakeRunExecutor(events: [.started(0), .finished(0, 0), .done])
+        let model = BrewxPortAppModel(services: F.services(catalog: catalog, executor: executor, path: path))
+        model.checkEnginesAgain()
+        _ = await waitUntil { model.enginesChecked }
+        let before = path.events.count
+        catalog.setEngines([.homebrew: Self.brew,
+                            .uv: .present(path: URL(fileURLWithPath: "/opt/homebrew/bin/uv"), version: "0.13.4")])
+        #expect(model.setUpEngine(.uv))
+        #expect(await waitUntil { !model.run.isRunning && model.engineStatuses[.uv] != .missing })
+        #expect(executor.runs.count == 1)
+        #expect(try #require(executor.runs.first).steps.map(\.spec.arguments) == [["install", "--formula", "uv"]])
+        #expect(try #require(executor.runs.first).steps.allSatisfy { $0.setupTarget == nil })
+        // The run's end asks the shell again before anything reads it.
+        #expect(path.events.dropFirst(before).first == "askAgain")
+        #expect(model.setupButton(for: .uv) == .hidden)
+    }
+
+    /// A Set Up whose toolchain step failed leaves Cargo "not working" on rustup's proxy: Set Up is offered again.
+    @Test func cargoWithoutAToolchainOffersSetUpAgain() async {
+        let keg = "/opt/homebrew/opt/rustup/bin"
+        let proxy = EngineStatus.unusable(path: URL(fileURLWithPath: keg + "/cargo"), reason: "no default toolchain")
+        let model = await setupModel(statuses([.homebrew: Self.brew, .cargo: proxy]),
+                                     fileExists: { $0 == keg + "/rustup" })
+        #expect(model.setupButton(for: .cargo) == .enabled(title: "Set Up Cargo…"))
+        #expect(model.setupLine(for: .cargo) == "Set Up installs Rust's stable toolchain with the rustup in \(keg).")
+        let other = EngineStatus.unusable(path: URL(fileURLWithPath: "/opt/local/bin/cargo"), reason: "bad")
+        let broken = await setupModel(statuses([.homebrew: Self.brew, .cargo: other]), fileExists: { _ in false })
+        #expect(broken.setupButton(for: .cargo) == .hidden)
+    }
+
+    /// R31: the person's own rustup (`~/.cargo/bin`, or CARGO_HOME's) without a toolchain: Set Up runs that rustup's
+    /// `default stable` as the user, and installs no second rustup through Homebrew or MacPorts. It needs neither of
+    /// them, nor an administrator.
+    @Test func ownRustupSetUpFromThePage() async throws {
+        let own = NSHomeDirectory() + "/.cargo/bin"
+        let proxy = EngineStatus.unusable(path: URL(fileURLWithPath: own + "/cargo"), reason: "no default toolchain")
+        let executor = FakeRunExecutor(events: [.started(0), .finished(0, 0), .done])
+        for given in [[EngineID.homebrew: Self.brew], [.macports: Self.port], [:]] {
+            let model = await setupModel(statuses(given.merging([.cargo: proxy]) { $1 }), executor: executor,
+                                         isAdministrator: false, fileExists: { $0 == own + "/rustup" })
+            #expect(model.setupButton(for: .cargo) == .enabled(title: "Set Up Cargo…"))
+            #expect(model.setupLine(for: .cargo)
+                    == "Set Up installs Rust's stable toolchain with the rustup in ~/.cargo/bin.")
+        }
+        let model = await setupModel(statuses([.homebrew: Self.brew, .cargo: proxy]), executor: executor,
+                                     fileExists: { $0 == own + "/rustup" })
+        #expect(model.setUpEngine(.cargo))
+        #expect(await waitUntil { executor.runs.count == 1 })
+        let steps = try #require(executor.runs.first).steps
+        #expect(steps.map(\.spec.executable.path) == [own + "/rustup"])
+        #expect(steps.map(\.spec.arguments) == [["default", "stable"]])
+        #expect(steps.first?.spec.environment?["RUSTUP_AUTO_INSTALL"] == "1")
+    }
+
+    /// Fix round 1: a Cargo Set Up that couldn't start once the shell had answered (something else came up meanwhile)
+    /// says so: the run panel shows why, and nothing ran.
+    @Test func cargoSetUpThatCantStartSaysWhy() async throws {
+        let path = ShellRecorder()
+        let gate = Gate()
+        let executor = FakeRunExecutor()
+        let model = await setupModel(statuses([.homebrew: Self.brew]), executor: executor, path: path)
+        path.resolveGate = gate
+        #expect(model.setUpEngine(.cargo))
+        #expect(await waitUntil { gate.waiting == 1 })
+        model.showingOpenPanel = true
+        path.resolveGate = nil
+        gate.release()
+        let why = "Cargo wasn't set up: something else came up while BrewxPort read your shell's settings. Try Set Up "
+            + "again."
+        #expect(await waitUntil { model.lastSetupPlanProblem != nil })
+        #expect(model.lastSetupPlanProblem == why)
+        #expect(model.run.panelVisible)
+        #expect(model.run.problems == [why])
+        #expect(executor.runs.isEmpty)
+    }
+
+    /// R31: an npm that lives in Homebrew's own prefix without being Homebrew's (Node's installer in /usr/local on an
+    /// Intel Mac): `brew install node` would fail to link over it, so it isn't offered; the page keeps npm's own fix
+    /// and says why.
+    @Test func npmInHomebrewsPrefixGetsNoHomebrewNode() async throws {
+        let reason = "npm installs tools into /usr/local, which your account can't change."
+        let intelBrew = EngineStatus.present(path: URL(fileURLWithPath: "/usr/local/bin/brew"), version: "4")
+        let npm = EngineStatus.present(path: URL(fileURLWithPath: "/usr/local/bin/npm"), version: "11.2.0")
+        let model = await setupModel(statuses([.homebrew: intelBrew, .npm: npm]), host: Self.intel,
+                                     languages: [FakeLanguageEngine(.npm, readOnlyReason: reason)],
+                                     listed: .homebrew([]))
+        #expect(model.setupButton(for: .npm) == .unavailable(note: "Homebrew's node would clash with the node already "
+                                                              + "in /usr/local, so BrewxPort doesn't offer it."))
+        #expect(model.setupLine(for: .npm) == nil)
+        #expect(model.readOnlyReason(for: .npm) == reason)
+    }
+
+    /// Fix round 1: Homebrew's node is installed beside a read-only npm, but the shell still runs the other npm: the
+    /// page names both folders. A note only: BrewxPort doesn't change the PATH for it.
+    @Test func npmNoteNamesBothCopiesAfterHomebrewNode() async throws {
+        let reason = "npm installs tools into /usr/local, which your account can't change."
+        let npm = EngineStatus.present(path: URL(fileURLWithPath: "/usr/local/bin/npm"), version: "11.2.0")
+        let model = await setupModel(statuses([.homebrew: Self.brew, .npm: npm]),
+                                     languages: [FakeLanguageEngine(.npm, readOnlyReason: reason)],
+                                     listed: .homebrew([F.package(.homebrew, .formula, "node", installed: "25.1.0")]),
+                                     path: ShellRecorder())
+        #expect(model.setupButton(for: .npm) == .hidden)
+        let note = try #require(model.pathNote(for: .npm))
+        #expect(note.text == "Your shell runs npm from /usr/local/bin; Homebrew's is in /opt/homebrew/bin.")
+        #expect(note.line == nil)
+        model.addToPath(.npm)
+        #expect(model.pathFix(for: .npm) == .offered)
+        // Homebrew's npm is the one the shell runs: nothing to say.
+        let homebrews = EngineStatus.present(path: URL(fileURLWithPath: "/opt/homebrew/bin/npm"), version: "11.2.0")
+        let fine = await setupModel(statuses([.homebrew: Self.brew, .npm: homebrews]),
+                                    languages: [FakeLanguageEngine(.npm, readOnlyReason: reason)],
+                                    listed: .homebrew([F.package(.homebrew, .formula, "node", installed: "25.1.0")]),
+                                    path: ShellRecorder())
+        #expect(fine.pathNote(for: .npm) == nil)
+    }
+
+    // MARK: Rulings on Task 11 (R30, Intel builds, Cargo's fresh shell read)
+
+    static let systemGem = EngineStatus.present(path: URL(fileURLWithPath: "/usr/bin/gem"), version: "3.5.22")
+
+    /// R30: RubyGems runs macOS's own Ruby (or MacPorts'), which only an administrator can change. With Homebrew, its
+    /// page offers Set Up of Homebrew's Ruby: the same run as a missing RubyGems' Set Up. Not without Homebrew, and not
+    /// for Homebrew's own Ruby.
+    @Test func systemRubyOffersHomebrewRubySetUp() async throws {
+        let executor = FakeRunExecutor(events: [.started(0), .finished(0, 0), .done])
+        let system = statuses([.homebrew: Self.brew, .gem: Self.systemGem])
+        let model = await setupModel(system, executor: executor, listed: .homebrew([]))
+        #expect(model.setupButton(for: .gem) == .enabled(title: "Set Up Homebrew's Ruby…"))
+        #expect(model.setupLine(for: .gem) == "Set Up installs Homebrew's ruby, which includes RubyGems.")
+        #expect(model.setUpEngine(.gem))
+        #expect(await waitUntil { executor.runs.count == 1 && !model.run.isRunning })
+        #expect(try #require(executor.runs.first).steps.map(\.spec.arguments) == [["install", "--formula", "ruby"]])
+        #expect(try #require(executor.runs.first).steps.allSatisfy { $0.setupTarget == nil })
+
+        let macPortsRuby = EngineStatus.present(path: URL(fileURLWithPath: "/opt/local/bin/gem"), version: "4.0.3")
+        let withPorts = await setupModel(statuses([.homebrew: Self.brew, .gem: macPortsRuby]), listed: .homebrew([]))
+        #expect(withPorts.setupButton(for: .gem) == .enabled(title: "Set Up Homebrew's Ruby…"))
+        let noHomebrew = await setupModel(statuses([.macports: Self.port, .gem: Self.systemGem]), listed: .homebrew([]))
+        #expect(noHomebrew.setupButton(for: .gem) == .hidden)
+        #expect(noHomebrew.setupLine(for: .gem) == nil)
+        let homebrewRuby = EngineStatus.present(path: URL(fileURLWithPath: "/opt/homebrew/bin/gem"), version: "4.0.10")
+        let own = await setupModel(statuses([.homebrew: Self.brew, .gem: homebrewRuby]), listed: .homebrew([]))
+        #expect(own.setupButton(for: .gem) == .hidden)
+        let demo = await setupModel(system, isDemo: true, listed: .homebrew([]))
+        #expect(demo.setupButton(for: .gem)
+                == .disabled(title: "Set Up Homebrew's Ruby…", help: "Not available in demo mode"))
+        // Until Installed has listed Homebrew it isn't known whether Homebrew has Ruby: nothing is offered.
+        let unlisted = await setupModel(system)
+        #expect(unlisted.setupButton(for: .gem) == .hidden)
+    }
+
+    /// Fix round 1: Installed couldn't list Homebrew, so whether Homebrew has Ruby or Node isn't known: no R30 button
+    /// (failing closed), and the PATH note stays as the last listing that worked left it.
+    @Test func homebrewRuntimeOffersFailClosedWhenHomebrewCouldNotBeListed() async throws {
+        let system = statuses([.homebrew: Self.brew, .gem: Self.systemGem])
+        let failed = await setupModel(system, listed: .homebrewFailed)
+        #expect(failed.installed.list.failedEngines.contains(.homebrew))
+        #expect(failed.setupButton(for: .gem) == .hidden)
+        #expect(failed.setupLine(for: .gem) == nil)
+
+        // Homebrew's Ruby was listed; a later listing fails: the PATH note is still there, still no button.
+        let catalog = FakeCatalog(engines: system)
+        catalog.script(.installed, .homebrew, packages: [F.package(.homebrew, .formula, "ruby", installed: "4.0.10")])
+        let gem = FakeLanguageEngine(.gem, readOnlyReason: "This is macOS's own Ruby, and only an administrator can "
+                                     + "change its gems. Set up Homebrew's Ruby to manage gems with BrewxPort.")
+        let model = BrewxPortAppModel(services: F.services(catalog: catalog, engines: PlanFixtures.engines + [gem],
+                                                          path: ShellRecorder()))
+        model.checkEnginesAgain()
+        _ = await waitUntil { model.enginesChecked }
+        model.refreshLists()
+        await model.installed.settled()
+        let note = try #require(model.pathNote(for: .gem))
+        catalog.script(.installed, .homebrew,
+                       FakeCatalog.Script(result: .failure(EngineError(engine: .homebrew, message: "failed"))))
+        model.refreshLists()
+        await model.installed.settled()
+        #expect(model.installed.list.failedEngines.contains(.homebrew))
+        #expect(model.pathNote(for: .gem) == note)
+        #expect(model.setupButton(for: .gem) == .hidden)
+    }
+
+    /// R30: npm's global folder isn't writable (Node from nodejs.org) and Homebrew has no node: the page offers Set Up
+    /// of Homebrew's node beside the user-prefix fix. Only with Homebrew, and not once Homebrew's node is installed.
+    @Test func npmReadOnlyOffersHomebrewNodeWhenAvailable() async throws {
+        let reason = "npm installs tools into /usr/local, which your account can't change."
+        let npmStatus = EngineStatus.present(path: URL(fileURLWithPath: "/usr/local/bin/npm"), version: "11.2.0")
+        func make(_ given: [EngineID: EngineStatus], readOnly: String? = reason, homebrewNode: Bool = false,
+                  executor: FakeRunExecutor = FakeRunExecutor(),
+                  path: any PathResolving = F.NoPath()) async -> BrewxPortAppModel {
+            let catalog = FakeCatalog(engines: statuses(given))
+            catalog.script(.installed, .homebrew,
+                           packages: homebrewNode ? [F.package(.homebrew, .formula, "node", installed: "25.1.0")] : [])
+            let npm = FakeLanguageEngine(.npm, readOnlyReason: readOnly)
+            let model = BrewxPortAppModel(services: F.services(catalog: catalog, executor: executor,
+                                                              engines: PlanFixtures.engines + [npm], path: path))
+            model.checkEnginesAgain()
+            _ = await waitUntil { model.enginesChecked }
+            model.refreshLists()
+            await model.installed.settled()
+            return model
+        }
+        let executor = FakeRunExecutor(events: [.started(0), .finished(0, 0), .done])
+        let model = await make([.homebrew: Self.brew, .npm: npmStatus], executor: executor)
+        #expect(model.setupButton(for: .npm) == .enabled(title: "Set Up Homebrew's Node…"))
+        #expect(model.setupLine(for: .npm) == "Set Up installs Homebrew's node, which includes npm.")
+        #expect(model.readOnlyReason(for: .npm) == reason)
+        #expect(model.setUpEngine(.npm))
+        #expect(await waitUntil { executor.runs.count == 1 })
+        #expect(try #require(executor.runs.first).steps.map(\.spec.arguments) == [["install", "--formula", "node"]])
+
+        let installed = await make([.homebrew: Self.brew, .npm: npmStatus], homebrewNode: true)
+        #expect(installed.setupButton(for: .npm) == .hidden)
+        let noHomebrew = await make([.macports: Self.port, .npm: npmStatus])
+        #expect(noHomebrew.setupButton(for: .npm) == .hidden)
+        let writable = await make([.homebrew: Self.brew, .npm: npmStatus], readOnly: nil)
+        #expect(writable.setupButton(for: .npm) == .hidden)
+
+        // Final review: Volta's npm is read-only for Volta's own reason. Homebrew's node wouldn't be the npm the shell
+        // runs (Volta's shims come first), so it isn't offered, and the two-copies note isn't shown either.
+        let voltaStatus = EngineStatus.present(path: URL(fileURLWithPath: "/Users/someone/.volta/bin/npm"),
+                                               version: "11.2.0")
+        let volta = await make([.homebrew: Self.brew, .npm: voltaStatus], readOnly: NpmEngine.voltaReason)
+        #expect(volta.readOnlyReason(for: .npm) == NpmEngine.voltaReason)
+        #expect(volta.setupButton(for: .npm) == .hidden)
+        let besideHomebrews = await make([.homebrew: Self.brew, .npm: npmStatus], homebrewNode: true,
+                                         path: ShellRecorder())
+        #expect(besideHomebrews.pathNote(for: .npm)?.text
+                == "Your shell runs npm from /usr/local/bin; Homebrew's is in /opt/homebrew/bin.")
+        let voltaBesideHomebrews = await make([.homebrew: Self.brew, .npm: voltaStatus], readOnly: NpmEngine.voltaReason,
+                                              homebrewNode: true, path: ShellRecorder())
+        #expect(voltaBesideHomebrews.pathNote(for: .npm) == nil)
+    }
+
+    /// Homebrew in /usr/local (an Intel Mac's) builds Bun from source (no Intel bottles), and Mint too on macOS 15 and
+    /// later (Intel bottles only for Sonoma and Ventura): their lines say it can take a while. Not where bottles exist.
+    @Test func intelHomebrewSaysBunAndMintBuildsTakeAWhile() async {
+        let intelBrew = EngineStatus.present(path: URL(fileURLWithPath: "/usr/local/bin/brew"), version: "4")
+        let sequoia = await setupModel(statuses([.homebrew: intelBrew]), host: Self.intel)
+        #expect(sequoia.setupLine(for: .bun) == "Set Up installs Homebrew's bun. On an Intel Mac, Homebrew builds Bun "
+                + "from source, which can take a while.")
+        #expect(sequoia.setupLine(for: .mint) == "Set Up installs Homebrew's mint. On an Intel Mac, Homebrew builds "
+                + "Mint from source, which can take a while.")
+        #expect(sequoia.setupLine(for: .uv) == "Set Up installs Homebrew's uv.")
+        let sonoma = await setupModel(statuses([.homebrew: intelBrew]),
+                                      host: HostInfo(appleSilicon: false, macOSMajor: 14))
+        #expect(sonoma.setupLine(for: .mint) == "Set Up installs Homebrew's mint.")
+        #expect(sonoma.setupLine(for: .bun) == "Set Up installs Homebrew's bun. On an Intel Mac, Homebrew builds Bun "
+                + "from source, which can take a while.")
+        let arm = await setupModel(statuses([.homebrew: Self.brew]))
+        #expect(arm.setupLine(for: .bun) == "Set Up installs Homebrew's bun.")
+        #expect(arm.setupLine(for: .mint) == "Set Up installs Homebrew's mint.")
+    }
+
+    /// Cargo's toolchain step gets CARGO_HOME and RUSTUP_HOME from the login shell as it answers when Set Up starts
+    /// (asked again first), not from whatever Installed last read. The buttons are off while it's asked.
+    @Test func cargoSetUpReadsTheShellAfresh() async throws {
+        let path = ShellRecorder(environment: ["RUSTUP_HOME": "/Users/tester/old-rust"])
+        let catalog = FakeCatalog(engines: [.homebrew: Self.brew, .cargo: .missing, .uv: .missing])
+        let executor = FakeRunExecutor(events: [.started(0), .finished(0, 0), .started(1), .finished(1, 0), .done])
+        let model = BrewxPortAppModel(services: F.services(catalog: catalog, executor: executor, path: path))
+        model.checkEnginesAgain()
+        _ = await waitUntil { model.enginesChecked }
+        model.refreshLists()
+        await model.installed.settled()
+        path.environment = ["RUSTUP_HOME": "/Users/tester/rust", "GEM_HOME": "/Users/tester/gems"]
+        let before = path.events.count
+        let gate = Gate()
+        path.resolveGate = gate
+        #expect(model.setUpEngine(.cargo))
+        #expect(await waitUntil { gate.waiting == 1 })
+        #expect(executor.runs.isEmpty)
+        #expect(!model.canSetUpEngines)
+        #expect(model.setupButton(for: .uv) == .disabled(title: "Set Up uv…", help: "Wait for the current task to finish."))
+        path.resolveGate = nil
+        gate.release()
+        #expect(await waitUntil { executor.runs.count == 1 })
+        #expect(Array(path.events.dropFirst(before).prefix(2)) == ["askAgain", "resolve"])
+        let toolchain = try #require(executor.runs.first?.steps.last)
+        #expect(toolchain.spec.arguments == ["default", "stable"])
+        #expect(toolchain.spec.environment?["RUSTUP_HOME"] == "/Users/tester/rust")
+        #expect(toolchain.spec.environment?["GEM_HOME"] == nil)
+    }
+
+    /// The setup sheet and File > "Set Up Package Manager…" stay with the system package managers: a language engine
+    /// is set up from its own page, through one of them.
+    @Test func setupSheetLeavesLanguageEnginesOut() async {
+        let systemPresent: [EngineID: EngineStatus] = [
+            .homebrew: Self.brew, .macports: Self.port,
+            .nanobrew: .present(path: URL(fileURLWithPath: "/opt/nanobrew/prefix/bin/nb"), version: "1"),
+            .mas: .present(path: URL(fileURLWithPath: "/opt/homebrew/bin/mas"), version: "1")]
+        let model = await setupModel(systemPresent.merging(Self.languagesMissing) { $1 })
+        #expect(model.setupButton(for: .npm) == .enabled(title: "Set Up npm…"))
+        #expect(!model.canShowSetupOffer)
+        model.showSetupOffer()
+        #expect(model.setup.stage == .hidden)
     }
 
     @Test func setupButtonHiddenWhenPresentOrUnusable() async {
@@ -1285,6 +1730,32 @@ import BrewxPortRun
         #expect(model.listReloadCount == 1)
     }
 
+    /// The person's Refresh and the engine page's Check again ask the login shell again (the engines' detects then
+    /// read it), so a PATH fixed meanwhile is read; a background check's reload and a run's end don't.
+    @Test func personsRefreshAndCheckAgainReadTheShellAgain() async {
+        final class RecordingPath: PathResolving, @unchecked Sendable {
+            private let lock = NSLock()
+            private var asked = 0
+            var askedAgain: Int { lock.withLock { asked } }
+            func resolve() async -> ResolvedPath { ResolvedPath(entries: ["/usr/bin"], source: .systemDefault) }
+            func askAgain() { lock.withLock { asked += 1 } }
+        }
+        let path = RecordingPath()
+        let model = BrewxPortAppModel(services: F.services(path: path))
+        model.refreshLists()
+        #expect(path.askedAgain == 0)
+        #expect(await waitUntil { !model.updates.list.loading })
+        model.refresh()
+        #expect(path.askedAgain == 1)
+        #expect(model.listReloadCount == 2)
+        #expect(await waitUntil { !model.updates.list.loading })
+        await model.background.checkNow()
+        #expect(path.askedAgain == 1)
+        model.checkEnginesAgain()
+        #expect(path.askedAgain == 2)
+        #expect(await waitUntil { model.enginesChecked })
+    }
+
     @Test func refreshQueuedDuringARunThatRanNothingIsNotLost() async {
         // The helper check leaves nothing to run; the run still ends (onRunEnded), so the queued refresh happens.
         let executor = FakeRunExecutor()
@@ -1399,6 +1870,30 @@ import BrewxPortRun
         #expect(executor.runs[0].steps[0].spec.arguments.contains("+universal"))
         #expect(executor.runs[0].steps[0].spec.arguments.contains("-s"))
         #expect(model.details.optionsError == nil)
+    }
+
+    /// Final review: every language engine refuses extra arguments, so a language tool's inspector has no Extra
+    /// arguments field (and with no version or variants, no options section at all). Homebrew's still has it.
+    @Test func inspectorHasNoExtraArgumentsForLanguageTools() async {
+        let cowsay = Package(id: PackageRef(engine: .npm, kind: .tool, name: "cowsay"), displayName: "cowsay",
+                             latestVersion: "1.6.0")
+        let wget = F.package(.homebrew, .formula, "wget")
+        let catalog = FakeCatalog()
+        catalog.script(.search("w"), .npm, packages: [cowsay])
+        catalog.script(.search("w"), .homebrew, packages: [wget])
+        catalog.scriptInfo(cowsay.id, FakeCatalog.InfoScript(result: .success(PackageDetails(ref: cowsay.id))))
+        catalog.scriptInfo(wget.id, FakeCatalog.InfoScript(result: .success(PackageDetails(ref: wget.id))))
+        let model = BrewxPortAppModel(services: F.services(catalog: catalog,
+                                                          engines: PlanFixtures.engines + [FakeLanguageEngine(.npm)]))
+        model.discover.query = "w"
+        model.discover.submit()
+        #expect(await waitUntil { !model.discover.searching })
+        model.perform(.showDetails, on: [cowsay.id])
+        #expect(await waitUntil { model.details.details?.ref == cowsay.id })
+        #expect(model.inspectorOptions == InspectorOptionFields(version: false, extraArgs: false, variants: []))
+        model.perform(.showDetails, on: [wget.id])
+        #expect(await waitUntil { model.details.details?.ref == wget.id })
+        #expect(model.inspectorOptions == InspectorOptionFields(version: false, extraArgs: true, variants: []))
     }
 
     @Test func inspectorInstallRejectsBadOptions() async {
@@ -1997,4 +2492,36 @@ import BrewxPortRun
         #expect(model.inspectorOpen)
         #expect(model.details.row == nil)
     }
+}
+
+/// A login shell that answers with `environment` and records, in order, each time it's read ("resolve") and each time
+/// it's asked to answer again ("askAgain"). With `resolveGate` set, a read waits for it after recording itself.
+final class ShellRecorder: PathResolving, @unchecked Sendable {
+    private let lock = NSLock()
+    private var recorded: [String] = []
+    private var _environment: [String: String]
+    private var _resolveGate: Gate?
+
+    init(environment: [String: String] = [:]) { _environment = environment }
+
+    var events: [String] { lock.withLock { recorded } }
+    var environment: [String: String] {
+        get { lock.withLock { _environment } }
+        set { lock.withLock { _environment = newValue } }
+    }
+    var resolveGate: Gate? {
+        get { lock.withLock { _resolveGate } }
+        set { lock.withLock { _resolveGate = newValue } }
+    }
+
+    func resolve() async -> ResolvedPath {
+        let gate = lock.withLock { () -> Gate? in
+            recorded.append("resolve")
+            return _resolveGate
+        }
+        if let gate { await gate.wait() }
+        return ResolvedPath(entries: ["/opt/homebrew/bin", "/usr/bin"], source: .loginShell, environment: environment)
+    }
+
+    func askAgain() { lock.withLock { recorded.append("askAgain") } }
 }

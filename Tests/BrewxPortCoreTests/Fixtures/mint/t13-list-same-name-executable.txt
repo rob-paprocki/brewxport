@@ -1,0 +1,3 @@
+🌱 Installed mint packages:
+  solo
+    - 1.0.0 *

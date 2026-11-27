@@ -7,7 +7,8 @@
 #   --same-session (the old behaviour): zsh sits in a background process group on the terminal, is stopped by
 #     SIGTTIN and never answers; the probe falls back to the system PATH after its timeout.
 #   default (a new session, no controlling terminal): zsh answers at once, with the .zshrc directory and without
-#     the banner.
+#     the banner, and captures the allowlisted location variable the .zshrc sets (CARGO_HOME) but not a variable
+#     outside the allowlist (NPM_TOKEN) or one whose value isn't an absolute path (BUN_INSTALL).
 #
 # usage: Tests/scripts/test-login-shell.sh
 set -euo pipefail
@@ -30,6 +31,9 @@ trap 'rm -rf "$TMP"' EXIT
 cat >"$TMP/.zshrc" <<'EOF'
 echo "Welcome to the brewxport test shell"
 path=(/brewxport-test/zshrc-bin $path)
+export CARGO_HOME=/brewxport-test/cargo-home
+export NPM_TOKEN=/brewxport-test/not-allowlisted
+export BUN_INSTALL=relative/bun
 EOF
 
 # probe <out> [args…]: the probe under a pseudo-terminal, with the temp HOME and nothing else of this shell's
@@ -60,6 +64,11 @@ grep -q 'source: loginShell' "$TMP/new.txt" && pass "new session: the login shel
 grep -qx /brewxport-test/zshrc-bin "$TMP/new.txt" && pass "PATH includes the .zshrc directory" \
     || fail "the .zshrc directory is missing: $(cat "$TMP/new.txt")"
 grep -q Welcome "$TMP/new.txt" && fail "the rc-file banner leaked into the answer" || pass "banner ignored"
+grep -qx 'variables: CARGO_HOME' "$TMP/new.txt" \
+    && pass "captured CARGO_HOME only (not NPM_TOKEN, not a relative BUN_INSTALL)" \
+    || fail "unexpected captured variables: $(grep '^variables:' "$TMP/new.txt")"
+grep -q 'brewxport-test/cargo-home\|not-allowlisted' "$TMP/new.txt" \
+    && fail "a variable's value was printed" || pass "no variable values printed"
 [ "$took" -lt 4 ] && pass "answered well inside the 5 s timeout" || fail "took ${took} s"
 
 [ "$failures" -eq 0 ] && { echo "all passed"; exit 0; }

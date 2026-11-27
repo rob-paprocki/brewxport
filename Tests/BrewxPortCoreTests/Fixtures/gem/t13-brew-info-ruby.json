@@ -1,0 +1,214 @@
+{
+  "formulae": [
+    {
+      "name": "ruby",
+      "full_name": "ruby",
+      "tap": "homebrew/core",
+      "oldnames": [],
+      "aliases": [
+        "ruby@4",
+        "ruby@4.0"
+      ],
+      "versioned_formulae": [
+        "ruby@3.4",
+        "ruby@3.3",
+        "ruby@3.2",
+        "ruby@3.1"
+      ],
+      "desc": "Powerful, clean, object-oriented scripting language",
+      "license": "Ruby",
+      "homepage": "https://www.ruby-lang.org/",
+      "versions": {
+        "stable": "4.0.10",
+        "head": "HEAD",
+        "bottle": true
+      },
+      "urls": {
+        "stable": {
+          "url": "https://cache.ruby-lang.org/pub/ruby/4.0/ruby-4.0.10.tar.gz",
+          "tag": null,
+          "revision": null,
+          "using": null,
+          "checksum": "b53eef3371fa5d3e3b74340edcd015f06d5d8853968d4e539a5264fce41ed9f1"
+        },
+        "head": {
+          "url": "https://github.com/ruby/ruby.git",
+          "branch": "master",
+          "using": null
+        }
+      },
+      "patches": [],
+      "local_patch_checksums": {},
+      "revision": 0,
+      "version_scheme": 0,
+      "compatibility_version": 1,
+      "autobump": true,
+      "no_autobump_message": null,
+      "skip_livecheck": false,
+      "bottle": {
+        "stable": {
+          "rebuild": 0,
+          "root_url": "https://ghcr.io/v2/homebrew/core",
+          "files": {
+            "arm64_sequoia": {
+              "cellar": "/opt/homebrew/Cellar",
+              "url": "https://ghcr.io/v2/homebrew/core/ruby/blobs/sha256:af69ccdbf9562f12659f8a950fb23ed643ccd3aadacafa92fee965ec0280f740",
+              "sha256": "af69ccdbf9562f12659f8a950fb23ed643ccd3aadacafa92fee965ec0280f740"
+            }
+          }
+        }
+      },
+      "pour_bottle_only_if": null,
+      "keg_only": false,
+      "keg_only_reason": null,
+      "options": [],
+      "build_dependencies": [
+        "pkgconf",
+        "rust"
+      ],
+      "dependencies": [
+        "libyaml",
+        "openssl@4"
+      ],
+      "test_dependencies": [],
+      "recommended_dependencies": [],
+      "optional_dependencies": [],
+      "no_linkage_dependencies": [],
+      "uses_from_macos": [
+        "libffi",
+        "libxcrypt"
+      ],
+      "uses_from_macos_bounds": [
+        {},
+        {}
+      ],
+      "requirements": [],
+      "conflicts_with": [],
+      "conflicts_with_reasons": [],
+      "link_overwrite": [
+        "bin/bundle",
+        "bin/bundler"
+      ],
+      "caveats": "By default, binaries installed by gem will be placed into:\n  $HOMEBREW_PREFIX/lib/ruby/gems/4.0.0/bin\n\nYou may want to add this to your PATH.\n",
+      "installed": [
+        {
+          "sbom": "/opt/homebrew/Cellar/ruby/4.0.10/sbom.spdx.json",
+          "version": "4.0.10",
+          "used_options": [],
+          "built_as_bottle": true,
+          "poured_from_bottle": true,
+          "time": 1795739092,
+          "runtime_dependencies": [
+            {
+              "full_name": "libyaml",
+              "version": "0.2.7",
+              "revision": 0,
+              "bottle_rebuild": 0,
+              "pkg_version": "0.2.7",
+              "declared_directly": true,
+              "compatibility_version": 1
+            },
+            {
+              "full_name": "ca-certificates",
+              "version": "2026-11-05",
+              "revision": 0,
+              "bottle_rebuild": 0,
+              "pkg_version": "2026-11-05",
+              "declared_directly": false,
+              "compatibility_version": 1
+            },
+            {
+              "full_name": "openssl@4",
+              "version": "4.1.0",
+              "revision": 0,
+              "bottle_rebuild": 0,
+              "pkg_version": "4.1.0",
+              "declared_directly": true,
+              "compatibility_version": 1
+            }
+          ],
+          "installed_on_request": true
+        }
+      ],
+      "linked_keg": "4.0.10",
+      "pinned": false,
+      "outdated": false,
+      "deprecated": false,
+      "deprecation_date": null,
+      "deprecation_reason": null,
+      "deprecation_replacement_formula": null,
+      "deprecation_replacement_cask": null,
+      "deprecate_args": null,
+      "disabled": false,
+      "disable_date": null,
+      "disable_reason": null,
+      "disable_replacement_formula": null,
+      "disable_replacement_cask": null,
+      "disable_args": null,
+      "post_install_steps": [
+        {
+          "paths": [
+            {
+              "path": "{{HOMEBREW_PREFIX}}/lib/ruby/gems/{{version.major_minor}}.0/gems/bundler-*"
+            }
+          ],
+          "recursive": true,
+          "type": "remove"
+        },
+        {
+          "source": {
+            "base": "prefix",
+            "path": "lib/libruby.dylib"
+          },
+          "id": "{{HOMEBREW_PREFIX}}/opt/ruby@{{version.major_minor}}/lib/libruby.{{version.major_minor}}.dylib",
+          "resolve_source": true,
+          "guards": [
+            {
+              "condition": "on",
+              "value": "macos",
+              "id": "1"
+            },
+            {
+              "base": "homebrew_prefix",
+              "path": "opt/ruby@{{version.major_minor}}/lib/libruby.{{version.major_minor}}.dylib",
+              "condition": "if_exists",
+              "id": "2"
+            }
+          ],
+          "type": "change_dylib_id"
+        }
+      ],
+      "post_install_defined": false,
+      "service": null,
+      "tap_git_head": "3de5481a1de4ee975fd354f283124972b63195ba",
+      "ruby_source_path": "Formula/r/ruby.rb",
+      "ruby_source_checksum": {
+        "sha256": "49d8624feb937c8639a52782e955dc12da8f9e41f12826da3c13963c7738567c"
+      },
+      "head_dependencies": {
+        "build_dependencies": [
+          "autoconf",
+          "pkgconf",
+          "rust"
+        ],
+        "dependencies": [
+          "libyaml",
+          "openssl@4"
+        ],
+        "test_dependencies": [],
+        "recommended_dependencies": [],
+        "optional_dependencies": [],
+        "no_linkage_dependencies": [],
+        "uses_from_macos": [
+          "libffi",
+          "libxcrypt"
+        ],
+        "uses_from_macos_bounds": [
+          {},
+          {}
+        ]
+      }
+    }
+  ],
+  "casks": []
+}

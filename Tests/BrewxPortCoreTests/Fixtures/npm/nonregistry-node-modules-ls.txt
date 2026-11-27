@@ -1,0 +1,12 @@
+total 0
+drwxr-xr-x   11 tester  admin   352 Nov 26 23:49 .
+drwxrwxr-x  294 tester  admin  9408 Nov 26 19:24 ..
+lrwxr-xr-x    1 tester  admin    37 Nov 26 23:49 capture-link -> ../../../../Users/tester/capture-link
+lrwxr-xr-x    1 tester  admin    36 Nov 26 23:49 capture-pkg -> ../../../../Users/tester/capture-pkg
+drwxr-xr-x   12 tester  admin   384 Nov 26 19:34 cowsay
+lrwxr-xr-x    1 tester  admin    58 Nov 26 23:49 he -> ../../../../Users/tester/.npm/_cacache/tmp/git-cloneJCplEY
+drwxr-xr-x    6 tester  admin   192 Nov 26 23:49 is-number
+drwxr-xr-x    6 tester  admin   192 Nov 26 23:49 ms
+drwxr-xr-x    6 tester  admin   192 Nov 26 23:49 n
+drwxr-xr-x   12 tester  admin   384 Nov 26 19:24 npm
+drwxr-xr-x   13 tester  admin   416 Nov 26 19:34 semver

@@ -1,0 +1,4 @@
+Resolved 1 package in 0.85ms
+Checked 1 package in 0.01ms
+Installed 2 executables: isort, isort-identify-imports
+warning: `/Users/tester/.local/bin` is not on your PATH. To use installed tools, add the directory to your PATH.

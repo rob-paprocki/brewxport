@@ -1,0 +1,12 @@
+bun add v1.4.5 (826ef2a6f)
+
+installed @antfu/ni@0.21.0 with binaries:
+ - na
+ - ni
+ - nr
+ - nu
+ - nci
+ - nlx
+ - nun
+
+1 package installed [640.00ms]

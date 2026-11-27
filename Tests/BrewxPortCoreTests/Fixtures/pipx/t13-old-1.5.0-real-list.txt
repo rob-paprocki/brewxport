@@ -1,0 +1,3 @@
+venvs are in /Users/tester/Library/Application Support/pipx/venvs
+apps are exposed on your $PATH at /Users/tester/.local/bin
+manual pages are exposed at /Users/tester/.local/share/man

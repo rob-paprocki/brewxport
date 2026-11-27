@@ -1,0 +1,5 @@
+⚠️ Found a space in the pipx home path. We heavily discourage this, due to
+    multiple incompatibilities. Please check our docs for more information on
+    this, as well as some pointers on how to migrate to a different home path.
+⚠️ To see your PIPX_HOME dir: pipx environment --value PIPX_HOME
+⚠️ Most likely fix on macOS: mv ~/Library/Application\ Support/pipx ~/.local/

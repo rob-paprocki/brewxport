@@ -1,0 +1,5 @@
+[tool]
+requirements = [{ name = "pyfiglet", url = "https://files.pythonhosted.org/packages/1a/03/bef6fff907e212d67a0003f8ea4819307bba91b2856074a0763dd483ccc4/pyfiglet-1.0.2-py3-none-any.whl" }]
+entrypoints = [
+    { name = "pyfiglet", install-path = "/Users/tester/.local/bin/pyfiglet", from = "pyfiglet" },
+]

@@ -19,7 +19,7 @@ public struct UninstallSection: Equatable, Sendable {
     /// The picks that will be removed, sorted by name. On Homebrew and MacPorts this includes a pick something else
     /// still needs: the package manager refuses that one when the run gets to it.
     public var picks: [Package]
-    /// The picks that won't be removed (nanobrew only), sorted by name.
+    /// The picks that won't be removed (nanobrew's, and npm's npm and corepack), sorted by name.
     public var blocked: [BlockedPick]
     /// The leftovers offered under the tick box, sorted by name. Empty means no box.
     public var leftovers: [Package]
@@ -59,7 +59,8 @@ public struct UninstallPlan: Equatable, Sendable {
 ///   dependencies couldn't all be read, there are no leftovers and the section says so.
 /// - nanobrew: `nb remove` doesn't refuse, so a pick with an installed dependent that stays is blocked, and every pick
 ///   is blocked when the facts failed. Never any leftovers.
-/// - Mac App Store: the picks, nothing else.
+/// - Mac App Store and the language engines: the picks, nothing else, except that npm and corepack, which came with
+///   Node, are blocked (`NpmEngine.cameWithNode`).
 public enum UninstallPlanner {
     /// - Parameters:
     ///   - picks: The packages picked for removal, any package managers.
@@ -77,7 +78,17 @@ public enum UninstallPlanner {
             let engineFacts = facts[engine].flatMap { try? $0.get() }
             switch engine {
             case .nanobrew: return nanobrewSection(sorted, engineFacts)
-            case .mas:
+            // Language engines: their global tools don't depend on each other (Plan 9 design); Task 10 adds the
+            // Python warning. npm and corepack came with Node and stay (the engine refuses them too), so their
+            // refusal can't stop the other removals.
+            case .npm:
+                let kept = sorted.filter { NpmEngine.cameWithNode.contains($0.id.name) }
+                return UninstallSection(engine: engine, picks: sorted.filter { !kept.contains($0) },
+                                        blocked: kept.map {
+                                            BlockedPick(package: $0, reason: NpmEngine.cameWithNodeReason($0.id.name))
+                                        },
+                                        leftovers: [], removeLeftovers: false, note: nil)
+            case .mas, .pipx, .uv, .cargo, .bun, .gem, .mint:
                 return UninstallSection(engine: engine, picks: sorted, blocked: [], leftovers: [],
                                         removeLeftovers: false, note: nil)
             case .homebrew, .macports: return leftoverSection(engine, sorted, engineFacts)

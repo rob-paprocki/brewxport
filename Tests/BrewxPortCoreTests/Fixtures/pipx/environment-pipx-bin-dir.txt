@@ -1,0 +1,1 @@
+/Users/tester/.local/bin

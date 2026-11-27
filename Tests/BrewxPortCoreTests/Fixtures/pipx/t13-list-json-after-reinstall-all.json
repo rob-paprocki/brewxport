@@ -1,0 +1,210 @@
+{
+    "pipx_spec_version": "0.1",
+    "venvs": {
+        "black": {
+            "metadata": {
+                "backend": "uv",
+                "environment": "black",
+                "exposure_enabled": true,
+                "injected_packages": {},
+                "main_package": {
+                    "app_paths": [
+                        {
+                            "__Path__": "/Users/tester/Library/Application Support/pipx/venvs/black/bin/black",
+                            "__type__": "Path"
+                        },
+                        {
+                            "__Path__": "/Users/tester/Library/Application Support/pipx/venvs/black/bin/blackd",
+                            "__type__": "Path"
+                        }
+                    ],
+                    "app_paths_of_dependencies": {},
+                    "apps": [
+                        "black",
+                        "blackd"
+                    ],
+                    "apps_of_dependencies": [],
+                    "completion_paths": [],
+                    "completion_paths_of_dependencies": {},
+                    "completions": [],
+                    "completions_of_dependencies": [],
+                    "cooldown_days": null,
+                    "expected_apps": [],
+                    "include_apps": true,
+                    "include_dependencies": false,
+                    "include_resources_from": [],
+                    "lock_file": null,
+                    "man_pages": [],
+                    "man_pages_of_dependencies": [],
+                    "man_paths": [],
+                    "man_paths_of_dependencies": {},
+                    "package": "black",
+                    "package_or_url": "black==24.2.0",
+                    "package_version": "24.2.0",
+                    "pinned": false,
+                    "pip_args": [],
+                    "suffix": ""
+                },
+                "pipx_metadata_version": "0.12",
+                "python_version": "Python 3.15.2",
+                "source_interpreter": {
+                    "__Path__": "/opt/homebrew/opt/python@3.15/bin/python3.15",
+                    "__type__": "Path"
+                },
+                "venv_args": []
+            }
+        },
+        "cowsay": {
+            "metadata": {
+                "backend": "uv",
+                "environment": "cowsay",
+                "exposure_enabled": true,
+                "injected_packages": {},
+                "main_package": {
+                    "app_paths": [
+                        {
+                            "__Path__": "/Users/tester/Library/Application Support/pipx/venvs/cowsay/bin/cowsay",
+                            "__type__": "Path"
+                        }
+                    ],
+                    "app_paths_of_dependencies": {},
+                    "apps": [
+                        "cowsay"
+                    ],
+                    "apps_of_dependencies": [],
+                    "completion_paths": [],
+                    "completion_paths_of_dependencies": {},
+                    "completions": [],
+                    "completions_of_dependencies": [],
+                    "cooldown_days": null,
+                    "expected_apps": [],
+                    "include_apps": true,
+                    "include_dependencies": false,
+                    "include_resources_from": [],
+                    "lock_file": null,
+                    "man_pages": [],
+                    "man_pages_of_dependencies": [],
+                    "man_paths": [],
+                    "man_paths_of_dependencies": {},
+                    "package": "cowsay",
+                    "package_or_url": "cowsay==5.0",
+                    "package_version": "5.0",
+                    "pinned": false,
+                    "pip_args": [],
+                    "suffix": ""
+                },
+                "pipx_metadata_version": "0.12",
+                "python_version": "Python 3.15.2",
+                "source_interpreter": {
+                    "__Path__": "/opt/homebrew/opt/python@3.15/bin/python3.15",
+                    "__type__": "Path"
+                },
+                "venv_args": []
+            }
+        },
+        "pygments": {
+            "metadata": {
+                "backend": "uv",
+                "environment": "pygments",
+                "exposure_enabled": true,
+                "injected_packages": {},
+                "main_package": {
+                    "app_paths": [
+                        {
+                            "__Path__": "/Users/tester/Library/Application Support/pipx/venvs/pygments/bin/pygmentize",
+                            "__type__": "Path"
+                        }
+                    ],
+                    "app_paths_of_dependencies": {},
+                    "apps": [
+                        "pygmentize"
+                    ],
+                    "apps_of_dependencies": [],
+                    "completion_paths": [],
+                    "completion_paths_of_dependencies": {},
+                    "completions": [],
+                    "completions_of_dependencies": [],
+                    "cooldown_days": null,
+                    "expected_apps": [],
+                    "include_apps": true,
+                    "include_dependencies": false,
+                    "include_resources_from": [],
+                    "lock_file": null,
+                    "man_pages": [],
+                    "man_pages_of_dependencies": [],
+                    "man_paths": [],
+                    "man_paths_of_dependencies": {},
+                    "package": "pygments",
+                    "package_or_url": "pygments",
+                    "package_version": "2.21.0",
+                    "pinned": false,
+                    "pip_args": [],
+                    "suffix": ""
+                },
+                "pipx_metadata_version": "0.12",
+                "python_version": "Python 3.15.2",
+                "source_interpreter": {
+                    "__Path__": "/opt/homebrew/opt/python@3.15/bin/python3.15",
+                    "__type__": "Path"
+                },
+                "venv_args": []
+            }
+        },
+        "pyjokes-private": {
+            "metadata": {
+                "backend": "uv",
+                "environment": "pyjokes-private",
+                "exposure_enabled": true,
+                "injected_packages": {},
+                "main_package": {
+                    "app_paths": [
+                        {
+                            "__Path__": "/Users/tester/Library/Application Support/pipx/venvs/pyjokes-private/bin/pyjoke",
+                            "__type__": "Path"
+                        },
+                        {
+                            "__Path__": "/Users/tester/Library/Application Support/pipx/venvs/pyjokes-private/bin/pyjokes",
+                            "__type__": "Path"
+                        }
+                    ],
+                    "app_paths_of_dependencies": {},
+                    "apps": [
+                        "pyjoke",
+                        "pyjokes"
+                    ],
+                    "apps_of_dependencies": [],
+                    "completion_paths": [],
+                    "completion_paths_of_dependencies": {},
+                    "completions": [],
+                    "completions_of_dependencies": [],
+                    "cooldown_days": null,
+                    "expected_apps": [],
+                    "include_apps": true,
+                    "include_dependencies": false,
+                    "include_resources_from": [],
+                    "lock_file": null,
+                    "man_pages": [],
+                    "man_pages_of_dependencies": [],
+                    "man_paths": [],
+                    "man_paths_of_dependencies": {},
+                    "package": "pyjokes",
+                    "package_or_url": "pyjokes",
+                    "package_version": "0.6.0",
+                    "pinned": false,
+                    "pip_args": [
+                        "--index-url",
+                        "http://127.0.0.1:8765/simple/"
+                    ],
+                    "suffix": "-private"
+                },
+                "pipx_metadata_version": "0.12",
+                "python_version": "Python 3.15.2",
+                "source_interpreter": {
+                    "__Path__": "/opt/homebrew/opt/python@3.15/bin/python3.15",
+                    "__type__": "Path"
+                },
+                "venv_args": []
+            }
+        }
+    }
+}

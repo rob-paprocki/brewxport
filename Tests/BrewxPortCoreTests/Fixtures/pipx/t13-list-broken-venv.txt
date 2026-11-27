@@ -1,0 +1,12 @@
+venvs are in /Users/tester/Library/Application Support/pipx/venvs
+apps are exposed on your $PATH at /Users/tester/.local/bin
+manual pages are exposed at /Users/tester/.local/share/man
+shell completions are exposed at /Users/tester/.local/share
+   package black 24.2.0, installed using Python 3.15.2
+    - black
+    - blackd
+   package pygments 2.21.0, installed using Python 3.15.2
+    - pygmentize
+   package pyjokes 0.6.0 (pyjokes-private), installed using Python 3.15.2
+    - pyjoke-private
+    - pyjokes-private

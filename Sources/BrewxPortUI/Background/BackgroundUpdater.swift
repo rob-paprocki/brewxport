@@ -16,7 +16,10 @@ import BrewxPortRun
 ///
 /// Ignored and skipped rows are never notified or run. Nor is, automatically, an update that would also update one
 /// (`HiddenRelations`: Homebrew and MacPorts bring outdated dependencies and dependents along); those get a "need your
-/// attention" notification instead. A check never runs during a run, and an automatic run never
+/// attention" notification instead. Nor is a Homebrew runtime update that would break language tools
+/// (`UpdatesModel.runtimeHolds`): with automatic updates on, each new version of one gets a notice of its own ("Ruby
+/// 4.1 is ready") instead of counting as available. Nor, automatically, an update that `brew upgrade` would bring
+/// such a runtime along with (`UpdatesModel.runtimesBroughtAlong`); those are in the "need your attention" notice. A check never runs during a run, and an automatic run never
 /// starts during one: the check waits for the run to end and reads the lists its end reloaded. After an automatic
 /// run, one notification says what was updated and what wasn't.
 ///
@@ -43,8 +46,37 @@ import BrewxPortRun
     /// skipped package.
     static let attentionID = "updates-need-attention"
 
+    /// A Homebrew runtime update held back from automatic updates because language tools run on it (design option A)
+    /// is told in a notice of its own, under this prefix and the formula's name.
+    static let runtimeIDPrefix = "runtime-held-"
+
     static func attentionBody(count: Int) -> String {
-        (count == 1 ? "Updating it" : "Updating them") + " would also update a package you ignored or skipped."
+        attentionBody(count: count, ignoredOrSkipped: true, runtimes: [])
+    }
+
+    /// Why they were left out: they'd also update a package the person ignored or skipped, and/or a runtime language
+    /// tools run on (`runtimes`: "Ruby", "Node", "Python"; `UpdatesModel.runtimesBroughtAlong`).
+    /// `maybeRuntimes` are the runtimes they may bring along: Homebrew couldn't say what's related, so it's possible,
+    /// not known ("may also update Node", as the manual warning says).
+    static func attentionBody(count: Int, ignoredOrSkipped: Bool, runtimes: [String],
+                              maybeRuntimes: [String] = []) -> String {
+        let start = count == 1 ? "Updating it" : "Updating them"
+        let maybe = maybeRuntimes.filter { !runtimes.contains($0) }
+        var known: [String] = []
+        if ignoredOrSkipped { known.append("a package you ignored or skipped") }
+        known += runtimes
+        guard !known.isEmpty || !maybe.isEmpty else { return start + " would also update a package you ignored or skipped." }
+        var text = start
+        if !known.isEmpty {
+            // "a package you ignored or skipped, or Ruby": the runtimes after the ignored package with "or".
+            text += " would also update " + (ignoredOrSkipped && !runtimes.isEmpty
+                ? known[0] + ", or " + RuntimeHolds.list(runtimes) : RuntimeHolds.list(known))
+        }
+        if !maybe.isEmpty {
+            text += (known.isEmpty ? "" : ", and") + " may also update " + RuntimeHolds.list(maybe)
+        }
+        let tools = !runtimes.isEmpty || !maybe.isEmpty ? ", which your language tools run on" : ""
+        return text + tools + "."
     }
 
     /// Where `lastChecked` is kept, as seconds since 1970 in UTF-8 text.
@@ -131,11 +163,14 @@ import BrewxPortRun
     /// The updates the last check's automatic run left out that way. They get their own notice ("need your
     /// attention"), so "available" doesn't count them too.
     @ObservationIgnored private var heldByRelations: Set<PackageRef> = []
+    /// The runtime updates the last check's automatic updates left out because language tools run on them. They get
+    /// their own notice too.
+    @ObservationIgnored private var heldForTools: Set<PackageRef> = []
 
     private struct AutoRun {
         let runNumber: Int
-        /// What it was asked to update, in list order.
-        let requested: [(ref: PackageRef, name: String)]
+        /// What it was asked to update, in list order, with the version each was to be updated to.
+        let requested: [(ref: PackageRef, name: String, target: String?)]
         /// "Update everything": the password-needing refs to run after this one.
         let passwordPart: Set<PackageRef>?
         /// `checksStarted` when it started. A check that started since decides the password part itself.
@@ -342,7 +377,7 @@ import BrewxPortRun
         guard let model else { return }
         lastChecked = now()
         let list = model.updates.list
-        ledger.prune(outdated: list.all, unanswered: list.failedEngines)
+        ledger.prune(outdated: list.all, unanswered: list.failedEngines, unchecked: list.unchecked)
         act()
     }
 
@@ -375,8 +410,10 @@ import BrewxPortRun
         resumeRunEndWaiters()
     }
 
-    /// What the check's result leads to, by mode. Only rows Update all would take (neither ignored nor skipped), less
-    /// the ones that would also update an ignored or skipped package (`relations`), which get their own notice.
+    /// What the check's result leads to, by mode. Only rows an automatic update may take (`automaticRequests()`: Update
+    /// all's, less those held from automatic updates, which wait for the person like any update that waits), less
+    /// the ones that would also update an ignored or skipped package (`relations`) or a held runtime
+    /// (`UpdatesModel.runtimesBroughtAlong`), which get their own notice.
     /// Automatic updates wait while power is low, or while the person is in the middle of something the run would stop
     /// or that no run starts under (`personBusy`); they don't happen at all with checks off (Never), or after a cancel
     /// until the next scheduled check. When they wait or don't happen, everything is notified instead.
@@ -387,15 +424,37 @@ import BrewxPortRun
         heldForPower = automatic && onLowPower
         heldForPerson = false
         heldByRelations = []
+        heldForTools = []
+        if automatic {
+            // Held whether or not power lets anything run now: what would break tools is told as itself.
+            let runtimes = model.updates.runtimeHolds
+            let rows = model.updates.updateAllRequests().map(\.package.id).filter { runtimes[$0] != nil }
+            heldForTools = Set(rows)
+            postRuntimeHeld(rows)
+        }
         if automatic, !heldForPower {
             let hidden = hiddenRefs
             var clear: [ActionRequest] = []
             var held: [ActionRequest] = []
-            for request in model.updates.updateAllRequests() {
-                if relations.holds(request.package.id, hidden: hidden) {
-                    held.append(request)
-                } else {
+            var ignoredOrSkipped = false
+            var runtimes: [String] = []
+            var maybeRuntimes: [String] = []
+            for request in model.updates.automaticRequests() {
+                let ref = request.package.id
+                // `brew upgrade` would bring an ignored or skipped package along, or a runtime language tools run on
+                // (or may: Homebrew couldn't say what's related).
+                let related = relations.holds(ref, hidden: hidden)
+                let broughtAlong = model.updates.broughtAlong(by: ref)
+                guard related || !broughtAlong.isEmpty else {
                     clear.append(request)
+                    continue
+                }
+                held.append(request)
+                ignoredOrSkipped = ignoredOrSkipped || related
+                for (runtime, certain) in broughtAlong {
+                    guard let name = model.updates.runtimeHolds[runtime]?.runtime else { continue }
+                    if certain, !runtimes.contains(name) { runtimes.append(name) }
+                    if !certain, !maybeRuntimes.contains(name) { maybeRuntimes.append(name) }
                 }
             }
             heldByRelations = Set(held.map(\.package.id))
@@ -409,7 +468,8 @@ import BrewxPortRun
             } else if !startAutoRun(free, origin: .background, passwordPart: passwordPart), let passwordPart {
                 waitForUser(passwordPart)
             }
-            postNeedsAttention(held)
+            postNeedsAttention(held, ignoredOrSkipped: ignoredOrSkipped, runtimes: runtimes.sorted(),
+                               maybeRuntimes: maybeRuntimes.sorted())
         }
         postAvailable()
     }
@@ -492,7 +552,7 @@ import BrewxPortRun
             return false
         }
         autoRun = AutoRun(runNumber: model.run.runNumber,
-                          requested: requests.map { ($0.package.id, $0.package.displayName) },
+                          requested: requests.map { ($0.package.id, $0.package.displayName, $0.package.latestVersion) },
                           passwordPart: passwordPart, check: checksStarted, asksPassword: origin == .user)
         return true
     }
@@ -530,10 +590,41 @@ import BrewxPortRun
         let cancelled = model.run.cancelled && !forNow
         // Set now, before a check waiting for this end acts on it.
         if cancelled { heldAfterCancel = true }
-        Task { [weak self] in await self?.autoRunEnded(ended, cancelled: cancelled, forNow: forNow) }
+        // Read now: a run the person starts while the lists reload replaces these steps.
+        let results = Self.stepResults(model.run.steps)
+        Task { [weak self] in
+            await self?.autoRunEnded(ended, cancelled: cancelled, forNow: forNow, results: results)
+        }
     }
 
-    private func autoRunEnded(_ ended: AutoRun, cancelled: Bool, forNow: Bool) async {
+    /// What a run's step says about one package it named (`RunStep.refs`).
+    enum StepResult: Equatable, Sendable {
+        /// The step finished with exit code 0.
+        case succeeded
+        /// The step ran and didn't finish with 0 (or was stopped), and it named other packages too: some of them may
+        /// have been updated (Homebrew carries on past a formula that fails). The reload decides (R27).
+        case failedWithOthers
+        /// The step didn't finish with 0 and named only this package, or never ran.
+        case failed
+    }
+
+    /// Each package the run's steps named, with what its step says.
+    static func stepResults(_ steps: [RunStepRow]) -> [PackageRef: StepResult] {
+        var results: [PackageRef: StepResult] = [:]
+        for step in steps {
+            let result: StepResult
+            switch step.state {
+            case .succeeded: result = .succeeded
+            case .failed, .stopped: result = step.refs.count > 1 ? .failedWithOthers : .failed
+            case .waiting, .running, .skipped: result = .failed
+            }
+            for ref in step.refs { results[ref] = result }
+        }
+        return results
+    }
+
+    private func autoRunEnded(_ ended: AutoRun, cancelled: Bool, forNow: Bool,
+                              results: [PackageRef: StepResult]) async {
         guard let updates = model?.updates else { return }
         await updates.reloaded()
         await autoRunEndPause()
@@ -551,50 +642,79 @@ import BrewxPortRun
             postAvailable()
             return
         }
-        postSummary(ended)
+        postSummary(ended, results: results)
         // A check that started since this run did (one that waited for its end) decides the password part itself,
         // whether it has finished by now or not. The wait re-reads the mode and the power first.
         if let passwordPart = ended.passwordPart, ended.check == checksStarted { waitForUser(passwordPart) }
     }
 
-    /// What the run was asked to update, sorted by what the reloaded Updates list says: gone from an engine that
-    /// answered is updated; still listed failed; and an engine that didn't answer (or answered with an error) can't
-    /// say, so those are never counted as updated.
-    private func postSummary(_ ended: AutoRun) {
+    /// What the run was asked to update, sorted by the run's own results (R6, R27), then by the reloaded Updates list.
+    /// Still offered after the run is failed, whatever the step said (the update didn't take; `stillOffered`).
+    /// Otherwise:
+    /// - a package whose step finished with 0 is updated;
+    /// - one whose step failed alone, or never ran or was never planned, failed;
+    /// - one whose failed step named other packages too (`failedWithOthers`) is updated when its engine answered the
+    ///   reload and checked everything; when it didn't answer, or couldn't check something, BrewxPort can't tell, so
+    ///   it's "not confirmed".
+    /// A row vanishing from the list never counts as updated by itself.
+    private func postSummary(_ ended: AutoRun, results: [PackageRef: StepResult]) {
         guard let model else { return }
-        let list = model.updates.list
-        let stillOutdated = Set(list.all.map(\.id))
+        let updates = model.updates
+        let list = updates.list
         let answered = list.answeredEngines.subtracting(list.failedEngines)
-        var updated: [String] = [], failed: [String] = [], unchecked: [String] = []
-        for (ref, name) in ended.requested {
-            if stillOutdated.contains(ref) {
+        var updated: [String] = [], failed: [String] = [], notConfirmed: [String] = []
+        for (ref, name, target) in ended.requested {
+            if let row = list.all.first(where: { $0.id == ref }),
+               Self.stillOffered(row.package, held: updates.hold(for: row) != nil, target: target) {
                 failed.append(name)
-            } else if answered.contains(ref.engine) {
+                continue
+            }
+            switch results[ref] ?? .failed {
+            case .succeeded:
                 updated.append(name)
-            } else {
-                unchecked.append(name)
+            case .failed:
+                failed.append(name)
+            case .failedWithOthers:
+                let checkedAll = answered.contains(ref.engine) && list.unchecked[ref.engine]?.isEmpty != false
+                if checkedAll { updated.append(name) } else { notConfirmed.append(name) }
             }
         }
         guard settings.notificationsOn else { return }
         services.notifier.post(id: summaryID(run: ended.runNumber),
-                               title: Self.summaryTitle(updated: updated.count, failed: failed, unchecked: unchecked),
+                               title: Self.summaryTitle(updated: updated.count, failed: failed,
+                                                        notConfirmed: notConfirmed),
                                body: updated.joined(separator: ", "), target: .runLog)
+    }
+
+    /// A package the reload still lists shows its update didn't take, unless it's held and offers a version newer than
+    /// the one the run targeted: then the run updated it, and the newer version waits for its own reason (a crate
+    /// updated to 15 whose 16 needs a newer Rust). A held row offering the targeted version or older still counts.
+    /// Versions are compared by the engine's own rules; for an engine without them (or a version they can't read),
+    /// only a different version counts as newer.
+    static func stillOffered(_ row: Package, held: Bool, target: String?) -> Bool {
+        guard held, let offered = row.latestVersion, let target, offered != target else { return true }
+        guard let scheme = EcosystemVersion.scheme(for: row.id.engine),
+              EcosystemVersion.isValid(offered, scheme: scheme), EcosystemVersion.isValid(target, scheme: scheme)
+        else { return false }
+        return EcosystemVersion.compare(offered, target, scheme: scheme) != .orderedDescending
     }
 
     /// Run numbers start again at every launch, so a summary's id names the launch too: one still unread from an
     /// earlier launch is never replaced, and a click knows which run it's about.
     private func summaryID(run: Int) -> String { "updated-\(launchID)-\(run)" }
 
-    /// "Updated 3", "Updated 2. 1 failed: jq", "Updates failed: jq, wget", each followed by ". Couldn't check: a"
-    /// when an engine didn't answer.
-    static func summaryTitle(updated: Int, failed: [String], unchecked: [String]) -> String {
+    /// "Updated 3", "Updated 2. 1 failed: jq", "Updates failed: jq, wget", each followed by ". 1 not confirmed: a"
+    /// when a failed step's package may or may not have been updated.
+    static func summaryTitle(updated: Int, failed: [String], notConfirmed: [String]) -> String {
         var parts: [String] = []
         if updated > 0 { parts.append("Updated \(updated)") }
         if !failed.isEmpty {
             let names = failed.joined(separator: ", ")
             parts.append(updated > 0 ? "\(failed.count) failed: \(names)" : "Updates failed: \(names)")
         }
-        if !unchecked.isEmpty { parts.append("Couldn't check: \(unchecked.joined(separator: ", "))") }
+        if !notConfirmed.isEmpty {
+            parts.append("\(notConfirmed.count) not confirmed: \(notConfirmed.joined(separator: ", "))")
+        }
         return parts.isEmpty ? "Updated 0" : parts.joined(separator: ". ")
     }
 
@@ -631,12 +751,13 @@ import BrewxPortRun
         userPoll = nil
     }
 
-    /// The waited-for updates as they are now: still on Updates, not ignored or skipped since, still needing the
-    /// password, and not updating an ignored or skipped package (one ignored or skipped since included).
+    /// The waited-for updates as they are now: still on Updates, not ignored, skipped or held from automatic updates
+    /// since, still needing the password, and not updating an ignored or skipped package (one ignored or skipped since
+    /// included).
     private func waitingRequests(_ refs: Set<PackageRef>) -> [ActionRequest] {
         guard let updates = model?.updates else { return [] }
         let hidden = hiddenRefs
-        return updates.updateAllRequests().filter {
+        return updates.automaticRequests().filter {
             refs.contains($0.package.id) && !isPasswordFree($0) && !relations.holds($0.package.id, hidden: hidden)
         }
     }
@@ -820,7 +941,7 @@ import BrewxPortRun
     /// replay old news; the badge shows them either way.
     private func postAvailable() {
         guard let updates = model?.updates else { return }
-        let left = handledRefs.union(heldByRelations)
+        let left = handledRefs.union(heldByRelations).union(heldForTools)
         let rows = updates.updateAllRequests().compactMap { request -> PackageRow? in
             left.contains(request.package.id) ? nil : updates.list.byRef[request.package.id]
         }
@@ -833,9 +954,11 @@ import BrewxPortRun
     }
 
     /// "N updates need your attention": the updates an automatic run left out because they'd also update an ignored
-    /// or skipped package. Like `postAvailable`, posted when one of them is a version not told before, counting them
-    /// all, and recorded even with notifications off. Clicking it opens Updates.
-    private func postNeedsAttention(_ requests: [ActionRequest]) {
+    /// or skipped package, or a Homebrew runtime held back for language tools (`attentionBody` says which). Like
+    /// `postAvailable`, posted when one of them is a version not told before, counting them all, and recorded even
+    /// with notifications off. Clicking it opens Updates.
+    private func postNeedsAttention(_ requests: [ActionRequest], ignoredOrSkipped: Bool, runtimes: [String],
+                                    maybeRuntimes: [String]) {
         guard let updates = model?.updates else { return }
         let rows = requests.compactMap { updates.list.byRef[$0.package.id] }
         guard !ledger.newOnes(in: rows).isEmpty else { return }
@@ -844,7 +967,26 @@ import BrewxPortRun
         services.notifier.post(id: Self.attentionID,
                                title: rows.count == 1
                                    ? "1 update needs your attention" : "\(rows.count) updates need your attention",
-                               body: Self.attentionBody(count: rows.count), target: .updates)
+                               body: Self.attentionBody(count: rows.count, ignoredOrSkipped: ignoredOrSkipped,
+                                                        runtimes: runtimes, maybeRuntimes: maybeRuntimes),
+                               target: .updates)
+    }
+
+    /// One notice per Homebrew runtime update held back because language tools run on it, in the design's words: title
+    /// "Ruby 4.1 is ready", body "Updating it needs your gems reinstalled." Like `postAvailable`, once per version
+    /// (`NotifyLedger`, in its own namespace: a version already told as available is still told this way once),
+    /// recorded even with notifications off; each runtime has its own id, so a newer version of it
+    /// replaces the last. Clicking it opens Updates.
+    private func postRuntimeHeld(_ refs: [PackageRef]) {
+        guard let updates = model?.updates else { return }
+        for ref in refs {
+            guard let row = updates.list.byRef[ref], let held = updates.runtimeHolds[ref],
+                  !ledger.newOnes(in: [row], namespace: .runtime).isEmpty else { continue }
+            ledger.record([row], namespace: .runtime)
+            guard settings.notificationsOn else { continue }
+            services.notifier.post(id: Self.runtimeIDPrefix + ref.name, title: held.noticeTitle,
+                                   body: held.hold.reason, target: .updates)
+        }
     }
 
     /// "N updates need your password": the password run is waiting for a click, because BrewxPort couldn't be made

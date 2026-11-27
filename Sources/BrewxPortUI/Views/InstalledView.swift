@@ -35,7 +35,7 @@ struct InstalledView: View {
                 }
             }
             ToolbarItem {
-                Button("Refresh", systemImage: "arrow.clockwise") { model.refreshLists() }
+                Button("Refresh", systemImage: "arrow.clockwise") { model.refresh() }
                     .help("Ask every engine what's installed again (⌘R)")
             }
             ToolbarItem {

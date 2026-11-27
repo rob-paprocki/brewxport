@@ -482,7 +482,9 @@ struct FakeReceipts: InstallerReceiptReading {
     @Test func previewFirstLaunchShowsNothingInstalled() async {
         let model = BrewxPortAppModel(services: F.services(isDemo: true))
         model.previewFirstLaunch()
+        #expect(Set(model.engineStatuses.keys) == Set(EngineID.allCases))
         #expect(model.engineStatuses.values.allSatisfy { $0 == .missing })
+        // The sheet offers the system package managers only: a language engine is set up from its own page, through one.
         #expect(model.setup.stage == .offer(recommended: .homebrew, others: [.macports, .nanobrew]))
     }
 

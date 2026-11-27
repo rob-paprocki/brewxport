@@ -36,8 +36,10 @@ public struct ActionPlan: Sendable, Equatable {
 /// Removes run first, then installs, then upgrades. Within each, engines go in `order`, and within an engine,
 /// Homebrew taps come first (so formulae from them resolve), then formulae (or ports, or apps), then casks, because
 /// Homebrew and nanobrew can't mix the two in one command. Requests are batched into one step per (operation, engine,
-/// kind group); every tap, and every request with non-default `InstallOptions`, gets a step of its own, so a MacPorts
-/// install with variants is always one port. Two installs share a name when `BundleRules.duplicateKey` matches.
+/// kind group), split further when the engine takes fewer packages per command (`maxTargetsPerCommand`: pipx's
+/// upgrades, Cargo's builds, Mint); every tap, and every request with non-default `InstallOptions`, gets a step of its
+/// own, so a MacPorts install with variants is always one port. Two installs share a name when
+/// `BundleRules.duplicateKey` matches.
 ///
 /// Each step's command comes from the engine's own `command(for:…)`. An engine that can't build its command is
 /// reported in `problems` and left out; the other steps still run.
@@ -136,9 +138,10 @@ public enum ActionPlanner {
                 let packages = mine.filter { $0.ref.kind != .tap && $0.ref.kind != .cask }
                 let casks = mine.filter { $0.ref.kind == .cask }
                 let refreshesFirst = operation == .upgrade && engine.id == .macports
+                let limit = engine.maxTargetsPerCommand(for: operation)
                 var planned: [RunStep] = []
                 // Taps first, so formulae from them resolve; `brew tap` takes one tap per command.
-                for batch in taps.map({ [$0] }) + batches(packages) + batches(casks) {
+                for batch in taps.map({ [$0] }) + batches(packages, limit: limit) + batches(casks, limit: limit) {
                     let refs = batch.map(\.ref)
                     let kind = refs[0].kind
                     let stepTitle = kind == .tap && operation == .install ? "Add tap `\(refs[0].name)`"
@@ -147,7 +150,8 @@ public enum ActionPlanner {
                         let spec = try engine.command(for: operation, refs, options: batch[0].options)
                         planned.append(RunStep(engine: engine.id, kind: kind, operation: operation, spec: spec,
                                                title: stepTitle, requiresAllEarlier: refreshesFirst,
-                                               gateGroup: refreshesFirst ? RunStep.macPortsCatalogueRefreshGroup : nil))
+                                               gateGroup: refreshesFirst ? RunStep.macPortsCatalogueRefreshGroup : nil,
+                                               refs: refs))
                     } catch let error as EngineError {
                         problems.append("\(stepTitle): \(error.message)")
                     } catch {
@@ -191,11 +195,14 @@ public enum ActionPlanner {
         return []
     }
 
-    /// Requests with default options share one step; each request with its own options gets its own.
-    private static func batches(_ items: [Item]) -> [[Item]] {
+    /// Requests with default options share one step, or steps of at most `limit` (the engine's
+    /// `maxTargetsPerCommand`) in request order; each request with its own options gets its own.
+    private static func batches(_ items: [Item], limit: Int?) -> [[Item]] {
         let plain = items.filter { $0.options == InstallOptions() }
         let custom = items.filter { $0.options != InstallOptions() }
-        return (plain.isEmpty ? [] : [plain]) + custom.map { [$0] }
+        let size = max(1, limit ?? plain.count)
+        let chunks = stride(from: 0, to: plain.count, by: size).map { Array(plain[$0..<min($0 + size, plain.count)]) }
+        return chunks + custom.map { [$0] }
     }
 
     static func title(_ engine: EngineID, kind: PackageKind, names: [String]) -> String {
@@ -211,6 +218,7 @@ public enum ActionPlanner {
             case .upgrade: what = "update these packages"
             case .remove: what = "remove these packages"
             case .markRequested, .markDependency: what = "change how these packages are marked"
+            case .repair: what = "repair these tools"
             }
         } else {
             what = "make these changes"

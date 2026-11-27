@@ -1,0 +1,1 @@
+warning: Invalid environment at `.local/share/uv/tools/tabulate`: missing Python executable at `.local/share/uv/tools/tabulate/bin/python` (run `uv tool install tabulate --reinstall` to reinstall)

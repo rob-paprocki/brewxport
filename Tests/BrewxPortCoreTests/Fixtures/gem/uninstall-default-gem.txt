@@ -1,0 +1,1 @@
+Gem json-2.18.3 cannot be uninstalled because it is a default gem

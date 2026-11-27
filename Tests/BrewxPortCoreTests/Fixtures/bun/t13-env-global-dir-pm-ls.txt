@@ -1,0 +1,2 @@
+/Users/tester/bun-alt-global node_modules (41 installed)
+└── cowsay@1.5.0

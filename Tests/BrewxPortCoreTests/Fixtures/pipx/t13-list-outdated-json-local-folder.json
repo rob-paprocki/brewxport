@@ -1,0 +1,44 @@
+{
+  "command": [
+    "list"
+  ],
+  "data": {
+    "packages": [
+      {
+        "environment": "black",
+        "injected": false,
+        "latest_version": "26.10.1",
+        "package": "black",
+        "pinned": false,
+        "version": "24.2.0"
+      },
+      {
+        "environment": "cowsay",
+        "injected": false,
+        "latest_version": "6.1",
+        "package": "cowsay",
+        "pinned": false,
+        "version": "5.0"
+      }
+    ],
+    "packages_checked": 4,
+    "skipped": [
+      {
+        "environment": "brewxport-capture-tool",
+        "package": "brewxport-capture-tool",
+        "reason": "non-index"
+      }
+    ]
+  },
+  "errors": [
+    {
+      "code": "environment_outdated_check_failed",
+      "environment": "pyjokes-private",
+      "message": "Package backend exited with code 2.\nstderr: error: Request failed after 3 retries in 10.6s\n  cause: Failed to fetch: http://127.0.0.1:8765/simple/pyjokes/\n  cause: error sending request for url (http://127.0.0.1:8765/simple/pyjokes/)\n  cause: client error (Connect)\n  cause: tcp connect error\n  cause: Connection refused (os error 61)\n",
+      "package": null
+    }
+  ],
+  "exit_code": 1,
+  "pipx_result_version": "1",
+  "status": "partial"
+}

@@ -1,0 +1,2 @@
+ripgrep v16.0.0:
+    rg

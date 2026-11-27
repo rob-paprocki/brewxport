@@ -1,0 +1,4 @@
+error: Failed to parse: `bad name!`
+  cause: Expected one of `@`, `(`, `<`, `=`, `>`, `~`, `!`, `;`, found `n`
+         bad name!
+             ^

@@ -1,0 +1,7 @@
+error: unexpected argument '--show-version-specifiers' found
+
+  tip: a similar argument exists: '--show-settings'
+
+Usage: uv tool list [OPTIONS]
+
+For more information, try '--help'.

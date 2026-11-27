@@ -3,8 +3,8 @@ import BrewxPortCore
 import BrewxPortRun
 import BrewxPortUI
 
-/// The real world: engines at their fixed paths, the helper, and one-password runs. Only a `.live` startup builds
-/// these; a development Mac never gets here.
+/// The real world: the system engines at their fixed paths, the language engines from the login shell's PATH, the
+/// helper, and one-password runs. Only a `.live` startup builds these; a development Mac never gets here.
 enum LiveServices {
     static let unsignedProblem =
         "This copy of BrewxPort isn't signed by a developer team, so it can't install, update or remove packages."
@@ -12,7 +12,14 @@ enum LiveServices {
     @MainActor static func make() -> Services {
         let runner = ProcessRunner()
         let host = Arch.current
-        let engines = Engines.make(runner: runner, arch: host)
+        // One login shell probe for the whole app: Installed's PATH and the language engines' PATH and variables.
+        let path = loginShellPath(runner)
+        // Every language engine's detect asks it: an answer, a slow shell's fallback included, is kept until the
+        // person's Refresh or Check again (`LoginShellPath.askAgain`), so a slow shell isn't waited for on each detect.
+        let engines = Engines.make(runner: runner, arch: host, loginShell: {
+            let resolved = await path.resolve()
+            return LoginShellContext(path: resolved.entries, environment: resolved.environment)
+        })
         let catalog = PackageCatalog(engines: engines, arch: host)
         // One provider: RunSession asks it, and BrewxPortAppModel points it at the run controller.
         let passwords = PromptPasswordProvider()
@@ -31,7 +38,6 @@ enum LiveServices {
         } else {
             setupProblem = unsignedProblem
         }
-        let path = loginShellPath(runner)
         return Services(
             engines: engines, catalog: catalog, executor: executor, helper: helper, passwords: passwords,
             isAdministrator: AdminMembership.currentUserIsAdmin, store: DefaultsStore(), path: path,
@@ -45,7 +51,8 @@ enum LiveServices {
             shellPath: ShellPathEditor(home: FileManager.default.homeDirectoryForCurrentUser, shell: path.loginShell))
     }
 
-    /// The login shell's PATH, asked for once, the first time Installed loads (read-only: the shell prints its PATH).
+    /// The login shell's PATH and tool variables, asked for once, the first time Installed loads or a language engine
+    /// is detected (read-only: the shell prints them).
     /// Falls back to /etc/paths and /etc/paths.d when the shell isn't listed in /etc/shells or doesn't answer.
     static func loginShellPath(_ runner: ProcessRunner) -> LoginShellPath {
         LoginShellPath(runner: runner, shell: LoginShellPath.userShell(), allowedShells: LoginShellPath.allowedShells(),

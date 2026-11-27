@@ -1,0 +1,22 @@
+{
+  "command": [
+    "install"
+  ],
+  "data": {
+    "packages": [
+      {
+        "backend": "uv",
+        "environment": "cowsay",
+        "interpreter": "Python 3.15.2",
+        "location": "/Users/tester/Library/Application Support/pipx/venvs/cowsay",
+        "package": "cowsay",
+        "version": "5.0"
+      }
+    ],
+    "skipped": []
+  },
+  "errors": [],
+  "exit_code": 0,
+  "pipx_result_version": "1",
+  "status": "success"
+}

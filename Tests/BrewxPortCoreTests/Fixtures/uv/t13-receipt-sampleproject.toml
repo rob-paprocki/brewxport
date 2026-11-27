@@ -1,0 +1,5 @@
+[tool]
+requirements = [{ name = "sampleproject", git = "https://github.com/pypa/sampleproject" }]
+entrypoints = [
+    { name = "sample", install-path = "/Users/tester/.local/bin/sample", from = "sampleproject" },
+]

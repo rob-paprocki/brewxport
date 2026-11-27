@@ -1,0 +1,20 @@
+{
+  "command": [
+    "install"
+  ],
+  "data": {
+    "packages": [],
+    "skipped": []
+  },
+  "errors": [
+    {
+      "code": "package_install_failed",
+      "environment": "bad name!",
+      "message": "Unable to parse package spec: bad name!",
+      "package": null
+    }
+  ],
+  "exit_code": 1,
+  "pipx_result_version": "1",
+  "status": "error"
+}

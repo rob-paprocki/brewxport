@@ -1,0 +1,14 @@
+{
+  "command": [
+    "list"
+  ],
+  "data": {
+    "packages": [],
+    "packages_checked": 0,
+    "skipped": []
+  },
+  "errors": [],
+  "exit_code": 0,
+  "pipx_result_version": "1",
+  "status": "success"
+}

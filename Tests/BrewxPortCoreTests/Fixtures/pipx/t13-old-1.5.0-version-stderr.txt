@@ -1,0 +1,3 @@
+⚠️ Found a space in the home path. We heavily discourage this, due to multiple
+    incompatibilities. Please check our docs for more information on this, as
+    well as some pointers on how to migrate to a different home path.

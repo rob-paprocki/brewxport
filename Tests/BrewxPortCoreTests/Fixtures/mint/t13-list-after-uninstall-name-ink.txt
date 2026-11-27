@@ -1,0 +1,4 @@
+🌱 Installed mint packages:
+  MultiTool
+    - 1.0.0 (multi-a, multi-b)
+    - 1.1.0 (multi-a *, multi-b)

@@ -36,6 +36,28 @@ import Foundation
         #expect(try Self.read(file) == "export EDITOR=vim\n" + Self.line + "\n")
     }
 
+    /// A language manager's bin folder (`~/.cargo/bin`) is in no fixed list, so it's written only when the caller names
+    /// it as one an engine reported, and only when it's a plain path: anything a shell would read as code (`$`, a
+    /// backtick, a quote, a backslash, a new line) is refused, allowed or not, and nothing is written.
+    @Test func languageBinFolderOnlyWhenPlain() throws {
+        let home = try Self.home()
+        let file = home.appendingPathComponent(".zprofile")
+        let editor = ShellPathEditor(home: home, shell: "/bin/zsh")
+        let cargo = home.path + "/.cargo/bin"
+        #expect(throws: ShellPathEditor.Failure.unknownDirectory) { try editor.add(cargo, to: editor.offer) }
+        #expect(try editor.add(cargo, to: editor.offer, allowing: [cargo]) == .added(file: "~/.zprofile"))
+        #expect(try Self.read(file) == "export PATH=\"\(cargo):$PATH\"  # Added by BrewxPort\n")
+        for unsafe in [home.path + "/$(touch x)/bin", home.path + "/`id`/bin", home.path + "/a\"b/bin",
+                       home.path + "/a\\b/bin", home.path + "/a\nb/bin", "relative/bin", home.path + "/../x/bin"] {
+            #expect(!ShellPathEditor.isPlainPath(unsafe), "\(unsafe)")
+            #expect(throws: ShellPathEditor.Failure.unknownDirectory) {
+                try editor.add(unsafe, to: editor.offer, allowing: [unsafe])
+            }
+        }
+        #expect(ShellPathEditor.isPlainPath("/Users/Zoë Smith/.local/bin"))
+        #expect(try Self.read(file) == "export PATH=\"\(cargo):$PATH\"  # Added by BrewxPort\n")
+    }
+
     @Test func createsFileWhenMissing() throws {
         let home = try Self.home()
         let file = home.appendingPathComponent(".zprofile")

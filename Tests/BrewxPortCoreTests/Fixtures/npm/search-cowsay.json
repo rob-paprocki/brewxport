@@ -1,0 +1,201 @@
+[
+
+{"name":"cowsay","keywords":["cow","cowsay","cowthink","figlet","talking","ASCII"],"version":"1.6.0","description":"cowsay is a configurable talking cow","sanitized_name":"cowsay","publisher":{"email":"user@example.com","username":"piuccio"},"maintainers":[{"email":"user@example.com","username":"piuccio"}],"license":"MIT","date":"2024-01-26T06:24:22.739Z","links":{"homepage":"https://github.com/piuccio/cowsay","repository":"git+https://github.com/piuccio/cowsay.git","bugs":"https://github.com/piuccio/cowsay/issues","npm":"https://www.npmjs.com/package/cowsay"}}
+
+,
+
+{"name":"@afcms/cowsay-ng","keywords":["ascii-art","cowsay","fun","terminal"],"version":"0.1.3","description":"Next-gen cowsay","sanitized_name":"@afcms/cowsay-ng","publisher":{"email":"user@example.com","approver":{"name":"afcm","email":"user@example.com"},"trustedPublisher":{"oidcConfigId":"***","id":"github"},"username":"GitHub Actions"},"maintainers":[{"email":"user@example.com","username":"afcm"}],"license":"MIT AND GPL-3.0-only","date":"2026-11-20T20:56:05.730Z","links":{"homepage":"https://github.com/AFCMS/cowsay-ng#readme","repository":"git+https://github.com/AFCMS/cowsay-ng.git","bugs":"https://github.com/AFCMS/cowsay-ng/issues","npm":"https://www.npmjs.com/package/@afcms/cowsay-ng"}}
+
+,
+
+{"name":"cowrizz","keywords":[],"version":"1.0.4","description":"cowsay with rizz","sanitized_name":"cowrizz","publisher":{"email":"user@example.com","username":"aliemirsen"},"maintainers":[{"email":"user@example.com","username":"aliemirsen"}],"license":"ISC","date":"2023-11-13T10:51:07.443Z","links":{"homepage":"https://github.com/aliemir/cowrizz#readme","repository":"git+https://github.com/aliemir/cowrizz.git","bugs":"https://github.com/aliemir/cowrizz/issues","npm":"https://www.npmjs.com/package/cowrizz"}}
+
+,
+
+{"name":"cowsay-browser","keywords":["cow","cowsay","cowthink","figlet","talking","ASCII"],"version":"1.1.8","description":"cowsay is a configurable talking cow","sanitized_name":"cowsay-browser","publisher":{"email":"user@example.com","username":"bushmango"},"maintainers":[{"email":"user@example.com","username":"bushmango"}],"date":"2016-02-21T01:34:20.296Z","links":{"homepage":"https://github.com/bushmango/cowsay-browser","repository":"git+https://github.com/bushmango/cowsay-browser.git","bugs":"https://github.com/bushmango/cowsay-browser/issues","npm":"https://www.npmjs.com/package/cowsay-browser"}}
+
+,
+
+{"name":"cowsayjs","keywords":["cowsay","cowthink","moo","cli","ascii","customizable","backend","front-end"],"version":"2.0.0","description":"A nodejs clone of the classic cowsay and cowthink cli commands","sanitized_name":"cowsayjs","publisher":{"email":"user@example.com","username":"erincones"},"maintainers":[{"email":"user@example.com","username":"erincones"}],"license":"MIT","date":"2022-10-24T19:09:42.811Z","links":{"homepage":"https://nextmoo.vercel.app/","repository":"git+ssh://git@github.com/erincones/cowsayjs.git","bugs":"https://github.com/erincones/cowsayjs/issues","npm":"https://www.npmjs.com/package/cowsayjs"}}
+
+,
+
+{"name":"cowsay-ts","keywords":["cowsay","ascii","cli","fun"],"version":"2026.10.2","description":"Zero-dependency cowsay, in TypeScript, with ESM and CJS builds","sanitized_name":"cowsay-ts","publisher":{"email":"user@example.com","username":"gabano"},"maintainers":[{"email":"user@example.com","username":"gabano"}],"license":"MIT","date":"2026-10-28T08:06:30.751Z","links":{"repository":"https://github.com/damien-mathieu1/cowsay-ts","npm":"https://www.npmjs.com/package/cowsay-ts"}}
+
+,
+
+{"name":"cowsay2","keywords":["cowsay","ASCII"],"version":"2.0.4","description":"cowsay is a configurable talking cow","sanitized_name":"cowsay2","publisher":{"email":"user@example.com","username":"portersi"},"maintainers":[{"email":"user@example.com","username":"portersi"}],"license":"MIT","date":"2020-04-12T23:45:51.009Z","links":{"homepage":"https://github.com/johnnysprinkles/cowsay","repository":"git+https://github.com/johnnysprinkles/cowsay.git","bugs":"https://github.com/johnnysprinkles/cowsay/issues","npm":"https://www.npmjs.com/package/cowsay2"}}
+
+,
+
+{"name":"react-cowsay","keywords":["react","react-component","cowsay","cowthink","say","wrapper","ascii"],"version":"0.1.0","description":"A react wrapper for cowsay-browser","sanitized_name":"react-cowsay","publisher":{"email":"user@example.com","username":"foxxmd"},"maintainers":[{"email":"user@example.com","username":"foxxmd"}],"license":"MIT","date":"2017-04-19T14:38:28.156Z","links":{"homepage":"https://github.com/foxxmd/react-cowsay","repository":"git+https://github.com/foxxmd/react-cowsay.git","bugs":"https://github.com/foxxmd/react-cowsay/issues","npm":"https://www.npmjs.com/package/react-cowsay"}}
+
+,
+
+{"name":"cowsay-demo","keywords":["cow","cowsay demo","cowthink","figlet","talking","ASCII"],"version":"1.5.0","description":"cowsay is a configurable talking cow","sanitized_name":"cowsay-demo","publisher":{"email":"user@example.com","username":"code-brewer"},"maintainers":[{"email":"user@example.com","username":"code-brewer"}],"license":"MIT","date":"2023-09-21T13:02:14.197Z","links":{"homepage":"https://github.com/code-brewer/cowsay-demo","repository":"git+https://github.com/code-brewer/cowsay-demo.git","bugs":"https://github.com/code-brewer/cowsay-demo/issues","npm":"https://www.npmjs.com/package/cowsay-demo"}}
+
+,
+
+{"name":"ember-cowsay","keywords":["ember-addon","cowsay"],"version":"0.3.0","description":"Ember + Cowsay","sanitized_name":"ember-cowsay","publisher":{"email":"user@example.com","username":"alexdiliberto"},"maintainers":[{"email":"user@example.com","username":"alexdiliberto"}],"license":"MIT","date":"2017-06-07T02:11:56.036Z","links":{"homepage":"https://github.com/alexdiliberto/ember-cowsay#readme","repository":"git+https://github.com/alexdiliberto/ember-cowsay.git","bugs":"https://github.com/alexdiliberto/ember-cowsay/issues","npm":"https://www.npmjs.com/package/ember-cowsay"}}
+
+,
+
+{"name":"node-red-contrib-cowsay","keywords":["node-red-nodegen","node-red","cowsay"],"version":"0.1.1","description":"Node-RED node for cowsay","sanitized_name":"node-red-contrib-cowsay","publisher":{"email":"user@example.com","username":"kazuhitoyokoi"},"maintainers":[{"email":"user@example.com","username":"kazuhitoyokoi"}],"license":"Apache-2.0","date":"2022-03-30T14:29:26.043Z","links":{"npm":"https://www.npmjs.com/package/node-red-contrib-cowsay"}}
+
+,
+
+{"name":"cowsay-tag","keywords":["cowsay","es6","template-tag"],"version":"1.3.3","description":"es6 template-tag function for cowsay","sanitized_name":"cowsay-tag","publisher":{"email":"user@example.com","username":"jlmitch5"},"maintainers":[{"email":"user@example.com","username":"jlmitch5"}],"license":"MIT","date":"2016-12-29T22:47:05.949Z","links":{"homepage":"https://github.com/jlmitch5/cowsay-tag","repository":"git+https://github.com/jlmitch5/cowsay-tag.git","bugs":"https://github.com/jlmitch5/cowsay-tag/issues","npm":"https://www.npmjs.com/package/cowsay-tag"}}
+
+,
+
+{"name":"ts-cowsay","keywords":["cow","cowsay","cowthink","figlet","talking","ASCII"],"version":"0.0.8","description":"cowsay is a configurable talking cow","sanitized_name":"ts-cowsay","publisher":{"email":"user@example.com","username":"andrewalex"},"maintainers":[{"email":"user@example.com","username":"andrewalex"}],"license":"MIT","date":"2023-09-13T03:33:59.768Z","links":{"npm":"https://www.npmjs.com/package/ts-cowsay"}}
+
+,
+
+{"name":"grunt-cowsay","keywords":["gruntplugin","cow","cowsay","figlet","ascii"],"version":"0.1.2","description":"Cowsay for grunt.","sanitized_name":"grunt-cowsay","publisher":{"email":"user@example.com","username":"beneb"},"maintainers":[{"email":"user@example.com","username":"beneb"}],"date":"2016-05-11T15:04:11.559Z","links":{"homepage":"https://github.com/ben-eb/grunt-cowsay","repository":"git://github.com/ben-eb/grunt-cowsay.git","bugs":"https://github.com/ben-eb/grunt-cowsay/issues","npm":"https://www.npmjs.com/package/grunt-cowsay"}}
+
+,
+
+{"name":"cowsay-loader","keywords":["webpack","cowsay","loader"],"version":"1.0.1","description":"Cowsay loader for webpack","sanitized_name":"cowsay-loader","publisher":{"email":"user@example.com","username":"nelix"},"maintainers":[{"email":"user@example.com","username":"nelix"}],"license":"Public Domain","date":"2014-10-15T09:41:00.941Z","links":{"homepage":"https://github.com/nelix/cowsay-loader","repository":"https://github.com/nelix/cowsay-loader","bugs":"https://github.com/nelix/cowsay-loader/issues","npm":"https://www.npmjs.com/package/cowsay-loader"}}
+
+,
+
+{"name":"cowsay-mcp","keywords":["AI","LLM","MCP","ModelContextProtocol","Cowsay MCP Server","LLM Tool","cowsay"],"version":"2.0.0","description":"Cowsay MCP Server, providing ASCII art cow capabilities for LLMs.","sanitized_name":"cowsay-mcp","publisher":{"email":"user@example.com","username":"mrseanchow"},"maintainers":[{"email":"user@example.com","username":"mrseanchow"}],"license":"MIT","date":"2025-10-16T07:15:34.554Z","links":{"npm":"https://www.npmjs.com/package/cowsay-mcp"}}
+
+,
+
+{"name":"ngx-cowsay","keywords":["cow","cowsay","talking","ASCII"],"version":"1.0.1","description":"cowsay is a configurable talking cow","sanitized_name":"ngx-cowsay","publisher":{"email":"user@example.com","username":"pedro-rog"},"maintainers":[{"email":"user@example.com","username":"pedro-rog"}],"date":"2021-10-13T05:07:06.035Z","links":{"homepage":"https://github.com/pedrosusername/ngx-cowsay#readme","repository":"git+https://github.com/pedrosusername/ngx-cowsay.git","bugs":"https://github.com/pedrosusername/ngx-cowsay/issues","npm":"https://www.npmjs.com/package/ngx-cowsay"}}
+
+,
+
+{"name":"@davina/catsay","keywords":[],"version":"1.28.0","description":"Cowsay for cats","sanitized_name":"@davina/catsay","publisher":{"email":"user@example.com","username":"dadisusila"},"maintainers":[{"email":"user@example.com","username":"dadisusila"}],"license":"ISC","date":"2019-02-20T04:20:58.211Z","links":{"npm":"https://www.npmjs.com/package/@davina/catsay"}}
+
+,
+
+{"name":"wikisay","keywords":["nerdsay","wikisay","cowsay","cli","ascii","wiki","wikipedia","nodejs","fun","command-line"],"version":"28.9.24-6","description":"Cowsay, but with a nerd that says wikipedia things","sanitized_name":"wikisay","publisher":{"email":"user@example.com","username":"douxx"},"maintainers":[{"email":"user@example.com","username":"douxx"}],"license":"GPL-3.0-or-later","date":"2024-09-28T16:55:34.772Z","links":{"homepage":"https://github.com/CPNE-iTeam/wikisay#readme","repository":"git+https://github.com/CPNE-iTeam/wikisay.git","bugs":"https://github.com/CPNE-iTeam/wikisay/issues","npm":"https://www.npmjs.com/package/wikisay"}}
+
+,
+
+{"name":"botstrap-cowsay","keywords":["botstrap","cowsay"],"version":"1.1.1","description":"Botstrap cowsay","sanitized_name":"botstrap-cowsay","publisher":{"email":"user@example.com","username":"elvinyung"},"maintainers":[{"email":"user@example.com","username":"elvinyung"}],"license":"MIT","date":"2015-10-24T22:56:14.999Z","links":{"npm":"https://www.npmjs.com/package/botstrap-cowsay"}}
+
+,
+
+{"name":"don667","keywords":["don"],"version":"1.0.10","description":"DONNN! Based on Cowsay (https://github.com/piuccio/cowsay)","sanitized_name":"don667","publisher":{"email":"user@example.com","username":"don667"},"maintainers":[{"email":"user@example.com","username":"don667"}],"license":"MIT","date":"2022-09-08T18:35:33.319Z","links":{"npm":"https://www.npmjs.com/package/don667"}}
+
+,
+
+{"name":"tibosay","keywords":["codex","openai","tibo","thsottiaux","tibosay","cowsay","cli"],"version":"1.0.0","description":"Cowsay-style CLI tracker & AI next-reset predictor for OpenAI Codex usage limit resets by @thsottiaux (Tibo).","sanitized_name":"tibosay","publisher":{"email":"user@example.com","username":"hoxiai"},"maintainers":[{"email":"user@example.com","username":"hoxiai"}],"license":"MIT","date":"2026-10-25T05:14:02.798Z","links":{"homepage":"https://tibosay.com","npm":"https://www.npmjs.com/package/tibosay"}}
+
+,
+
+{"name":"tilda-cowsay","keywords":["tilda","cowsay","example","how","to","use","build","a","app"],"version":"1.0.0","description":"Example how to use tilda to build a cowsay app","sanitized_name":"tilda-cowsay","publisher":{"email":"user@example.com","username":"ionicabizau"},"maintainers":[{"email":"user@example.com","username":"ionicabizau"}],"license":"MIT","date":"2016-12-21T16:59:03.503Z","links":{"homepage":"https://github.com/Bloggify/tilda-cowsay#readme","repository":"git+ssh://git@github.com/Bloggify/tilda-cowsay.git","bugs":"https://github.com/Bloggify/tilda-cowsay/issues","npm":"https://www.npmjs.com/package/tilda-cowsay"}}
+
+,
+
+{"name":"ducksay-instant","keywords":["cowsay","DuckDuckGo","duck say","instant answers","terminal fun","nodejs"],"version":"1.0.4","description":"A rewrite of cowsay using the DuckDuckGo Instant Answer API","sanitized_name":"ducksay-instant","publisher":{"email":"user@example.com","username":"wkyleg"},"maintainers":[{"email":"user@example.com","username":"wkyleg"}],"license":"MIT","date":"2024-03-08T22:18:07.190Z","links":{"homepage":"https://github.com/wkyleg/ducksay-instant#readme","repository":"git+https://github.com/wkyleg/ducksay-instant.git","bugs":"https://github.com/wkyleg/ducksay-instant/issues","npm":"https://www.npmjs.com/package/ducksay-instant"}}
+
+,
+
+{"name":"@fastmcp-me/cowsay-mcp","keywords":["AI","LLM","MCP","ModelContextProtocol","Cowsay MCP Server","LLM Tool","cowsay"],"version":"2.0.0","description":"Cowsay MCP Server, providing ASCII art cow capabilities for LLMs.","sanitized_name":"@fastmcp-me/cowsay-mcp","publisher":{"email":"user@example.com","username":"sultanlive"},"maintainers":[{"email":"user@example.com","username":"sultanlive"}],"license":"MIT","date":"2025-10-19T19:35:57.578Z","links":{"homepage":"https://github.com/fastmcp-me/cowsay-mcp#readme","repository":"git+https://github.com/fastmcp-me/cowsay-mcp.git","bugs":"https://github.com/fastmcp-me/cowsay-mcp/issues","npm":"https://www.npmjs.com/package/@fastmcp-me/cowsay-mcp"}}
+
+,
+
+{"name":"cowsay-sfw","keywords":["cow","cowsay","cowthink","figlet","talking","ASCII"],"version":"1.5.0","description":"cowsay is a configurable talking cow. This fork is SFW","sanitized_name":"cowsay-sfw","publisher":{"email":"user@example.com","username":"pqmcgill"},"maintainers":[{"email":"user@example.com","username":"pqmcgill"}],"license":"MIT","date":"2022-04-15T17:01:19.506Z","links":{"homepage":"https://github.com/piuccio/cowsay","repository":"git+https://github.com/piuccio/cowsay.git","bugs":"https://github.com/piuccio/cowsay/issues","npm":"https://www.npmjs.com/package/cowsay-sfw"}}
+
+,
+
+{"name":"@franco-grobler/cowsay-cli","keywords":["command-line-utilities","cowsay","cli","command-line","ascii-art","fun"],"version":"0.3.24","description":"Command-line interface for cowsay-rs","sanitized_name":"@franco-grobler/cowsay-cli","publisher":{"email":"user@example.com","username":"franco-grobler"},"maintainers":[{"email":"user@example.com","username":"franco-grobler"}],"license":"UNLICENSE","date":"2026-01-02T19:31:48.158Z","links":{"homepage":"https://franco-grobler.github.io/cowsay-rs/","repository":"git+https://github.com/franco-grobler/cowsay-rs.git","bugs":"https://github.com/franco-grobler/cowsay-rs/issues","npm":"https://www.npmjs.com/package/@franco-grobler/cowsay-cli"}}
+
+,
+
+{"name":"goatsay","keywords":["cowsay","cowthink","ascii","asciiart","cli","goat","goatsay","goatthink"],"version":"1.0.0","description":"A goat-based variant of cowsay","sanitized_name":"goatsay","publisher":{"email":"user@example.com","username":"danyshaanan"},"maintainers":[{"email":"user@example.com","username":"danyshaanan"}],"license":"MIT","date":"2015-12-21T21:23:38.173Z","links":{"homepage":"https://github.com/danyshaanan/goatsay","repository":"git://github.com/danyshaanan/goatsay.git","bugs":"https://github.com/danyshaanan/goatsay","npm":"https://www.npmjs.com/package/goatsay"}}
+
+,
+
+{"name":"truesay","keywords":[],"version":"2.0.2","description":"A cowsay alternative for terminal with true color.","sanitized_name":"truesay","publisher":{"email":"user@example.com","actor":{"name":"eliep","type":"user","email":"user@example.com"},"username":"eliep"},"maintainers":[{"email":"user@example.com","username":"eliep"}],"license":"ISC","date":"2025-07-01T21:42:50.286Z","links":{"homepage":"https://github.com/eliep/truesay","repository":"git+https://github.com/eliep/truesay.git","bugs":"https://github.com/eliep/truesay/issues","npm":"https://www.npmjs.com/package/truesay"}}
+
+,
+
+{"name":"cowchat","keywords":["cow","cowsay","cowchat","socket.io","chat"],"version":"1.0.2","description":"A chat that uses cowsay to send you messages","sanitized_name":"cowchat","publisher":{"email":"user@example.com","username":"mariolamacchia"},"maintainers":[{"email":"user@example.com","username":"mariolamacchia"}],"license":"ISC","date":"2014-11-07T21:13:53.939Z","links":{"homepage":"https://github.com/mariolamacchia/cowchat","repository":"https://github.com/mariolamacchia/cowchat.git","bugs":"https://github.com/mariolamacchia/cowchat/issues","npm":"https://www.npmjs.com/package/cowchat"}}
+
+,
+
+{"name":"devicescript-cowsay","keywords":["devicescript","jacdac","iot","embedded"],"version":"2.16.4","description":"DeviceScript package sample implementing the famous cow say rendering engine.","sanitized_name":"devicescript-cowsay","publisher":{"email":"user@example.com","username":"msftjacdac"},"maintainers":[{"email":"user@example.com","username":"msftjacdac"}],"license":"MIT","date":"2024-04-19T20:49:21.769Z","links":{"homepage":"https://github.com/microsoft/devicescript#readme","repository":"git+https://github.com/microsoft/devicescript.git","bugs":"https://github.com/microsoft/devicescript/issues","npm":"https://www.npmjs.com/package/devicescript-cowsay"}}
+
+,
+
+{"name":"owl-wisdom","keywords":["owls","quote","quotes","quotations","cowsay","wisdom","wise","cli","fun"],"version":"2.0.0","description":"A wise owl spouts quotes to your terminal, inspired by cowsay","sanitized_name":"owl-wisdom","publisher":{"email":"user@example.com","username":"pirtleshell"},"maintainers":[{"email":"user@example.com","username":"pirtleshell"}],"license":"MIT","date":"2019-05-22T19:40:45.854Z","links":{"homepage":"https://github.com/PirtleShell/owl-wisdom#readme","repository":"git://github.com/PirtleShell/owl-wisdom.git","bugs":"https://github.com/PirtleShell/owl-wisdom/issues","npm":"https://www.npmjs.com/package/owl-wisdom"}}
+
+,
+
+{"name":"@franco-grobler/cowsay-wasm-nodejs","keywords":["cowsay","cli","command-line","ascii-art","fun"],"version":"0.3.24","description":"WebAssembly bindings for Cowsay-RS","sanitized_name":"@franco-grobler/cowsay-wasm-nodejs","publisher":{"email":"user@example.com","username":"franco-grobler"},"maintainers":[{"email":"user@example.com","username":"franco-grobler"}],"license":"UNLICENSE","date":"2026-01-02T19:32:24.892Z","links":{"homepage":"https://franco-grobler.github.io/cowsay-rs/","repository":"git+https://github.com/franco-grobler/cowsay-rs.git","bugs":"https://github.com/franco-grobler/cowsay-rs/issues","npm":"https://www.npmjs.com/package/@franco-grobler/cowsay-wasm-nodejs"}}
+
+,
+
+{"name":"@franco-grobler/cowsay-wasm-web","keywords":["cowsay","cli","command-line","ascii-art","fun"],"version":"0.3.24","description":"WebAssembly bindings for Cowsay-RS","sanitized_name":"@franco-grobler/cowsay-wasm-web","publisher":{"email":"user@example.com","username":"franco-grobler"},"maintainers":[{"email":"user@example.com","username":"franco-grobler"}],"license":"UNLICENSE","date":"2026-01-02T19:32:19.223Z","links":{"homepage":"https://franco-grobler.github.io/cowsay-rs/","repository":"git+https://github.com/franco-grobler/cowsay-rs.git","bugs":"https://github.com/franco-grobler/cowsay-rs/issues","npm":"https://www.npmjs.com/package/@franco-grobler/cowsay-wasm-web"}}
+
+,
+
+{"name":"node-red-contrib-oscar-cowsay","keywords":["node-red","OSCAR","cowsay","GRyCAP","UPV","AI4EOSC"],"version":"0.0.1","description":"The OSCAR Cowsay Service node shows the basic functionality for invoking the OSCAR service synchronously.","sanitized_name":"node-red-contrib-oscar-cowsay","publisher":{"email":"user@example.com","username":"dieagra"},"maintainers":[{"email":"user@example.com","username":"dieagra"}],"license":"ISC","date":"2024-01-12T09:47:13.433Z","links":{"homepage":"https://github.com/ai4os/ai4-compose/tree/main/node-red/modules","repository":"git+https://github.com/ai4os/ai4-compose.git","bugs":"https://github.com/ai4os/ai4-compose/issues","npm":"https://www.npmjs.com/package/node-red-contrib-oscar-cowsay"}}
+
+,
+
+{"name":"alfred-cowsay","keywords":[],"version":"1.0.0","description":"Alfred Cowsay Workflow","sanitized_name":"alfred-cowsay","publisher":{"email":"user@example.com","username":"teebot"},"maintainers":[{"email":"user@example.com","username":"teebot"}],"license":"ISC","date":"2018-07-23T14:25:04.004Z","links":{"npm":"https://www.npmjs.com/package/alfred-cowsay"}}
+
+,
+
+{"name":"pokemonsay","keywords":["pokemon","pokemonsay","cow","cowsay","fortune","xterm"],"version":"1.0.1","description":"Pokemon version of cowsay with CLI and API.","sanitized_name":"pokemonsay","publisher":{"email":"user@example.com","username":"dfrankland"},"maintainers":[{"email":"user@example.com","username":"dfrankland"}],"license":"MIT","date":"2016-11-28T18:50:16.774Z","links":{"homepage":"https://github.com/dfrankland/pokemonsay#readme","repository":"git+https://github.com/dfrankland/pokemonsay.git","bugs":"https://github.com/dfrankland/pokemonsay/issues","npm":"https://www.npmjs.com/package/pokemonsay"}}
+
+,
+
+{"name":"@franco-grobler/cowsay-wasm-bundler","keywords":["cowsay","cli","command-line","ascii-art","fun"],"version":"0.3.24","description":"WebAssembly bindings for Cowsay-RS","sanitized_name":"@franco-grobler/cowsay-wasm-bundler","publisher":{"email":"user@example.com","username":"franco-grobler"},"maintainers":[{"email":"user@example.com","username":"franco-grobler"}],"license":"UNLICENSE","date":"2026-01-02T19:32:20.504Z","links":{"homepage":"https://franco-grobler.github.io/cowsay-rs/","repository":"git+https://github.com/franco-grobler/cowsay-rs.git","bugs":"https://github.com/franco-grobler/cowsay-rs/issues","npm":"https://www.npmjs.com/package/@franco-grobler/cowsay-wasm-bundler"}}
+
+,
+
+{"name":"rudecow","keywords":["node","cowsay","cli","foaas"],"version":"1.0.0","description":"Combines foaas.com and cowsay","sanitized_name":"rudecow","publisher":{"email":"user@example.com","username":"coumbole"},"maintainers":[{"email":"user@example.com","username":"coumbole"}],"license":"MIT","date":"2017-03-06T14:35:11.947Z","links":{"homepage":"https://github.com/coumbole/rudecow#readme","repository":"git+https://github.com/coumbole/rudecow.git","bugs":"https://github.com/coumbole/rudecow/issues","npm":"https://www.npmjs.com/package/rudecow"}}
+
+,
+
+{"name":"pokesay","keywords":["cowsay","pokemon","ASCII","talking","cowthink"],"version":"1.1.4","description":"Pokesay is a pokemon themed command-line app inspired by cowsay, written in JavaScript.","sanitized_name":"pokesay","publisher":{"email":"user@example.com","username":"anvit"},"maintainers":[{"email":"user@example.com","username":"anvit"}],"license":"ISC","date":"2023-11-03T16:55:37.798Z","links":{"homepage":"https://github.com/anvit/pokesay#readme","repository":"git+https://github.com/anvit/pokesay.git","bugs":"https://github.com/anvit/pokesay/issues","npm":"https://www.npmjs.com/package/pokesay"}}
+
+,
+
+{"name":"node-red-contrib-cowsay0902","keywords":["node-red-nodegen","node-red","cowsay"],"version":"0.0.1","description":"Node-RED node for cowsay","sanitized_name":"node-red-contrib-cowsay0902","publisher":{"email":"user@example.com","username":"kerorinyokoi"},"maintainers":[{"email":"user@example.com","username":"kerorinyokoi"}],"license":"Apache-2.0","date":"2023-07-31T13:38:50.715Z","links":{"homepage":"https://github.com/kerorinyokoi/node-red-contrib-cowsay0902#readme","repository":"git+https://github.com/kerorinyokoi/node-red-contrib-cowsay0902.git","bugs":"https://github.com/kerorinyokoi","npm":"https://www.npmjs.com/package/node-red-contrib-cowsay0902"}}
+
+,
+
+{"name":"commitsay","keywords":["Geek","Commits","From","Last","Night"],"version":"1.1.7","description":"Pulls commits from http://www.commitlogsfromlastnight.com/ and pipes it to cowsay","sanitized_name":"commitsay","publisher":{"email":"user@example.com","username":"aswintyv"},"maintainers":[{"email":"user@example.com","username":"aswintyv"}],"license":"MIT","date":"2016-11-16T18:54:41.298Z","links":{"homepage":"https://github.com/aswintyv/commitssay#readme","repository":"git+https://github.com/aswintyv/commitssay.git","bugs":"https://github.com/aswintyv/commitssay/issues","npm":"https://www.npmjs.com/package/commitsay"}}
+
+,
+
+{"name":"yosay","keywords":["cli-app","cli","yeoman","yo","cowsay","say","box","message","ansi"],"version":"3.0.0","description":"Tell Yeoman what to say","sanitized_name":"yosay","publisher":{"email":"user@example.com","username":"sindresorhus"},"maintainers":[{"email":"user@example.com","username":"sboudrias"},{"email":"user@example.com","username":"mischah"},{"email":"user@example.com","username":"ulisesgascon"},{"email":"user@example.com","username":"mshima"},{"email":"user@example.com","username":"joshuakgoldberg"},{"email":"user@example.com","username":"sindresorhus"}],"license":"BSD-2-Clause","date":"2023-10-27T14:37:36.742Z","links":{"homepage":"https://github.com/yeoman/yosay#readme","repository":"git+https://github.com/yeoman/yosay.git","bugs":"https://github.com/yeoman/yosay/issues","npm":"https://www.npmjs.com/package/yosay"}}
+
+,
+
+{"name":"moominsay","keywords":[],"version":"0.0.2","description":"A cowsay with Moomins","sanitized_name":"moominsay","publisher":{"email":"user@example.com","username":"chocolateofpain"},"maintainers":[{"email":"user@example.com","username":"chocolateofpain"}],"date":"2023-02-12T23:01:55.727Z","links":{"npm":"https://www.npmjs.com/package/moominsay"}}
+
+,
+
+{"name":"cowsay-pragmatic-programmer","keywords":["cowsay","cli","pragmatic-programmer"],"version":"1.2.0","description":"CLI para mostrar uma dica do livro [programador pragmático](https://www.amazon.com.br/Programador-Pragm%C3%A1tico-Aprendiz-Mestre/dp/8577807002/ref=sr_1_1).","sanitized_name":"cowsay-pragmatic-programmer","publisher":{"email":"user@example.com","username":"julianosirtori"},"maintainers":[{"email":"user@example.com","username":"julianosirtori"}],"license":"MIT","date":"2024-02-17T01:04:08.163Z","links":{"homepage":"https://github.com/julianosirtori/cowsay-pragmatic-programmer#readme","repository":"git+https://github.com/julianosirtori/cowsay-pragmatic-programmer.git","bugs":"https://github.com/julianosirtori/cowsay-pragmatic-programmer/issues","npm":"https://www.npmjs.com/package/cowsay-pragmatic-programmer"}}
+
+,
+
+{"name":"sailor","keywords":["Sailor Moon","terminal","prompt"],"version":"0.0.5","description":"Cowsay-style Sailor Moon ascii art program!","sanitized_name":"sailor","publisher":{"email":"user@example.com","username":"mkgh"},"maintainers":[{"email":"user@example.com","username":"mkgh"}],"license":"Public","date":"2014-07-17T00:12:15.139Z","links":{"homepage":"https://github.com/mkgh/sailor","repository":"git://github.com/mkgh/sailor","bugs":"https://github.com/mkgh/sailor/issues","npm":"https://www.npmjs.com/package/sailor"}}
+
+,
+
+{"name":"wise-owl","keywords":["owls","quote","quotes","quotations","cowsay","wisdom","wise","cli","fun"],"version":"1.0.0","description":"A wise owl spouts quotes and wisdom to your terminal, inspired by cowsay","sanitized_name":"wise-owl","publisher":{"email":"user@example.com","username":"pirtleshell"},"maintainers":[{"email":"user@example.com","username":"pirtleshell"}],"license":"MIT","date":"2017-03-09T06:12:43.403Z","links":{"homepage":"https://github.com/PirtleShell/owl-wisdom#readme","repository":"git://github.com/PirtleShell/owl-wisdom.git","bugs":"https://github.com/PirtleShell/owl-wisdom/issues","npm":"https://www.npmjs.com/package/wise-owl"}}
+
+,
+
+{"name":"rubberduck-say","keywords":["duck","ascii","cli","debugging","cowsay"],"version":"1.2.0","description":"A rubber duck that says things, like cowsay","sanitized_name":"rubberduck-say","publisher":{"email":"user@example.com","username":"sonseongyeol"},"maintainers":[{"email":"user@example.com","username":"sonseongyeol"}],"license":"MIT","date":"2025-05-21T11:26:07.489Z","links":{"homepage":"https://github.com/sonseong10/rubberduck-say#readme","repository":"git+https://github.com/sonseong10/rubberduck-say.git","bugs":"https://github.com/sonseong10/rubberduck-say/issues","npm":"https://www.npmjs.com/package/rubberduck-say"}}
+
+,
+
+{"name":"npx-import-light","keywords":[],"version":"1.0.0","description":"Import modules and load them if needed deferred from npm","sanitized_name":"npx-import-light","publisher":{"actor":{"name":"uzlopak","type":"user","email":"user@example.com"},"email":"user@example.com","username":"uzlopak"},"maintainers":[{"email":"user@example.com","username":"uzlopak"}],"license":"ISC","date":"2025-07-09T12:12:05.904Z","links":{"homepage":"https://github.com/uzlopak/npx-import-light","repository":"git+https://github.com/uzlopak/npx-import-light.git","bugs":"https://github.com/uzlopak/npx-import-light/issues","npm":"https://www.npmjs.com/package/npx-import-light"}}
+
+,
+
+{"name":"moo-cli","keywords":[],"version":"1.0.1","description":"cowsay moo with a message in your cli","sanitized_name":"moo-cli","publisher":{"email":"user@example.com","username":"d48"},"maintainers":[{"email":"user@example.com","username":"d48"}],"license":"ISC","date":"2017-01-27T23:45:48.208Z","links":{"npm":"https://www.npmjs.com/package/moo-cli"}}
+]
+

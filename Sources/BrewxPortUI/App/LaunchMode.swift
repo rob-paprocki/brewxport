@@ -16,6 +16,10 @@ public struct DemoOptions: Equatable, Sendable {
     public var host: Arch
     /// `--demo-bundle NAME`: one of `DemoSamples.names`, opened on Bundles at launch.
     public var bundle: String?
+    /// `--demo-missing ENGINE`, once per engine: language engines shown as not installed, so their Set Up shows.
+    public var missing: Set<EngineID>
+    /// `--demo-states` (no value): the states the captures alone can't show, layered on (`DemoStates`).
+    public var states: Bool
 
     public init() {
         fixtures = nil
@@ -23,6 +27,8 @@ public struct DemoOptions: Equatable, Sendable {
         snapshot = nil
         host = .current
         bundle = nil
+        missing = []
+        states = false
     }
 
     public static let fixturesFlag = "--demo-fixtures"
@@ -30,15 +36,23 @@ public struct DemoOptions: Equatable, Sendable {
     public static let snapshotFlag = "--snapshot"
     public static let archFlag = "--demo-arch"
     public static let bundleFlag = "--demo-bundle"
+    public static let missingFlag = "--demo-missing"
+    public static let statesFlag = "--demo-states"
 
-    /// Reads the demo flags. A flag whose value is missing, starts with `--` or isn't one BrewxPort knows is ignored.
+    /// Reads the demo flags. A flag whose value is missing, starts with `--` or isn't one BrewxPort knows is ignored
+    /// (for `--demo-missing`, anything but a language engine's name). `--demo-states` takes no value.
     static func parse(_ flags: [String]) -> DemoOptions {
         var options = DemoOptions()
         var index = flags.startIndex
         while index < flags.endIndex {
             let flag = flags[index]
             let next = flags.index(after: index)
-            guard [fixturesFlag, appearanceFlag, snapshotFlag, archFlag, bundleFlag].contains(flag),
+            if flag == statesFlag {
+                options.states = true
+                index = next
+                continue
+            }
+            guard [fixturesFlag, appearanceFlag, snapshotFlag, archFlag, bundleFlag, missingFlag].contains(flag),
                   next < flags.endIndex, !flags[next].hasPrefix("--") else {
                 index = next
                 continue
@@ -49,6 +63,8 @@ public struct DemoOptions: Equatable, Sendable {
             case snapshotFlag: options.snapshot = URL(fileURLWithPath: value)
             case appearanceFlag: if let appearance = Appearance(rawValue: value) { options.appearance = appearance }
             case bundleFlag: if DemoSamples.names.contains(value) { options.bundle = value }
+            case missingFlag:
+                if let engine = EngineID(rawValue: value), engine.isLanguage { options.missing.insert(engine) }
             default: if let arch = Arch(rawValue: value) { options.host = arch }
             }
             index = flags.index(after: next)

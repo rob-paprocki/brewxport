@@ -1,0 +1,6 @@
+Uninstalling /opt/homebrew/Cellar/pipx/1.19.1... (274 files, 4.5MB)
+==> Autoremoving 2 unneeded formulae:
+mpdecimal
+python@3.15
+Uninstalling /opt/homebrew/Cellar/python@3.15/3.15.2... (4,151 files, 84MB)
+Uninstalling /opt/homebrew/Cellar/mpdecimal/4.0.1... (22 files, 625.5KB)

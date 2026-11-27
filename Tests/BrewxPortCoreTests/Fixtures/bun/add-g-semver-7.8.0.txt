@@ -1,0 +1,6 @@
+bun add v1.4.5 (826ef2a6f)
+
+installed semver@7.8.0 with binaries:
+ - semver
+
+1 package installed [188.00ms]

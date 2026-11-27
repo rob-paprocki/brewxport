@@ -1,0 +1,47 @@
+creating virtual environment...
+installing brewxport-capture-tool from spec '/Users/tester/capture-tool'...
+Fatal error from uv prevented installation. Full uv output in file:
+    /Users/tester/Library/Logs/pipx/cmd_2026-11-27_07.28.54_2_uv_errors.log
+
+Errors from uv install:
+    error: Failed to build `brewxport-capture-tool @ file:///Users/tester/capture-tool`
+      cause: The build backend returned an error
+      cause: Call to `hatchling.build.build_wheel` failed (exit status: 1)
+             [stderr]
+             Traceback (most recent call last):
+               File "<string>", line 11, in <module>
+                 wheel_filename = backend.build_wheel(__import__("os").fsdecode(b"/Users/tester/.cache/uv/builds-v0/.tmpc1Ymd6"), {}, None)
+               File "/Users/tester/.cache/uv/builds-v0/.tmpXCWXxW/lib/python3.15/site-packages/hatchling/build.py", line 58, in build_wheel
+                 return os.path.basename(next(builder.build(directory=wheel_directory, versions=["standard"])))
+                                         ~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+               File "/Users/tester/.cache/uv/builds-v0/.tmpXCWXxW/lib/python3.15/site-packages/hatchling/builders/plugin/interface.py", line 166, in build
+                 artifact = version_api[version](directory, **build_data)
+               File "/Users/tester/.cache/uv/builds-v0/.tmpXCWXxW/lib/python3.15/site-packages/hatchling/builders/wheel.py", line 528, in build_standard
+                 for included_file in self.recurse_included_files():
+                                      ~~~~~~~~~~~~~~~~~~~~~~~~~~~^^
+               File "/Users/tester/.cache/uv/builds-v0/.tmpXCWXxW/lib/python3.15/site-packages/hatchling/builders/plugin/interface.py", line 187, in recurse_included_files
+                 yield from self.recurse_selected_project_files()
+               File "/Users/tester/.cache/uv/builds-v0/.tmpXCWXxW/lib/python3.15/site-packages/hatchling/builders/plugin/interface.py", line 191, in recurse_selected_project_files
+                 if self.config.only_include:
+                    ^^^^^^^^^^^^^^^^^^^^^^^^
+               File "/opt/homebrew/Cellar/python@3.15/3.15.2/Frameworks/Python.framework/Versions/3.15/lib/python3.15/functools.py", line 1169, in __get__
+                 val = self.func(instance)
+               File "/Users/tester/.cache/uv/builds-v0/.tmpXCWXxW/lib/python3.15/site-packages/hatchling/builders/config.py", line 715, in only_include
+                 only_include = only_include_config.get("only-include", self.default_only_include()) or self.packages
+                                                                        ~~~~~~~~~~~~~~~~~~~~~~~~~^^
+               File "/Users/tester/.cache/uv/builds-v0/.tmpXCWXxW/lib/python3.15/site-packages/hatchling/builders/wheel.py", line 293, in default_only_include
+                 return self.default_file_selection_options.only_include
+                        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+               File "/opt/homebrew/Cellar/python@3.15/3.15.2/Frameworks/Python.framework/Versions/3.15/lib/python3.15/functools.py", line 1169, in __get__
+                 val = self.func(instance)
+               File "/Users/tester/.cache/uv/builds-v0/.tmpXCWXxW/lib/python3.15/site-packages/hatchling/builders/wheel.py", line 281, in default_file_selection_options
+                 raise ValueError(message)
+             ValueError: Unable to determine which files to ship inside the wheel using the following heuristics: https://hatch.pypa.io/latest/plugins/builder/wheel/#default-file-selection
+             The most likely cause of this is that there is no directory that matches the name of your project (brewxport_capture_tool).
+             At least one file selection option must be defined in the `tool.hatch.build.targets.wheel` table, see: https://hatch.pypa.io/latest/config/build/
+             As an example, if you intend to ship a directory named `foo` that resides within a `src` directory located at the root of your project, you can define the following:
+             [tool.hatch.build.targets.wheel]
+             packages = ["src/foo"]
+    hint: Build failures usually indicate a problem with the package or the build environment
+Error installing brewxport-capture-tool from spec
+'/Users/tester/capture-tool'.

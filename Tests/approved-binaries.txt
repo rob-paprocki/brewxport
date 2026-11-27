@@ -1,10 +1,10 @@
 # Binary files that were looked at and approved, published as they are. One per line: the SHA-256
 # of exactly that content, two spaces, then the path (as `shasum -a 256 PATH` prints it). A changed
 # or new binary fails Tests/check_repo.py and the public build until its line is approved here.
-607bdbb152f1f9cb3b8349604ca61fe46d5977e845dd9600937df62a839006df  docs/images/updates-dark.png
-e3a5ebe8de24a247108662c3d90d15bf5eaf15b544e88e9f58aab63a559267f0  docs/images/updates-light.png
-1a2efb44204663d4934443f5494bfe07b98f94e072ef537070355d1f867d6f73  docs/images/bundles-dark.png
-f19b71a70f78c605c5f7b1c36931baffd94b00011219f1afce2e81b3d452950b  docs/images/bundles-light.png
-19959d774dfc24fd89508d6ac34fb9fb43f25c4a1e89d9e7d7a6bd0489e1ccf5  docs/images/setup-light.png
-4a01a09c9576a223cf0fb323b568618272fa88b0f70f006088da3e7fe681f9b5  docs/images/setup-dark.png
+a2f8bfaac2697a9c319be4e8f3798bbcfdbaa492ef771eb65e801a9e03eea2a2  docs/images/updates-dark.png
+f62695cc53ef72e21b49ba9e3cbe18550f5d982a2c880bf30b58ae7bae2d0257  docs/images/updates-light.png
+6ef0401cb6c8466d74d24762922f15bdb24010307cec63f8b007184b77c8b477  docs/images/bundles-dark.png
+285f35c45e2c57766e58c4a2b94993ba3970bd054f8e73a7b768cf5ae7278c77  docs/images/bundles-light.png
+c514b0b83d86ae9f252ff258e3ea131b7fb1d1b10f2b2e5e476464565a2adac5  docs/images/setup-light.png
+9dc6390684b2ed273b3e40a16268144a12de2fca41a3c9b0aaea0ffe124a578b  docs/images/setup-dark.png
 2cd567f0aa73fd9930a8d9671bda80b2e041d81dc32a80eea5ffda90a5483de8  Resources/bundle/AppIcon.icns

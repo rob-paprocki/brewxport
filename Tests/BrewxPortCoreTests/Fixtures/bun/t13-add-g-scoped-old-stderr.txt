@@ -1,0 +1,7 @@
+Resolving dependencies
+Resolved, downloaded and extracted [4]
+Saved lockfile
+
+warn: To run "na", add the global bin folder to $PATH:
+
+/Users/tester/.bun/bin

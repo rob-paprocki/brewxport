@@ -1,0 +1,8 @@
+🌱 Installed mint packages:
+  Ink (file:///Users/tester/mintpkgs/forks/Ink)
+    - 1.0.0 (ink-fork) *
+  Ink (https://github.com/JohnSundell/Ink.git)
+    - 0.5.0 (ink-cli) *
+  MultiTool
+    - 1.0.0 (multi-a, multi-b)
+    - 1.1.0 (multi-a *, multi-b)

@@ -1,0 +1,6 @@
+bun add v1.4.5 (826ef2a6f)
+
+installed he@github:mathiasbynens/he#ab02411 with binaries:
+ - he
+
+1 package installed [606.00ms]

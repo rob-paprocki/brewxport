@@ -102,7 +102,7 @@ public enum MenuBarItem: Equatable, Sendable {
             return (engine, requests.count, !requests.allSatisfy(model.background.isPasswordFree))
         }
         let total = managers.reduce(0) { $0 + $1.count }
-        guard total > 0 else { return [.text(emptyText(model.updates.list))] }
+        guard total > 0 else { return [.text(emptyText(model.updates))] }
         let enabled = model.canMenuUpdate
         var items: [MenuBarItem] = [.text(total == 1 ? "1 update" : "\(total) updates")]
         for manager in managers {
@@ -114,12 +114,19 @@ public enum MenuBarItem: Equatable, Sendable {
         return items
     }
 
-    /// Never "up to date" while the answers are still coming, or when a manager couldn't be checked.
-    private static func emptyText(_ list: PackageListState) -> String {
+    /// Never "up to date" while the answers are still coming, or when a manager couldn't be checked. Otherwise Updates'
+    /// own empty page decides (`UpdatesModel.emptyTitle`): "Nothing else to update" when some packages couldn't be
+    /// looked up (R6, naming their managers) or updates are held back, "Everything is up to date" only when neither.
+    private static func emptyText(_ updates: UpdatesModel) -> String {
+        let list = updates.list
         if list.loading { return "Checking for updates…" }
         let failed = list.order.filter(list.failedEngines.contains).map(\.displayName)
         if !failed.isEmpty { return "No updates found. Couldn't check \(failed.joined(separator: ", "))" }
-        return "Everything is up to date"
+        let partly = list.order.filter { list.unchecked[$0].map { !$0.isEmpty } ?? false }
+        guard !partly.isEmpty else { return updates.emptyTitle }
+        let noun = partly.allSatisfy(\.isLanguage) ? "tools" : "packages"
+        return updates.emptyTitle + ". Some " + RuntimeHolds.list(partly.map(\.displayName)) + " \(noun) couldn't be "
+            + "checked"
     }
 
     /// "Updating… Homebrew: jq, wget": the step that's running, or just "Updating…" before one starts (the helper

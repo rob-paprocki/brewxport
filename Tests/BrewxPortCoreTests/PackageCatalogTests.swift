@@ -9,12 +9,37 @@ private func pkg(_ engine: EngineID, _ name: String) -> Package {
 private struct Boom: Error {}
 
 @Suite struct PackageCatalogTests {
+    static let languages: [EngineID] = [.npm, .pipx, .uv, .cargo, .bun, .gem, .mint]
+
     @Test func defaultOrderArm() {
-        #expect(PackageCatalog.defaultOrder(for: .arm64) == [.nanobrew, .homebrew, .macports, .mas])
+        #expect(PackageCatalog.defaultOrder(for: .arm64) == [.nanobrew, .homebrew, .macports, .mas] + Self.languages)
     }
 
     @Test func defaultOrderIntel() {
-        #expect(PackageCatalog.defaultOrder(for: .x86_64) == [.macports, .homebrew, .nanobrew, .mas])
+        #expect(PackageCatalog.defaultOrder(for: .x86_64) == [.macports, .homebrew, .nanobrew, .mas] + Self.languages)
+    }
+
+    @Test func defaultOrderPutsLanguagesAfterSystem() {
+        for arch in [Arch.arm64, .x86_64] {
+            let order = PackageCatalog.defaultOrder(for: arch)
+            #expect(Set(order) == Set(EngineID.allCases))
+            #expect(order.count == EngineID.allCases.count)
+            #expect(order.prefix(4).allSatisfy { $0.group == .system })
+            #expect(Array(order.dropFirst(4)) == Self.languages)
+        }
+    }
+
+    @Test func mergeSortsLanguageEnginesAfterSystem() {
+        let rg = Package(id: PackageRef(engine: .cargo, kind: .tool, name: "rg"), displayName: "rg")
+        let outcomes = [
+            EngineOutcome(engine: .cargo, result: .success([rg])),
+            EngineOutcome(engine: .homebrew, result: .success([pkg(.homebrew, "rg")])),
+            EngineOutcome(engine: .npm, result: .failure(EngineError(engine: .npm, message: "x"))),
+            EngineOutcome(engine: .mas, result: .failure(EngineError(engine: .mas, message: "y"))),
+        ]
+        let merged = PackageCatalog.merge(outcomes, order: PackageCatalog.defaultOrder(for: .arm64))
+        #expect(merged.packages.map(\.id.engine) == [.homebrew, .cargo])
+        #expect(merged.errors.map(\.engine) == [.mas, .npm])
     }
 
     @Test func mergeKeepsSameNameFromDifferentEngines() async {
@@ -62,6 +87,29 @@ private struct Boom: Error {}
         #expect(r.errors.map(\.engine) == [.nanobrew, .homebrew, .mas])
     }
 
+    /// A registry that's down (crates.io 503) or a manager that fails (pipx) marks only that engine as "couldn't
+    /// check"; the other engines' updates are still listed.
+    @Test func oneEngineFailureDoesNotHideOthers() async {
+        func tool(_ engine: EngineID, _ name: String) -> Package {
+            Package(id: PackageRef(engine: engine, kind: .tool, name: name), displayName: name)
+        }
+        let engines: [any Engine] = [
+            StubEngine(id: .cargo, outdated: .failure(RegistryFetchError.status(503))),
+            StubEngine(id: .npm, outdated: .success([tool(.npm, "typescript")])),
+            StubEngine(id: .pipx, outdated: .failure(EngineError(engine: .pipx, message: "pipx couldn't check PyPI"))),
+            StubEngine(id: .homebrew, outdated: .success([pkg(.homebrew, "wget")])),
+            StubEngine(id: .mint, outdated: .success([tool(.mint, "SwiftLint")])),
+        ]
+        let r = await PackageCatalog(engines: engines, arch: .arm64).outdated()
+        #expect(r.packages.map(\.id) == [
+            PackageRef(engine: .mint, kind: .tool, name: "SwiftLint"),
+            PackageRef(engine: .npm, kind: .tool, name: "typescript"),
+            PackageRef(engine: .homebrew, kind: .formula, name: "wget"),
+        ])
+        #expect(r.errors.map(\.engine) == [.pipx, .cargo])
+        #expect(r.errors.last?.message == String(describing: RegistryFetchError.status(503)))
+    }
+
     @Test func missingEnginesSkipped() async {
         let missing = StubEngine(id: .macports, status: .missing, search: .success([pkg(.macports, "x")]))
         let ok = StubEngine(id: .homebrew, search: .success([pkg(.homebrew, "y")]))
@@ -90,6 +138,60 @@ private struct Boom: Error {}
         #expect(await catalog.outdated().errors == expected)
         #expect(broken.calls.isEmpty)
         #expect(await catalog.presentEngines()[.macports] == .unusable(path: path, reason: "`port version` exited 1"))
+    }
+
+    /// R6 and holds: an outdated check's packages that couldn't be checked and its held updates reach the outcome and
+    /// the merged result; a held update nobody may pick joins the packages, marked, and one the engine still lists
+    /// isn't listed twice.
+    @Test func outdatedReportReachesTheMergedResult() async {
+        func tool(_ name: String, _ installed: String = "1", _ latest: String = "2") -> Package {
+            Package(id: PackageRef(engine: .cargo, kind: .tool, name: name), displayName: name,
+                    installedVersion: installed, latestVersion: latest)
+        }
+        let rust = UpdateHold(reason: "Needs Rust 1.96", blocksAutomatic: true, blocksManual: true)
+        let ruby = UpdateHold(reason: "Came with Ruby", blocksAutomatic: true, blocksManual: false)
+        let report = OutdatedReport(packages: [tool("bat"), tool("rake")],
+                                    unchecked: UncheckedPackages(reasons: ["tokei": "crates.io didn't answer"]),
+                                    held: [HeldUpdate(package: tool("ripgrep", "14.1.0", "16.0.0"), hold: rust),
+                                           HeldUpdate(package: tool("rake"), hold: ruby)])
+        let cargo = StubEngine(id: .cargo, report: report)
+        let brew = StubEngine(id: .homebrew, outdated: .success([pkg(.homebrew, "jq")]))
+        let catalog = PackageCatalog(engines: [cargo, brew], arch: .arm64)
+        var outcomes: [EngineID: EngineOutcome] = [:]
+        for await outcome in catalog.stream(.outdated) { outcomes[outcome.engine] = outcome }
+        #expect(outcomes[.cargo]?.unchecked.names == ["tokei"])
+        #expect(outcomes[.cargo]?.held.map(\.package.id.name) == ["ripgrep", "rake"])
+        #expect(outcomes[.homebrew]?.unchecked == UncheckedPackages.none)
+        #expect(outcomes[.homebrew]?.held == [])
+        let merged = await catalog.outdated()
+        #expect(merged.packages.map(\.id.name) == ["bat", "jq", "rake", "ripgrep"])
+        #expect(merged.holds == [tool("ripgrep").id: rust, tool("rake").id: ruby])
+        #expect(merged.unchecked == [.cargo: UncheckedPackages(reasons: ["tokei": "crates.io didn't answer"])])
+        #expect(merged.errors.isEmpty)
+        // The other queries ask for the plain lists: no report.
+        _ = await catalog.installed()
+        #expect(cargo.calls == ["checkOutdated", "checkOutdated", "listInstalled"])
+    }
+
+    /// An engine BrewxPort doesn't drive at its version (Bun before 1.4.5) isn't asked and isn't a failure: no
+    /// outcome, no error, its status says why.
+    @Test func unsupportedEngineIsQuiet() async {
+        let path = URL(fileURLWithPath: "/opt/homebrew/bin/bun")
+        let reason = "Bun 1.2.20 is too old for BrewxPort."
+        let old = StubEngine(id: .bun, status: .unsupported(path: path, version: "1.2.20", reason: reason),
+                             installed: .success([pkg(.bun, "x")]), outdated: .success([pkg(.bun, "x")]))
+        let ok = StubEngine(id: .homebrew, outdated: .success([pkg(.homebrew, "y")]))
+        let catalog = PackageCatalog(engines: [old, ok], arch: .arm64)
+        var engines: [EngineID] = []
+        for await outcome in catalog.stream(.outdated) { engines.append(outcome.engine) }
+        #expect(engines == [.homebrew])
+        #expect(await catalog.outdated().errors.isEmpty)
+        #expect(await catalog.installed().errors.isEmpty)
+        #expect(old.calls.isEmpty)
+        #expect(PackageCatalog.message(for: .bun, status: .unsupported(path: path, version: "1.2.20", reason: reason))
+                == reason)
+        let rg = PackageRef(engine: .bun, kind: .tool, name: "x")
+        await #expect(throws: EngineError(engine: .bun, message: reason)) { try await catalog.info(rg) }
     }
 
     @Test(.timeLimit(.minutes(1))) func runsEnginesConcurrently() async {
@@ -162,6 +264,32 @@ private struct Boom: Error {}
         #expect(ContinuousClock.now - start < .seconds(5))
     }
 
+    /// Details asked for before any list detect the engine first (a language engine knows its tool only after a
+    /// detect), once; an engine a list already detected isn't detected again, and one that isn't there says so.
+    @Test func infoDetectsAnEngineNoQueryHasDetected() async throws {
+        let detects = Counter()
+        let details = PackageDetails(ref: rgRef, summary: "grep, faster", latestVersion: "15.2.0")
+        let brew = StubEngine(id: .homebrew, info: .success(details), onDetect: { detects.add() })
+        let catalog = PackageCatalog(engines: [brew], arch: .arm64)
+        #expect(try await catalog.info(rgRef) == details)
+        #expect(detects.value == 1)
+        #expect(try await catalog.info(rgRef) == details)
+        #expect(detects.value == 1)
+
+        let listed = Counter()
+        let other = StubEngine(id: .homebrew, info: .success(details), onDetect: { listed.add() })
+        let afterList = PackageCatalog(engines: [other], arch: .arm64)
+        _ = await afterList.installed()
+        #expect(try await afterList.info(rgRef) == details)
+        #expect(listed.value == 1)
+
+        let missing = StubEngine(id: .homebrew, status: .missing, info: .success(details))
+        await #expect(throws: EngineError(engine: .homebrew, message: "Homebrew isn't installed")) {
+            try await PackageCatalog(engines: [missing], arch: .arm64).info(rgRef)
+        }
+        #expect(missing.calls.isEmpty)
+    }
+
     @Test func infoForUnknownEngineThrows() async {
         let catalog = PackageCatalog(engines: [StubEngine(id: .mas)], arch: .arm64)
         await #expect(throws: EngineError.self) { try await catalog.info(rgRef) }
@@ -225,4 +353,12 @@ extension PackageCatalogTests {
             try await catalog.installedTaps()
         }
     }
+}
+
+/// Counts calls from a `@Sendable` closure.
+private final class Counter: @unchecked Sendable {
+    private let lock = NSLock()
+    private var count = 0
+    var value: Int { lock.withLock { count } }
+    func add() { lock.withLock { count += 1 } }
 }

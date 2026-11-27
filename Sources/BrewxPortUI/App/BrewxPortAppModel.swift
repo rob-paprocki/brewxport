@@ -40,11 +40,13 @@ public enum RunOrigin: Sendable { case user, background }
     /// Bumped by Find (Cmd-F); DiscoverView maps it to `.searchFocused`.
     public var focusSearchRequest = 0
     @ObservationIgnored private var searchFocusPending = false
-    /// nanobrew cask route lookups in flight before `run.start`.
+    /// nanobrew cask route lookups in flight before `run.start`, or the login-shell read Cargo's Set Up waits for.
     public private(set) var preparing = false
     @ObservationIgnored public let services: Services
 
     public var engineOrder: [EngineID] { PackageCatalog.defaultOrder(for: services.host) }
+    /// The sidebar's engine sections: "Engines", then "Languages".
+    public var sidebarEngineGroups: [SidebarEngineGroup] { SidebarEngineGroup.make(order: engineOrder) }
     /// False when this copy can't run anything (`services.setupProblem` says why).
     public var canRun: Bool { services.executor != nil }
     public var hasHelper: Bool { services.helper != nil }
@@ -139,6 +141,8 @@ public enum RunOrigin: Sendable { case user, background }
     @ObservationIgnored private var runEndedObservers: [@MainActor () -> Void] = []
     @ObservationIgnored private var enginesCheckedObservers: [@MainActor ([EngineID: EngineStatus]) -> Void] = []
     @ObservationIgnored private var helperFlight: (kind: HelperCall, task: Task<HelperState?, Never>)?
+    /// `checkEnginesAgainSoon()` came while a check was going: another follows it.
+    @ObservationIgnored private var engineCheckQueued = false
 
     private enum HelperCall { case refresh, ensure, reinstall }
 
@@ -176,8 +180,10 @@ public enum RunOrigin: Sendable { case user, background }
         // Discover's installed marks come from the Installed list and nowhere else, so this observer is first.
         // Updates rows show the installed copy's arch, which only Installed's answer carries.
         let discover = discover
-        installed.addLoadedObserver { refs in
+        installed.addLoadedObserver { [weak self] refs in
             discover.markInstalled(refs)
+            self?.homebrewListed(refs)
+            self?.refreshKeptRuntimes()
             updatesList.borrowedArchs = Dictionary(
                 installedList.all.compactMap { row in row.package.installedArchs.map { (row.id, $0) } },
                 uniquingKeysWith: { first, _ in first })
@@ -197,6 +203,7 @@ public enum RunOrigin: Sendable { case user, background }
         setup.connect(statuses: { [weak self] in self?.engineStatuses ?? [:] },
                       runSetup: { [weak self] in self?.setUpEngine($0) ?? false },
                       planProblem: { [weak self] in self?.lastSetupPlanProblem })
+        updates.holdsAfterReload = { [weak self] in await self?.refreshAppHolds() }
         background = BackgroundUpdater(
             model: self,
             settings: BackgroundSettings(store: services.store, testIntervalOverride: testIntervalOverride),
@@ -237,16 +244,31 @@ public enum RunOrigin: Sendable { case user, background }
 
     // MARK: Engines
 
+    /// Detects every engine again: the engine page's Check again, and after a Set Up run or Add to PATH
+    /// (`checkEnginesAgainSoon`). The login shell is asked again too, so a tool whose folder the person (or Set Up) just
+    /// added to the PATH is found, and a language engine's folder the person made writable shows on Updates at once
+    /// (`engineAccessChecked`). A language engine found on another copy than the last check found loses the rows that
+    /// copy listed, and the lists load again (`reloadRows(of:)`).
     public func checkEnginesAgain() {
         guard !checkingEngines else { return }
+        services.path.askAgain()
         checkingEngines = true
         let catalog = services.catalog
         Task {
             let statuses = await catalog.presentEngines()
+            let moved = Self.movedLanguageEngines(from: engineStatuses, to: statuses)
             engineStatuses = statuses
             checkingEngines = false
             enginesChecked = true
+            // Before the holds are worked out again: a hold must not lift from a row the old copy listed (macOS's
+            // Ruby's rake, once Homebrew's Ruby, which this account can change, is found).
+            reloadRows(of: moved)
+            engineAccessChecked()
             for observer in enginesCheckedObservers { observer(statuses) }
+            if engineCheckQueued {
+                engineCheckQueued = false
+                checkEnginesAgainSoon()
+            }
             // The first answer decides whether the setup screen shows; later checks never reopen it.
             if !setupDecided {
                 setupDecided = true
@@ -256,6 +278,47 @@ public enum RunOrigin: Sendable { case user, background }
                 setup.enginesRechecked()
             }
         }
+    }
+
+    /// `checkEnginesAgain()` for a check nobody clicked for (Add to PATH, a Set Up run's end), never dropped: at once;
+    /// once the run going ends, since its end checks them again; or right after the check going, which may have read
+    /// the login shell before what changed.
+    func checkEnginesAgainSoon() {
+        if run.isRunning {
+            recheckEnginesAfterRun = true
+        } else if checkingEngines {
+            engineCheckQueued = true
+        } else {
+            checkEnginesAgain()
+        }
+    }
+
+    /// The language engines a check found on another copy than the last check did: another executable, or none where
+    /// there was one. Not at the first check (nothing listed came from an earlier one), nor for one found where there
+    /// was none (no row came from it), nor for a version change alone, nor for one the check didn't answer for.
+    static func movedLanguageEngines(from before: [EngineID: EngineStatus],
+                                     to after: [EngineID: EngineStatus]) -> Set<EngineID> {
+        func executable(_ status: EngineStatus) -> String? {
+            switch status {
+            case .present(let path, _), .unusable(let path, _), .unsupported(let path, _, _):
+                path.standardizedFileURL.path
+            case .missing: nil
+            }
+        }
+        return Set(before.compactMap { engine, status in
+            guard engine.isLanguage, let old = executable(status), let now = after[engine] else { return nil }
+            return executable(now) == old ? nil : engine
+        })
+    }
+
+    /// The rows `engines` listed came from a copy BrewxPort no longer uses: they leave Updates and Installed at once,
+    /// so nothing acts on them with the new copy meanwhile, and the lists load again (once the run going ends, when
+    /// there is one: its end reloads them).
+    private func reloadRows(of engines: Set<EngineID>) {
+        guard !engines.isEmpty else { return }
+        updates.list.dropRows(of: engines)
+        installed.list.dropRows(of: engines)
+        refreshLists()
     }
 
     // MARK: Helper
@@ -435,9 +498,11 @@ public enum RunOrigin: Sendable { case user, background }
         }
     }
 
-    /// The toolbar's Install: enabled when a checked, uninstalled row is there and nothing is running.
+    /// The toolbar's Install: enabled when a checked, uninstalled row is there (not one of a language engine this
+    /// account can't change) and nothing is running.
     public var canInstallChecked: Bool {
-        canRun && !busy && !modalUp && !discover.checkedRefs.isEmpty
+        let readOnly = readOnlyEngines
+        return canRun && !busy && !modalUp && discover.checkedRefs.contains { !readOnly.contains($0.engine) }
     }
 
     public func installChecked() {
@@ -469,7 +534,10 @@ public enum RunOrigin: Sendable { case user, background }
         let requests = engine.map(updates.updateAllRequests(for:)) ?? updates.updateAllRequests()
         guard canMenuUpdate, !requests.isEmpty else { return }
         sidebar = .updates
-        if !requests.allSatisfy(background.isPasswordFree) { openMainWindow?() }
+        // The password sheet and a runtime's warning are in the window.
+        if !requests.allSatisfy(background.isPasswordFree) || warningBefore(requests) != nil {
+            openMainWindow?()
+        }
         if let engine { updateAll(engine: engine) } else { updateAll() }
     }
 
@@ -495,9 +563,11 @@ public enum RunOrigin: Sendable { case user, background }
         perform(.update, on: Set(requests.map(\.package.id)))
     }
 
-    /// The toolbar's "Remove N" in Installed: the checked rows on screen, through the uninstall sheet.
+    /// The toolbar's "Remove N" in Installed: the checked rows on screen, through the uninstall sheet. Off when every
+    /// checked row is a language engine's this account can't change.
     public var canRemoveChecked: Bool {
-        canRun && !busy && !installed.checkedRefs.isEmpty
+        let readOnly = readOnlyEngines
+        return canRun && !busy && installed.checkedRefs.contains { !readOnly.contains($0.engine) }
     }
 
     public func removeChecked() {
@@ -554,8 +624,14 @@ public enum RunOrigin: Sendable { case user, background }
     /// while anything modal is up (the move sheet included), as `perform` ignores them then.
     public func rowMenuItems(for refs: Set<PackageRef>, in view: PackageView) -> [RowActionItem] {
         let rows = view == .bundles ? bundles.rowsByRef : list(for: view).byRef
-        let items = RowActions.items(for: refs, in: view, rows: rows, outdated: outdatedRefs, prefs: preferences,
+        let readOnly = readOnlyReasons
+        // A read-only engine's update is held from every update, so not in `outdatedRefs`: Installed still shows its
+        // Update, off, saying why.
+        let outdated = outdatedRefs.union(updates.list.all.map(\.id).filter { readOnly[$0.engine] != nil })
+        let items = RowActions.items(for: refs, in: view, rows: rows, outdated: outdated, prefs: preferences,
                                      isRunning: busy, canRun: canRun,
+                                     heldFromUpdates: Set(refs.filter(updates.blocksManual)),
+                                     readOnlyEngines: readOnly,
                                      installable: view == .bundles ? bundles.installableRefs : [],
                                      moveTargets: moveTargets, isDemo: services.isDemo)
         return modalUp ? items.map { $0.isMove ? $0.disabled() : $0 } : items
@@ -686,16 +762,17 @@ public enum RunOrigin: Sendable { case user, background }
     public var canInstallFromInspector: Bool {
         guard canRun, !busy, !modalUp, let row = details.row else { return false }
         if currentView == .bundles { return bundles.installableRefs.contains(row.id) }
-        return !row.isInstalled
+        return !row.isInstalled && !readOnlyEngines.contains(row.id.engine)
     }
 
     /// Which option fields the inspector shows for its package. Nil when there's nothing to install.
-    /// Nil on Bundles too: an install there takes only the options the file's checked entry carries.
+    /// Nil on Bundles too: an install there takes only the options the file's checked entry carries. No Extra arguments
+    /// for the Mac App Store or a language engine: none of them takes any.
     public var inspectorOptions: InspectorOptionFields? {
         guard currentView != .bundles, let row = details.row, !row.isInstalled,
               let engine = services.engines.first(where: { $0.id == row.id.engine }) else { return nil }
         return InspectorOptionFields(version: engine.capabilities.contains(.versionPinning),
-                                     extraArgs: row.id.engine != .mas,
+                                     extraArgs: row.id.engine != .mas && !row.id.engine.isLanguage,
                                      variants: row.id.engine == .macports
                                         ? (details.details?.variants ?? []).sorted() : [])
     }
@@ -731,7 +808,8 @@ public enum RunOrigin: Sendable { case user, background }
     var busy: Bool { run.isRunning || preparing }
 
     /// Something modal is up: the password sheet, the uninstall sheet, the open panel, the export review sheet,
-    /// the save panel, the move sheet, the setup sheet or the one-time background sheet. The menu's Open Bundle,
+    /// the save panel, the move sheet, the setup sheet, the one-time background sheet or the warning before a runtime
+    /// update (`runtimeWarning`). The menu's Open Bundle,
     /// exports and package items are off meanwhile, no run starts (the menu bar's and automatic ones included), and a
     /// file the Finder opens waits until it's gone (`openFromFinder`). The move sheet's own Move button doesn't check
     /// this (`MoveModel.confirm`), and the sheet is gone once the move runs; nor does the setup sheet's own Set up
@@ -741,7 +819,7 @@ public enum RunOrigin: Sendable { case user, background }
     /// `modalUp`, less the setup sheet.
     private var modalUpBesidesSetup: Bool {
         run.showingPasswordSheet || confirmingRemoval || showingOpenPanel || exportReview != nil
-            || exportToSave != nil || move.sheetShown || showingBackgroundIntro
+            || exportToSave != nil || move.sheetShown || showingBackgroundIntro || runtimeWarning != nil
     }
 
     /// True while the uninstall sheet is up (checking or showing its plan). The menu's Find, Refresh and package items
@@ -752,8 +830,11 @@ public enum RunOrigin: Sendable { case user, background }
     private func startChange(_ operation: PackageOperation, on refs: Set<PackageRef>,
                              options: [PackageRef: InstallOptions] = [:]) {
         var rows = refs.compactMap(listRow(for:))
-        // An install leaves out rows that are already installed (Discover marks them).
+        // An install leaves out rows that are already installed (Discover marks them); an update, ones held from every
+        // update (`UpdatesModel.hold(for:)`). Neither takes a language engine this account can't change.
+        rows.removeAll { readOnlyEngines.contains($0.id.engine) }
         if operation == .install { rows.removeAll(where: \.isInstalled) }
+        if operation == .upgrade { rows.removeAll { updates.blocksManual($0.id) } }
         rows.sort { ($0.engineName, $0.name) < ($1.engineName, $1.name) }
         guard !rows.isEmpty else { return }
         installRequests(rows.map {
@@ -768,8 +849,26 @@ public enum RunOrigin: Sendable { case user, background }
     /// True when a run started, or when the cask lookup it waits for started (the run follows unless another one
     /// started meanwhile). A `.user` request that's left with nothing it may run still shows the panel saying why,
     /// and returns false. A `.background` one returns false without touching the panel or the last run's log.
+    ///
+    /// An update of a Homebrew runtime that language tools run on (`UpdatesModel.runtimeHolds`), or one that would
+    /// bring such a runtime along (`UpdatesModel.runtimesBroughtAlong`), asks first: nothing starts until the person
+    /// confirms the warning (`confirmRuntimeUpdate`). While the holds are still being worked out, the warning fails
+    /// closed (`warningBefore`), and a `.background` run that could need it starts nothing and asks nothing. Automatic
+    /// updates never take one.
     @discardableResult
     public func installRequests(_ requests: [ActionRequest], origin: RunOrigin = .user) -> Bool {
+        guard canRun, !busy, !modalUp, !requests.isEmpty else { return false }
+        if let warning = warningBefore(requests) {
+            if origin == .background, updates.pruning { return false }
+            runtimeWarning = warning
+            return false
+        }
+        return proceed(requests, origin: origin)
+    }
+
+    /// `installRequests` once any runtime warning was answered.
+    @discardableResult
+    func proceed(_ requests: [ActionRequest], origin: RunOrigin) -> Bool {
         guard canRun, !busy, !modalUp, !requests.isEmpty else { return false }
         let casks = requests.filter { $0.operation == .install }.map(\.package.id)
             .filter { $0.engine == .nanobrew && $0.kind == .cask }
@@ -809,14 +908,15 @@ public enum RunOrigin: Sendable { case user, background }
     /// administrator) never reaches the run controller, whose refusal would show the panel and replace the last log.
     @discardableResult
     private func startRun(_ requests: [ActionRequest], caskRoutes: [PackageRef: CaskRoute], origin: RunOrigin) -> Bool {
-        let plan = ActionPlanner.make(requests, engines: services.engines, order: engineOrder, caskRoutes: caskRoutes)
+        let plan = keepingRuntimes(ActionPlanner.make(requests, engines: services.engines, order: engineOrder,
+                                                      caskRoutes: caskRoutes))
         if origin == .background,
            RunPreflight.filter(plan.steps, helperState: .enabled, isAdministrator: services.isAdministrator()).steps
                .isEmpty {
             return false
         }
         requestedUpgrades = requests.filter { $0.operation == .upgrade }
-            .map { (ref: $0.package.id, name: $0.package.displayName) }
+            .map { (ref: $0.package.id, name: $0.package.displayName, target: $0.package.latestVersion) }
         return start(plan, origin: origin)
     }
 
@@ -827,15 +927,50 @@ public enum RunOrigin: Sendable { case user, background }
     public var canSetUpEngines: Bool { canRun && !services.isDemo && !busy && !modalUpBesidesSetup }
 
     /// Plans "set up this engine" and runs it through the same run controller as every other change. Once the run
-    /// ends, however it ends, the engines are detected again, so a new one shows up without "Check again".
-    /// False when nothing started (not allowed now, or the run had nothing it could do).
+    /// ends, however it ends, the login shell is asked again and the engines are detected again, so a new one (and a
+    /// new bin folder on the PATH) shows up without "Check again". False when nothing started (not allowed now, or the
+    /// run had nothing it could do).
+    ///
+    /// Cargo's toolchain step runs with the login shell's CARGO_HOME and RUSTUP_HOME as they are now: the shell is
+    /// asked again and the plan made from its answer before the run starts, with nothing else starting meanwhile
+    /// (`preparing`). True then once that read started; if the run then can't start (something modal came up), the run
+    /// panel says so (`lastSetupPlanProblem`).
     @discardableResult
     public func setUpEngine(_ engine: EngineID) -> Bool {
         lastSetupPlanProblem = nil
         guard canSetUpEngines else { return false }
-        let plan = EngineSetupPlanner.plan(
-            engine, statuses: engineStatuses, host: services.hostInfo, cltPresent: services.cltPresent(),
-            engines: services.engines)
+        let plan = setupPlan(engine, loginEnvironment: [:])
+        guard engine == .cargo, !plan.steps.isEmpty else { return startSetup(plan) }
+        preparing = true
+        services.path.askAgain()
+        let path = services.path
+        Task {
+            let resolved = await path.resolve()
+            preparing = false
+            guard canSetUpEngines else {
+                startSetup(ActionPlan(steps: [], problems: [SetupCopy.setupInterrupted(engine)], notes: [],
+                                      reason: plan.reason))
+                return
+            }
+            startSetup(setupPlan(engine, loginEnvironment: resolved.environment))
+        }
+        return true
+    }
+
+    /// The plan for `engine`'s Set Up: Homebrew's Ruby or Node beside a read-only RubyGems or npm (R30,
+    /// `homebrewRuntimeOffer`), else `EngineSetupPlanner.plan`.
+    private func setupPlan(_ engine: EngineID, loginEnvironment: [String: String]) -> ActionPlan {
+        if homebrewRuntimeOffer(for: engine) == .offered {
+            return EngineSetupPlanner.languagePlan(engine, statuses: engineStatuses, host: services.hostInfo,
+                                                   engines: services.engines, loginEnvironment: loginEnvironment)
+        }
+        return EngineSetupPlanner.plan(engine, statuses: engineStatuses, host: services.hostInfo,
+                                       cltPresent: services.cltPresent(), engines: services.engines,
+                                       loginEnvironment: loginEnvironment, fileExists: services.fileExists)
+    }
+
+    @discardableResult
+    private func startSetup(_ plan: ActionPlan) -> Bool {
         if plan.steps.isEmpty { lastSetupPlanProblem = plan.problems.first }
         requestedUpgrades = []
         // Only a run that started will end, so the flag is never left set for an unrelated later run.
@@ -844,6 +979,7 @@ public enum RunOrigin: Sendable { case user, background }
         return true
     }
 
+    /// The engines are checked again when the run going ends: a Set Up run, or one Add to PATH came during.
     @ObservationIgnored private var recheckEnginesAfterRun = false
     /// The first problem of the last setup plan that had nothing to run; the setup screen words it.
     @ObservationIgnored private(set) var lastSetupPlanProblem: String?
@@ -852,7 +988,7 @@ public enum RunOrigin: Sendable { case user, background }
     /// user's setup, uninstall or move after a background run brings the window back again. `verify` answers the
     /// plan's check steps (only a move has any).
     @discardableResult
-    private func start(_ plan: ActionPlan, origin: RunOrigin = .user,
+    func start(_ plan: ActionPlan, origin: RunOrigin = .user,
                        verify: @escaping InstalledVerifier = RunSession.failClosed) -> Bool {
         let didStart: Bool
         if services.isDemo {
@@ -966,27 +1102,64 @@ public enum RunOrigin: Sendable { case user, background }
         reloadListsNow()
     }
 
+    /// The person's Refresh (the toolbar's, and ⌘R): the login shell is asked again by the reload's engines, so a
+    /// PATH fixed meanwhile is read (a background check or a run's end doesn't), then `refreshLists()`.
+    public func refresh() {
+        services.path.askAgain()
+        refreshLists()
+    }
+
     /// How the lists wait before their one retry after Homebrew's lock. Tests replace it.
     @ObservationIgnored var listLockRetrySleep: @Sendable (Duration) async -> Void = { try? await Task.sleep(for: $0) }
 
     private func runEnded() {
         setup.runEnded()
+        runtimeChangesEnded()
+        // A setup may have put a new bin folder on the login shell's PATH: the reload and the engine check read it.
+        if recheckEnginesAfterRun { services.path.askAgain() }
         reloadListsNow()
         retryListsAfterHomebrewLock()
         if recheckEnginesAfterRun {
             recheckEnginesAfterRun = false
-            checkEnginesAgain()
+            checkEnginesAgainSoon()
         }
         checkUpdatesTookEffect()
         for observer in runEndedObservers { observer() }
     }
 
-    /// The packages the last run was asked to update, by ref with the name to show. Set by `startRun`.
-    @ObservationIgnored private var requestedUpgrades: [(ref: PackageRef, name: String)] = []
+    /// The packages the last run was asked to update, by ref with the name to show and the version it was to get. Set
+    /// by `startRun`; a run of something else clears it.
+    @ObservationIgnored var requestedUpgrades: [(ref: PackageRef, name: String, target: String?)] = []
+
+    // MARK: Language engines (Task 10b): the state; the work is in BrewxPortAppModel+Languages.swift
+
+    /// The warning before an update of a Homebrew runtime that language tools run on; nil when none is up.
+    public internal(set) var runtimeWarning: RuntimeWarning?
+    /// Repair tools offered on an engine's page after a runtime its tools run on changed.
+    public internal(set) var repairOffers: [EngineID: RepairOffer] = [:]
+    /// The PATH note's Add to PATH, per engine page.
+    public internal(set) var pathFixes: [EngineID: MoveModel.PathFix] = [:]
+    /// R29: the Homebrew runtimes Installed lists as only another package's dependency that language tools run on,
+    /// each with those tools' engines. Homebrew updates run with autoremove off while there's one.
+    public internal(set) var keptRuntimes: [PackageRef: [EngineID]] = [:]
+    /// Counts the times `keptRuntimes` was asked for, so only the latest answer lands.
+    @ObservationIgnored var keptRuntimesAsked = 0
+    /// Homebrew's formulae by name, as the last Installed load that listed Homebrew found them; nil before one. Whether
+    /// Homebrew has Ruby or Node decides R30's offers and PATH notes (`homebrewListed`).
+    public internal(set) var homebrewFormulae: Set<String>?
+    /// No answer for `keptRuntimes` yet (launch, before Installed has loaded, or Installed couldn't list Homebrew):
+    /// Homebrew updates run with autoremove off meanwhile, failing closed.
+    @ObservationIgnored var keptRuntimesPending = true
+    /// Runtime changes BrewxPort started (an update the person confirmed, a Python removal), waiting for the run that
+    /// has them to end.
+    @ObservationIgnored var pendingRuntimeChanges: [PendingRuntimeChange] = []
+    /// Where Add to PATH writes, read from the home folder once (and again after it wrote).
+    @ObservationIgnored var cachedPathOffer: ShellPathEditor.Offer?
 
     /// After an update run, once Updates has reloaded: any package the run was asked to update that the engine still
-    /// lists as outdated is named in the run panel. That covers every way an update can quietly not happen (a step
-    /// the preflight skipped, a failed one, Homebrew printing "Not upgrading …" and exiting 0).
+    /// offers (`BackgroundUpdater.stillOffered`: a newer version held back for its own reason doesn't count) is named
+    /// in the run panel. That covers every way an update can quietly not happen (a step the preflight skipped, a
+    /// failed one, Homebrew printing "Not upgrading …" and exiting 0).
     private func checkUpdatesTookEffect() {
         let asked = requestedUpgrades
         requestedUpgrades = []
@@ -995,8 +1168,13 @@ public enum RunOrigin: Sendable { case user, background }
         Task { [weak self] in
             guard let self else { return }
             await self.updates.list.settled()
-            let still = Set(self.updates.list.all.map(\.id))
-            let names = asked.filter { still.contains($0.ref) }.map(\.name)
+            let updates = self.updates
+            let names = asked.filter { asked in
+                updates.list.all.first { $0.id == asked.ref }.map { row in
+                    BackgroundUpdater.stillOffered(row.package, held: updates.hold(for: row) != nil,
+                                                   target: asked.target)
+                } ?? false
+            }.map(\.name)
             guard !names.isEmpty else { return }
             self.run.addProblem("Still out of date after the update: \(names.joined(separator: ", ")).", run: runNumber)
         }
@@ -1362,8 +1540,8 @@ public enum RunOrigin: Sendable { case user, background }
         return parts.isEmpty ? nil : parts.joined(separator: " ")
     }
 
-    /// Updates' rows including hidden ones.
-    public var outdatedRefs: Set<PackageRef> { Set(updates.list.all.map(\.id)) }
+    /// Updates' rows including hidden ones, less those held from every update (nobody may update them).
+    public var outdatedRefs: Set<PackageRef> { Set(updates.list.all.filter { !updates.blocksManual($0) }.map(\.id)) }
 
     /// Puts the window in the state Task 7's Snapshotter photographs and waits until that view's list isn't loading.
     public func prepareSnapshot(_ item: SidebarItem) async {
@@ -1413,7 +1591,7 @@ public enum RunOrigin: Sendable { case user, background }
     /// For the setup snapshot only: the window as on a first launch, with no engine installed.
     public func previewFirstLaunch() {
         guard services.isDemo else { return }
-        engineStatuses = [.homebrew: .missing, .macports: .missing, .nanobrew: .missing, .mas: .missing]
+        engineStatuses = Dictionary(uniqueKeysWithValues: EngineID.allCases.map { ($0, EngineStatus.missing) })
         setup.previewOffer()
     }
 
@@ -1438,7 +1616,7 @@ public enum RunOrigin: Sendable { case user, background }
 public struct InspectorOptionFields: Equatable, Sendable {
     /// Only for an engine with `.versionPinning` (none today).
     public let version: Bool
-    /// Every engine but mas.
+    /// Every system engine but mas; never a language engine.
     public let extraArgs: Bool
     /// MacPorts' variants, by name; empty for other engines.
     public let variants: [String]
@@ -1485,9 +1663,11 @@ public struct PendingExport: Equatable, Sendable {
         summary.counts.values.reduce(0, +) - leftOut.count
     }
 
-    /// Something isn't in the file: an engine that failed to list, a refused name, or a left-out entry.
+    /// Something isn't in the file: an engine that failed to list, a refused name, a left-out entry, or language
+    /// tools (`ExportSummary.languageToolsLine`).
     public var needsReview: Bool {
         !leftOut.isEmpty || !summary.failedEngines.isEmpty || !summary.refused.isEmpty
+            || summary.languageToolsLine != nil
     }
 }
 

@@ -1,0 +1,5 @@
+Updating installed gems
+Updating lolcat
+Successfully installed lolcat-100.0.1
+Gems updated: lolcat
+Gems already up-to-date: mustache

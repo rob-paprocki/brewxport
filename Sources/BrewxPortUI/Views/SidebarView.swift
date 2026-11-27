@@ -2,8 +2,8 @@ import BrewxPortCore
 import BrewxPortRun
 import SwiftUI
 
-/// Library (Discover, Updates, Installed, Bundles), one row per engine in the host's engine order, and BrewxPort's
-/// helper.
+/// Library (Discover, Updates, Installed, Bundles), one row per engine in the host's engine order (system package
+/// managers under "Engines", language ones under "Languages"), and BrewxPort's helper.
 struct SidebarView: View {
     @Bindable var model: BrewxPortAppModel
 
@@ -17,10 +17,13 @@ struct SidebarView: View {
                 Label("Installed", systemImage: "checkmark.rectangle.stack").tag(SidebarItem.installed)
                 Label("Bundles", systemImage: "archivebox").tag(SidebarItem.bundles)
             }
-            Section("Engines") {
-                ForEach(model.engineOrder, id: \.self) { id in
-                    EngineRow(id: id, status: model.engineStatuses[id])
-                        .tag(SidebarItem.engine(id))
+            ForEach(model.sidebarEngineGroups) { group in
+                Section(group.title) {
+                    ForEach(group.engines, id: \.self) { id in
+                        EngineRow(id: id, status: model.engineStatuses[id],
+                                  note: model.updates.uncheckedDetail(for: id))
+                            .tag(SidebarItem.engine(id))
+                    }
                 }
             }
             if model.hasHelper {
@@ -41,6 +44,8 @@ struct SidebarView: View {
 private struct EngineRow: View {
     let id: EngineID
     let status: EngineStatus?
+    /// What the last check couldn't look up, for the tooltip.
+    let note: String?
 
     var body: some View {
         HStack {
@@ -59,12 +64,13 @@ private struct EngineRow: View {
                 .foregroundStyle(statusColor)
                 .accessibilityLabel(EngineRowText.subtitle(status))
         }
+        .optionalHelp(EngineRowText.help(status, unchecked: note))
     }
 
     private var statusColor: Color {
         switch status {
         case .present?: .green
-        case .unusable?: .orange
+        case .unusable?, .unsupported?: .orange
         case .missing?, nil: .secondary
         }
     }

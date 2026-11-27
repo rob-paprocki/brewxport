@@ -1,0 +1,5 @@
+error: unexpected argument '--outdated' found
+
+Usage: uv tool list --show-version-specifiers
+
+For more information, try '--help'.

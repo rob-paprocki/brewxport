@@ -1,0 +1,6 @@
+lolcat (100.0.0)
+    Author: Moe
+    Homepage: https://github.com/busyloop/lolcat
+    Installed at: /opt/homebrew/lib/ruby/gems/4.0.0
+
+    Okay, no unicorns. But rainbows!!

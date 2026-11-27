@@ -1,0 +1,4 @@
+other-crate v0.1.0 (/Users/tester/othercrate):
+    rg
+tokei v13.0.0-alpha.9:
+    tokei

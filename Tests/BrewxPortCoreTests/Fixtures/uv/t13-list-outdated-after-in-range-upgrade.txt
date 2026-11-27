@@ -1,0 +1,10 @@
+black v24.2.0 [required: >=24, <24.3.0] [latest: 26.10.1]
+- black
+- blackd
+isort v6.1.0 [required: >=5, <7] [latest: 9.0.2]
+- isort
+- isort-identify-imports
+pyfiglet v1.0.2 [required:  https://files.pythonhosted.org/packages/1a/03/bef6fff907e212d67a0003f8ea4819307bba91b2856074a0763dd483ccc4/pyfiglet-1.0.2-py3-none-any.whl] [latest: 1.0.4]
+- pyfiglet
+ruff v0.6.0 [required: ==0.6.0] [latest: 0.17.6]
+- ruff

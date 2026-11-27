@@ -1,0 +1,8 @@
+/Users/tester/cargo-alt-root:
+.crates.toml
+.crates2.json
+bin
+
+/Users/tester/cargo-alt-root/bin:
+cap-one
+cap-two

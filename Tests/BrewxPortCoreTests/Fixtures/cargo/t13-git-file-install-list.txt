@@ -1,0 +1,5 @@
+capture-crate v0.1.0 (file:///Users/tester/capcrate#7fa6e7b8):
+    cap-one
+    cap-two
+ripgrep v14.1.0:
+    rg

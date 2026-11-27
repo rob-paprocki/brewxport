@@ -1,0 +1,4 @@
+lrwxr-xr-x  1 tester  staff  83 Nov 27 07:31 /Users/tester/.local/share/uv/tools/black/bin/python -> /Users/tester/.local/share/uv/python/cpython-3.12-macos-aarch64-none/bin/python3.12
+lrwxr-xr-x  1 tester  staff  44 Nov 26 19:34 /Users/tester/.local/share/uv/tools/isort/bin/python -> /opt/homebrew/opt/python@3.15/bin/python3.15
+lrwxr-xr-x  1 tester  staff  83 Nov 27 07:31 /Users/tester/.local/share/uv/tools/pyfiglet/bin/python -> /Users/tester/.local/share/uv/python/cpython-3.12-macos-aarch64-none/bin/python3.12
+lrwxr-xr-x  1 tester  staff  81 Nov 27 07:32 /Users/tester/.local/share/uv/tools/tabulate/bin/python -> /Users/tester/.local/share/uv/python/pypy-3.12.15-macos-aarch64-none/bin/pypy3.12

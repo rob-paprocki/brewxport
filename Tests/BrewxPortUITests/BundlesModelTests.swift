@@ -641,6 +641,61 @@ import BrewxPortCore
         #expect(brewfile.summary.failedEngines == bundle.summary.failedEngines)
     }
 
+    /// Language tools aren't in bundles or Brewfiles (Plan 9): each export says so in one line, counting them by
+    /// manager in the sidebar's order, rather than one refusal per tool. It still asks for a review before saving.
+    @Test func exportsSayLanguageToolsAreNotIncluded() async throws {
+        let catalog = FakeCatalog(engines: P.allPresent)
+        catalog.script(.installed, .homebrew, packages: [P.installed(.homebrew, .formula, "jq", "1.8.1")])
+        catalog.script(.installed, .cargo, packages: [P.installed(.cargo, .tool, "ripgrep", "14.1.0"),
+                                                      P.installed(.cargo, .tool, "bat", "0.24.0")])
+        catalog.script(.installed, .npm, packages: [P.installed(.npm, .tool, "cowsay", "1.5.0")])
+        let model = K.app(catalog: catalog)
+        let bundle = await model.exportBundle()
+        #expect(bundle.summary.refused.isEmpty)
+        #expect(bundle.summary.languageTools == [.npm: 1, .cargo: 2])
+        #expect(bundle.summary.languageToolsLine == "Not included: 3 language tools (npm, Cargo)")
+        #expect(try BundleFile.decode(bundle.data).entries.map(\.ref) == [Self.jq])
+        let brewfile = await model.exportBrewfile()
+        #expect(brewfile.leftOut.isEmpty)
+        #expect(brewfile.summary.languageToolsLine == "Not included: 3 language tools (npm, Cargo)")
+        let pending = PendingExport(kind: .brewfile, data: Data(brewfile.text.utf8), defaultName: "Brewfile",
+                                    leftOut: brewfile.leftOut, summary: brewfile.summary)
+        #expect(pending.needsReview)
+        #expect(pending.savedCount == 1)
+        #expect(ExportSummary(counts: [:], failedEngines: [:], refused: [], languageTools: [.gem: 1])
+            .languageToolsLine == "Not included: 1 language tool (RubyGems)")
+        #expect(ExportSummary(counts: [:], failedEngines: [:], refused: []).languageToolsLine == nil)
+    }
+
+    /// Final review: a language manager whose listing failed isn't blamed under "Couldn't list what's installed" for
+    /// tools no export carries, and the "Not included" line counts it in: its tools are left out too.
+    @Test func failedLanguageListingIsNotIncludedNotBlamed() async throws {
+        let catalog = FakeCatalog(engines: P.allPresent)
+        catalog.script(.installed, .homebrew, packages: [P.installed(.homebrew, .formula, "jq", "1.8.1")])
+        catalog.script(.installed, .cargo, packages: [P.installed(.cargo, .tool, "ripgrep", "14.1.0"),
+                                                      P.installed(.cargo, .tool, "bat", "0.24.0")])
+        catalog.script(.installed, .pipx, FakeCatalog.Script(
+            result: .failure(EngineError(engine: .pipx, message: "pipx list failed (exit 1)"))))
+        catalog.script(.installed, .macports, FakeCatalog.Script(
+            result: .failure(EngineError(engine: .macports, message: "port broke"))))
+        let model = K.app(catalog: catalog)
+        for summary in [await model.exportBundle().summary, await model.exportBrewfile().summary] {
+            #expect(summary.failedEngines == [.macports: "port broke"])
+            #expect(summary.languageToolsUnlisted == [.pipx])
+            #expect(summary.languageToolsLine == "Not included: 2 language tools (Cargo) and pipx's tools, which "
+                    + "couldn't be listed")
+        }
+        // Only language listings failed, and nothing else to say: still reviewed, with the line.
+        let unlisted = ExportSummary(counts: [.homebrew: 1], failedEngines: [:], refused: [],
+                                     languageToolsUnlisted: [.uv, .pipx])
+        #expect(unlisted.languageToolsLine == "Not included: pipx's and uv's tools, which couldn't be listed")
+        #expect(ExportSummary(counts: [:], failedEngines: [:], refused: [], languageToolsUnlisted: [.gem])
+                .languageToolsLine == "Not included: RubyGems' tools, which couldn't be listed")
+        let pending = PendingExport(kind: .bundle, data: Data(), defaultName: "a", leftOut: [], summary: unlisted)
+        #expect(pending.needsReview)
+        #expect(pending.failedEngineLines.isEmpty)
+    }
+
     @Test func exportBrewfileNamesWhatItLeavesOut() async throws {
         let catalog = FakeCatalog(engines: P.allPresent)
         catalog.script(.installed, .macports, packages: [P.installed(.macports, .port, "curl", "8.0")])

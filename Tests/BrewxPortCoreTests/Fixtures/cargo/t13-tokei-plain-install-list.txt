@@ -1,0 +1,4 @@
+ripgrep v16.0.0:
+    rg
+tokei v15.0.0:
+    tokei

@@ -23,6 +23,8 @@ public struct EngineLocator: Sendable {
         case .mas: return prefixes.map { $0 + "/mas" }
         case .nanobrew: return [Self.nanobrewPath, "/opt/nb/bin/nb"]
         case .macports: return ["/opt/local/bin/port"]
+        // Language engines are found from the login shell's PATH first (Plan 9 Task 2's ToolLocator), not here.
+        case .npm, .pipx, .uv, .cargo, .bun, .gem, .mint: return []
         }
     }
 

@@ -10,6 +10,8 @@ final class StubEngine: Engine, @unchecked Sendable {
     private let searchResult: Result<[Package], Error>
     private let installedResult: Result<[Package], Error>
     private let outdatedResult: Result<[Package], Error>
+    /// What `checkOutdated()` answers when set; otherwise the protocol's default (`listOutdated()`'s packages).
+    private let report: OutdatedReport?
     private let infoResult: Result<PackageDetails, Error>
     private let onInfo: (@Sendable () async -> Void)?
     private let onSearch: (@Sendable () async -> Void)?
@@ -23,6 +25,7 @@ final class StubEngine: Engine, @unchecked Sendable {
         search: Result<[Package], Error> = .success([]),
         installed: Result<[Package], Error> = .success([]),
         outdated: Result<[Package], Error> = .success([]),
+        report: OutdatedReport? = nil,
         info: Result<PackageDetails, Error> = .failure(EngineError(engine: .homebrew, message: "stub")),
         onInfo: (@Sendable () async -> Void)? = nil,
         onSearch: (@Sendable () async -> Void)? = nil,
@@ -36,6 +39,7 @@ final class StubEngine: Engine, @unchecked Sendable {
         self.searchResult = search
         self.installedResult = installed
         self.outdatedResult = outdated
+        self.report = report
         self.onSearch = onSearch
         self.infoResult = info
         self.onInfo = onInfo
@@ -70,6 +74,12 @@ final class StubEngine: Engine, @unchecked Sendable {
     func listOutdated() async throws -> [Package] {
         log("listOutdated")
         return try outdatedResult.get()
+    }
+
+    func checkOutdated() async throws -> OutdatedReport {
+        guard let report else { return OutdatedReport(packages: try await listOutdated()) }
+        log("checkOutdated")
+        return report
     }
 
     func info(_ ref: PackageRef) async throws -> PackageDetails {

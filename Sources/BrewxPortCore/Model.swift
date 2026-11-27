@@ -1,7 +1,10 @@
 import Foundation
 
+/// Raw values are stored (ignored and skipped packages, the notify ledger, bundles), so they never change. The system
+/// package managers come first, then the language package managers, each group in the order its sidebar shows it.
 public enum EngineID: String, Codable, Sendable, CaseIterable {
     case homebrew, nanobrew, macports, mas
+    case npm, pipx, uv, cargo, bun, gem, mint
 
     /// The name people see in messages.
     public var displayName: String {
@@ -10,13 +13,56 @@ public enum EngineID: String, Codable, Sendable, CaseIterable {
         case .nanobrew: return "nanobrew"
         case .macports: return "MacPorts"
         case .mas: return "Mac App Store"
+        case .npm: return "npm"
+        case .pipx: return "pipx"
+        case .uv: return "uv"
+        case .cargo: return "Cargo"
+        case .bun: return "Bun"
+        case .gem: return "RubyGems"
+        case .mint: return "Mint"
+        }
+    }
+
+    public var group: EngineGroup {
+        switch self {
+        case .homebrew, .nanobrew, .macports, .mas: return .system
+        case .npm, .pipx, .uv, .cargo, .bun, .gem, .mint: return .languages
+        }
+    }
+
+    /// A language package manager: installs a language's global command-line tools, always as the user.
+    public var isLanguage: Bool { group == .languages }
+
+    /// The display name's possessive: "Cargo's", "RubyGems'", "MacPorts'" (`String.possessive`).
+    public var possessive: String { displayName.possessive }
+}
+
+extension String {
+    /// The possessive the copy builds from a name: "Cargo's", but "RubyGems'" and "MacPorts'": a name that ends in
+    /// "s" takes the apostrophe alone. An upper-case "S" ("AWS") takes "'s".
+    public var possessive: String { hasSuffix("s") ? self + "'" : self + "'s" }
+}
+
+/// Which sidebar group an engine is listed in.
+public enum EngineGroup: String, Sendable, CaseIterable {
+    /// Homebrew, nanobrew, MacPorts and the Mac App Store.
+    case system
+    /// npm, pipx, uv, Cargo, Bun, RubyGems and Mint.
+    case languages
+
+    /// The sidebar section's title.
+    public var title: String {
+        switch self {
+        case .system: return "Engines"
+        case .languages: return "Languages"
         }
     }
 }
 
 public enum PackageKind: String, Codable, Sendable {
     /// `tap` is Homebrew only: a third-party formula repository (`user/repo`), added with `brew tap`.
-    case formula, cask, port, app, tap
+    /// `tool` is the language engines' only kind: a global command-line tool (an npm package, a crate, a gem).
+    case formula, cask, port, app, tap, tool
 }
 
 public enum Arch: String, Codable, Sendable {
@@ -116,6 +162,9 @@ public struct PackageDetails: Sendable, Equatable {
     /// answers an alias (`python3`) with the formula it stands for (`python@3.15`), and MacPorts gives a port's own
     /// capitals (`ImageMagick` for `imagemagick`). nil means the answer didn't say.
     public var reportedName: String?
+    /// The commands the package puts on disk, where the engine says: a crate's binaries (ripgrep's `rg`), whose names
+    /// often differ from the package's. nil means the engine doesn't say; an empty array means it has none.
+    public var executables: [String]?
 
     public init(
         ref: PackageRef,
@@ -126,9 +175,11 @@ public struct PackageDetails: Sendable, Equatable {
         dependencies: [String]? = nil,
         variants: [String] = [],
         installerNeedsRoot: Bool? = nil,
-        reportedName: String? = nil
+        reportedName: String? = nil,
+        executables: [String]? = nil
     ) {
         self.reportedName = reportedName
+        self.executables = executables
         self.ref = ref
         self.summary = summary
         self.homepage = homepage

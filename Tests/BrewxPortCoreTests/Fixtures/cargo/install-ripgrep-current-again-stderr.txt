@@ -1,0 +1,2 @@
+    Updating crates.io index
+     Ignored package `ripgrep v16.0.0` is already installed, use --force to override

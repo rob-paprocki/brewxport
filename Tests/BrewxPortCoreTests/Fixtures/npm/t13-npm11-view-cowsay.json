@@ -1,0 +1,6 @@
+{
+  "name": "cowsay",
+  "version": "1.6.0",
+  "description": "cowsay is a configurable talking cow",
+  "homepage": "https://github.com/piuccio/cowsay"
+}

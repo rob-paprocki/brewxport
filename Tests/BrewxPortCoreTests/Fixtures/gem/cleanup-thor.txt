@@ -1,0 +1,4 @@
+Cleaning up installed gems...
+Attempting to uninstall thor-1.3.2
+Successfully uninstalled thor-1.3.2
+Clean up complete

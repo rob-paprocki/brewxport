@@ -1,0 +1,7 @@
+    Updating git repository `file:///Users/tester/capcrate`
+  Installing capture-crate v0.1.0 (file:///Users/tester/capcrate#7fa6e7b8)
+   Compiling capture-crate v0.1.0 (/Users/tester/.cargo/git/checkouts/capcrate-7335fa0b89fa73bc/7fa6e7b)
+    Finished `release` profile [optimized] target(s) in 0.14s
+  Installing /Users/tester/.cargo/bin/cap-one
+  Installing /Users/tester/.cargo/bin/cap-two
+   Installed package `capture-crate v0.1.0 (file:///Users/tester/capcrate#7fa6e7b8)` (executables `cap-one`, `cap-two`)

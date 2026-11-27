@@ -1,0 +1,6 @@
+  Installing capture-crate v0.1.0 (/Users/tester/capcrate)
+   Compiling capture-crate v0.1.0 (/Users/tester/capcrate)
+    Finished `release` profile [optimized] target(s) in 0.83s
+  Installing /Users/tester/.cargo/bin/cap-one
+  Installing /Users/tester/.cargo/bin/cap-two
+   Installed package `capture-crate v0.1.0 (/Users/tester/capcrate)` (executables `cap-one`, `cap-two`)

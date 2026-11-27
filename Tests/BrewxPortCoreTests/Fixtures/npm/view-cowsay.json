@@ -1,0 +1,13 @@
+{
+  "name": "cowsay",
+  "version": "1.6.0",
+  "description": "cowsay is a configurable talking cow",
+  "homepage": "https://github.com/piuccio/cowsay",
+  "license": "MIT",
+  "repository.url": "git+https://github.com/piuccio/cowsay.git",
+  "bin": {
+    "cowsay": "cli.js",
+    "cowthink": "cli.js"
+  },
+  "engines.node": ">= 4"
+}

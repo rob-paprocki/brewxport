@@ -1,0 +1,404 @@
+{
+  "name": "lib",
+  "problems": [
+    "missing: yargs@15.4.1, required by cowsay@1.5.0"
+  ],
+  "dependencies": {
+    "cowsay": {
+      "version": "1.5.0",
+      "overridden": false,
+      "dependencies": {
+        "ansi-styles": {
+          "version": "4.3.0",
+          "overridden": false
+        },
+        "camelcase": {
+          "version": "5.3.1",
+          "overridden": false
+        },
+        "cliui": {
+          "version": "6.0.0",
+          "overridden": false
+        },
+        "color-convert": {
+          "version": "2.0.1",
+          "overridden": false
+        },
+        "color-name": {
+          "version": "1.1.4",
+          "overridden": false
+        },
+        "decamelize": {
+          "version": "1.2.0",
+          "overridden": false
+        },
+        "emoji-regex": {
+          "version": "8.0.0",
+          "overridden": false
+        },
+        "find-up": {
+          "version": "4.1.0",
+          "overridden": false
+        },
+        "get-caller-file": {
+          "version": "2.0.5",
+          "overridden": false
+        },
+        "get-stdin": {
+          "version": "8.0.0",
+          "overridden": false
+        },
+        "locate-path": {
+          "version": "5.0.0",
+          "overridden": false
+        },
+        "p-limit": {
+          "version": "2.3.0",
+          "overridden": false
+        },
+        "p-locate": {
+          "version": "4.1.0",
+          "overridden": false
+        },
+        "p-try": {
+          "version": "2.2.0",
+          "overridden": false
+        },
+        "path-exists": {
+          "version": "4.0.0",
+          "overridden": false
+        },
+        "require-directory": {
+          "version": "2.1.1",
+          "overridden": false
+        },
+        "require-main-filename": {
+          "version": "2.0.0",
+          "overridden": false
+        },
+        "set-blocking": {
+          "version": "2.0.0",
+          "overridden": false
+        },
+        "string-width": {
+          "version": "2.1.1",
+          "overridden": false
+        },
+        "strip-final-newline": {
+          "version": "2.0.0",
+          "overridden": false
+        },
+        "which-module": {
+          "version": "2.0.1",
+          "overridden": false
+        },
+        "wrap-ansi": {
+          "version": "6.2.0",
+          "overridden": false
+        },
+        "y18n": {
+          "version": "4.0.3",
+          "overridden": false
+        },
+        "yargs-parser": {
+          "version": "18.1.3",
+          "overridden": false
+        },
+        "yargs": {
+          "required": "15.4.1",
+          "missing": true,
+          "problems": [
+            "missing: yargs@15.4.1, required by cowsay@1.5.0"
+          ]
+        }
+      }
+    },
+    "npm": {
+      "version": "12.2.3",
+      "overridden": false,
+      "dependencies": {
+        "@isaacs/string-locale-compare": {
+          "version": "1.1.0",
+          "overridden": false
+        },
+        "@npmcli/arborist": {
+          "version": "10.0.5",
+          "overridden": false
+        },
+        "@npmcli/config": {
+          "version": "11.2.1",
+          "overridden": false
+        },
+        "@npmcli/fs": {
+          "version": "6.0.0",
+          "overridden": false
+        },
+        "@npmcli/git": {
+          "version": "8.0.0",
+          "overridden": false
+        },
+        "@npmcli/map-workspaces": {
+          "version": "6.0.0",
+          "overridden": false
+        },
+        "@npmcli/metavuln-calculator": {
+          "version": "10.0.0",
+          "overridden": false
+        },
+        "@npmcli/package-json": {
+          "version": "8.0.0",
+          "overridden": false
+        },
+        "@npmcli/promise-spawn": {
+          "version": "10.0.1",
+          "overridden": false
+        },
+        "@npmcli/redact": {
+          "version": "5.0.0",
+          "overridden": false
+        },
+        "@npmcli/run-script": {
+          "version": "11.0.0",
+          "overridden": false
+        },
+        "@sigstore/tuf": {
+          "version": "5.0.0",
+          "overridden": false
+        },
+        "abbrev": {
+          "version": "5.0.0",
+          "overridden": false
+        },
+        "archy": {
+          "version": "1.0.0",
+          "overridden": false
+        },
+        "bin-links": {
+          "version": "7.0.1",
+          "overridden": false
+        },
+        "cacache": {
+          "version": "21.0.1",
+          "overridden": false
+        },
+        "chalk": {
+          "version": "5.6.2",
+          "overridden": false
+        },
+        "ci-info": {
+          "version": "4.4.0",
+          "overridden": false
+        },
+        "diff": {
+          "version": "8.0.4",
+          "overridden": false
+        },
+        "fastest-levenshtein": {
+          "version": "1.0.16",
+          "overridden": false
+        },
+        "fs-minipass": {
+          "version": "3.0.3",
+          "overridden": false
+        },
+        "glob": {
+          "version": "13.0.6",
+          "overridden": false
+        },
+        "graceful-fs": {
+          "version": "4.2.11",
+          "overridden": false
+        },
+        "hosted-git-info": {
+          "version": "10.1.1",
+          "overridden": false
+        },
+        "ini": {
+          "version": "7.0.0",
+          "overridden": false
+        },
+        "init-package-json": {
+          "version": "9.0.0",
+          "overridden": false
+        },
+        "is-cidr": {
+          "version": "7.0.0",
+          "overridden": false
+        },
+        "json-parse-even-better-errors": {
+          "version": "6.0.0",
+          "overridden": false
+        },
+        "libnpmaccess": {
+          "version": "11.0.0",
+          "overridden": false
+        },
+        "libnpmdiff": {
+          "version": "9.0.5",
+          "overridden": false
+        },
+        "libnpmexec": {
+          "version": "11.0.6",
+          "overridden": false
+        },
+        "libnpmfund": {
+          "version": "8.0.5",
+          "overridden": false
+        },
+        "libnpmorg": {
+          "version": "9.0.0",
+          "overridden": false
+        },
+        "libnpmpack": {
+          "version": "10.0.5",
+          "overridden": false
+        },
+        "libnpmpublish": {
+          "version": "12.0.1",
+          "overridden": false
+        },
+        "libnpmsearch": {
+          "version": "10.0.0",
+          "overridden": false
+        },
+        "libnpmteam": {
+          "version": "9.0.0",
+          "overridden": false
+        },
+        "libnpmversion": {
+          "version": "9.0.0",
+          "overridden": false
+        },
+        "make-fetch-happen": {
+          "version": "16.0.1",
+          "overridden": false
+        },
+        "minimatch": {
+          "version": "10.2.5",
+          "overridden": false
+        },
+        "minipass-pipeline": {
+          "version": "1.2.4",
+          "overridden": false
+        },
+        "minipass": {
+          "version": "7.1.3",
+          "overridden": false
+        },
+        "ms": {
+          "version": "2.1.3",
+          "overridden": false
+        },
+        "node-gyp": {
+          "version": "13.0.0",
+          "overridden": false
+        },
+        "nopt": {
+          "version": "10.0.1",
+          "overridden": false
+        },
+        "npm-audit-report": {
+          "version": "8.0.0",
+          "overridden": false
+        },
+        "npm-install-checks": {
+          "version": "9.0.0",
+          "overridden": false
+        },
+        "npm-package-arg": {
+          "version": "14.0.0",
+          "overridden": false
+        },
+        "npm-pick-manifest": {
+          "version": "12.0.0",
+          "overridden": false
+        },
+        "npm-profile": {
+          "version": "13.0.1",
+          "overridden": false
+        },
+        "npm-registry-fetch": {
+          "version": "20.0.1",
+          "overridden": false
+        },
+        "npm-user-validate": {
+          "version": "5.0.0",
+          "overridden": false
+        },
+        "p-map": {
+          "version": "7.0.5",
+          "overridden": false
+        },
+        "pacote": {
+          "version": "22.0.1",
+          "overridden": false
+        },
+        "parse-conflict-json": {
+          "version": "6.0.0",
+          "overridden": false
+        },
+        "proc-log": {
+          "version": "7.0.0",
+          "overridden": false
+        },
+        "qrcode-terminal": {
+          "version": "0.12.0",
+          "overridden": false
+        },
+        "read": {
+          "version": "6.0.0",
+          "overridden": false
+        },
+        "semver": {
+          "version": "7.8.6",
+          "overridden": false
+        },
+        "spdx-expression-parse": {
+          "version": "4.0.0",
+          "overridden": false
+        },
+        "ssri": {
+          "version": "14.0.0",
+          "overridden": false
+        },
+        "supports-color": {
+          "version": "10.2.2",
+          "overridden": false
+        },
+        "tar": {
+          "version": "7.5.22",
+          "overridden": false
+        },
+        "text-table": {
+          "version": "0.2.0",
+          "overridden": false
+        },
+        "tiny-relative-date": {
+          "version": "2.0.2",
+          "overridden": false
+        },
+        "treeverse": {
+          "version": "3.0.0",
+          "overridden": false
+        },
+        "validate-npm-package-name": {
+          "version": "8.0.0",
+          "overridden": false
+        },
+        "which": {
+          "version": "7.0.0",
+          "overridden": false
+        }
+      }
+    },
+    "semver": {
+      "version": "7.8.0",
+      "overridden": false
+    }
+  },
+  "error": {
+    "code": "ELSPROBLEMS",
+    "summary": "missing: yargs@15.4.1, required by cowsay@1.5.0",
+    "detail": ""
+  }
+}

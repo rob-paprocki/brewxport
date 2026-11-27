@@ -63,7 +63,7 @@ public enum RunPreflight {
         case .install: return "MacPorts installs"
         case .upgrade: return "MacPorts updates"
         case .remove: return "MacPorts removals"
-        case .markRequested, .markDependency: return "MacPorts changes"
+        case .markRequested, .markDependency, .repair: return "MacPorts changes"
         }
     }
 }

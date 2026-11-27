@@ -1,0 +1,20 @@
+{
+  "command": [
+    "install"
+  ],
+  "data": {
+    "packages": [],
+    "skipped": []
+  },
+  "errors": [
+    {
+      "code": "package_install_failed",
+      "environment": "httpie",
+      "message": "Error installing httpie.\nerror: Request failed after 3 retries in 9.3s\n  cause: Failed to fetch: https://pypi.org/simple/httpie/\n  cause: error sending request for url (https://pypi.org/simple/httpie/)\n  cause: client error (Connect)\n  cause: tunnel error: failed to create underlying connection\n  cause: tcp connect error\n  cause: Connection refused (os error 61)",
+      "package": null
+    }
+  ],
+  "exit_code": 1,
+  "pipx_result_version": "1",
+  "status": "error"
+}

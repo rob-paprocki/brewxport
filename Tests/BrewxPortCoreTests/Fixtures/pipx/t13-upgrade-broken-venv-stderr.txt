@@ -1,0 +1,3 @@
+Not upgrading cowsay. It has an invalid python interpreter /Users/tester/Library/Application Support/pipx/venvs/cowsay/bin/python.
+This usually happens after a system Python upgrade.
+To fix, execute: pipx reinstall-all

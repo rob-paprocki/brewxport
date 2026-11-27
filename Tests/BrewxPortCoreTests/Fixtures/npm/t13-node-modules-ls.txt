@@ -1,0 +1,6 @@
+total 0
+drwxr-xr-x    5 tester  admin   160 Nov 26 19:34 .
+drwxrwxr-x  294 tester  admin  9408 Nov 26 19:24 ..
+drwxr-xr-x   12 tester  admin   384 Nov 26 19:34 cowsay
+drwxr-xr-x   12 tester  admin   384 Nov 26 19:24 npm
+drwxr-xr-x   13 tester  admin   416 Nov 26 19:34 semver

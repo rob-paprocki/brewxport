@@ -1,0 +1,6 @@
+
+Select gem to uninstall:
+ 1. thor-1.3.2
+ 2. thor-1.5.0
+ 3. All versions
+> Error: must enter a number [1-3]

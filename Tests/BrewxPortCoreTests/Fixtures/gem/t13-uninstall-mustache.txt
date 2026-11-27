@@ -1,0 +1,2 @@
+Removing mustache
+Successfully uninstalled mustache-1.1.3

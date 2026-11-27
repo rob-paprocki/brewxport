@@ -1,0 +1,2 @@
+==> Fetching downloads for: pipx
+✔︎ Bottle pipx (1.19.1)

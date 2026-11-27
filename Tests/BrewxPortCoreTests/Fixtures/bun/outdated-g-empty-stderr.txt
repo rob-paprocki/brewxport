@@ -1,0 +1,2 @@
+error: missing package.json, nothing outdated
+error: failed to initialize bun install: MissingPackageJSON

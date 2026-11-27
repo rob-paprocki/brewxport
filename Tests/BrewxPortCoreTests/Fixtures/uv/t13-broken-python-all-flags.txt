@@ -1,0 +1,5 @@
+isort v6.1.0 [required: >=5, <7] [CPython 3.15.2] (/Users/tester/.local/share/uv/tools/isort)
+- isort (/Users/tester/.local/bin/isort)
+- isort-identify-imports (/Users/tester/.local/bin/isort-identify-imports)
+ruff v0.6.0 [required: ==0.6.0] [CPython 3.15.2] (/Users/tester/.local/share/uv/tools/ruff)
+- ruff (/Users/tester/.local/bin/ruff)

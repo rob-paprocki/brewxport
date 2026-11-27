@@ -1,0 +1,2 @@
+lrwxr-xr-x  1 tester  staff  44 Nov 27 07:36 /Users/tester/.local/share/uv/tools/isort/bin/python -> /opt/homebrew/opt/python@3.15/bin/python3.15
+lrwxr-xr-x  1 tester  staff  44 Nov 27 07:36 /Users/tester/.local/share/uv/tools/ruff/bin/python -> /opt/homebrew/opt/python@3.15/bin/python3.15

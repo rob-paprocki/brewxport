@@ -1,0 +1,6 @@
+🌱 Cloning Ink 1.0.0
+🌱 Resolving package
+🌱 Building product ink-fork
+🌱 Installed Ink 1.0.0
+🌱 Linked ink-fork 1.0.0 to /Users/tester/.mint/bin
+🌱 /Users/tester/.mint/bin must be added to your $PATH if you wish to run this package outside of mint

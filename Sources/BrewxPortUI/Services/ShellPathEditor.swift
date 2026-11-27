@@ -7,7 +7,8 @@ import BrewxPortCore
 /// nothing is written.
 ///
 /// The line is always `export PATH="<bin>:$PATH"  # Added by BrewxPort`, and only a known engine bin directory
-/// (`EngineLocator`'s candidates on either architecture) is ever written, and only to the file the offer named. The
+/// (`EngineLocator`'s candidates on either architecture, or a language engine's own bin folder that the caller names
+/// and that is a plain path, `isPlainPath`) is ever written, and only to the file the offer named. The
 /// file is appended to and never rewritten: it's opened with O_APPEND and O_NOCTTY (created 0644 when missing),
 /// checked on the open descriptor to be a regular file the person owns (a symlink to one is fine), given a trailing
 /// newline first when it lacks one, and written in one call.
@@ -78,6 +79,16 @@ public struct ShellPathEditor: Sendable {
     }
 
     public static func isKnown(_ bin: String) -> Bool { knownDirectories.contains(trimmed(bin)) }
+
+    /// An absolute path a shell reads as nothing but itself inside the line's double quotes: letters, digits, spaces
+    /// and `/ . _ - + @`, with no `.` or `..` part. No `$`, backtick, quote, backslash, colon or control character,
+    /// so a folder an engine reported can never become code in a startup file.
+    public static func isPlainPath(_ path: String) -> Bool {
+        guard path.hasPrefix("/") else { return false }
+        let allowed = CharacterSet.letters.union(.decimalDigits).union(CharacterSet(charactersIn: " /._-+@"))
+        guard path.unicodeScalars.allSatisfy(allowed.contains) else { return false }
+        return !path.split(separator: "/").contains { $0 == "." || $0 == ".." }
+    }
 
     public var offer: Offer {
         switch destination {
@@ -236,9 +247,12 @@ public struct ShellPathEditor: Sendable {
     static let createFlags = O_RDWR | O_APPEND | O_CREAT | O_EXCL | O_NOFOLLOW | O_NONBLOCK | O_NOCTTY | O_CLOEXEC
 
     /// Appends the line for `bin` to the file `offer` named (the one the preview showed, even if the files have
-    /// changed since), unless that file already puts it on the PATH. A copy-only offer writes nothing.
-    public func add(_ bin: String, to offer: Offer) throws(Failure) -> Outcome {
-        guard Self.isKnown(bin) else { throw .unknownDirectory }
+    /// changed since), unless that file already puts it on the PATH. A copy-only offer writes nothing. `allowing` are
+    /// language engines' bin folders (`~/.cargo/bin`) the caller vouches for; each is written only when it's a plain
+    /// path (`isPlainPath`).
+    public func add(_ bin: String, to offer: Offer, allowing languageBins: Set<String> = []) throws(Failure) -> Outcome {
+        let allowed = languageBins.map(Self.trimmed).contains(Self.trimmed(bin)) && Self.isPlainPath(bin)
+        guard Self.isKnown(bin) || allowed else { throw .unknownDirectory }
         guard case .append(let target) = offer else { throw .copyOnly }
         let path = target.path, shown = target.file
         let bin = Self.trimmed(bin)

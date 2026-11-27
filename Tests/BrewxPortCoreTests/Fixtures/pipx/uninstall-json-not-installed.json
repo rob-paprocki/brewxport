@@ -1,0 +1,19 @@
+{
+  "command": [
+    "uninstall"
+  ],
+  "data": {
+    "packages": []
+  },
+  "errors": [
+    {
+      "code": "environment_uninstall_failed",
+      "environment": "cowsay",
+      "message": "Nothing to uninstall for cowsay.",
+      "package": null
+    }
+  ],
+  "exit_code": 1,
+  "pipx_result_version": "1",
+  "status": "error"
+}

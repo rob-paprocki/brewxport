@@ -1,0 +1,3 @@
+    Updating crates.io index
+ Downloading crates ...
+  Downloaded ripgrep v16.0.0

@@ -4,6 +4,8 @@ import Foundation
 ///
 /// Each one goes through `BundleRules.check`, the same check an import runs, so an export never holds an entry an
 /// import would refuse. One that fails, or repeats a ref already written, is left out and named in `refused`.
+/// Language tools are never in bundles (Plan 9): they're left out without a line each, and the summary counts them
+/// (`languageTools`, `ExportSummary.languageToolsLine`).
 public enum BundleExporter {
     /// Entry order: engine (`EngineID.allCases`), then kind (this order), then name (plain `String` order, not the
     /// locale's), so two exports of the same Mac are byte-identical.
@@ -37,7 +39,7 @@ public enum BundleExporter {
         for tap in taps {
             add(engine: .homebrew, kind: .tap, name: tap, displayName: nil, variants: [], installedVersion: nil)
         }
-        for package in installed {
+        for package in installed where !package.id.engine.isLanguage {
             add(engine: package.id.engine, kind: package.id.kind, name: package.fullName ?? package.id.name,
                 displayName: package.displayName,
                 variants: package.id.engine == .macports ? package.requestedVariants : [],
@@ -59,6 +61,11 @@ public enum BundleExporter {
         return (bundle, refused)
     }
 
+    /// How many language tools `installed` has, by manager: what an export leaves out of every bundle and Brewfile.
+    public static func languageTools(_ installed: [Package]) -> [EngineID: Int] {
+        Dictionary(grouping: installed.filter(\.id.engine.isLanguage), by: \.id.engine).mapValues(\.count)
+    }
+
     /// For an export of only what the user installed: drops packages their engine marks as installed as a
     /// dependency (`installedOnRequest == false`). One the engine says nothing about (nil) stays, and its engine is
     /// named in `unknown` so the message after saving can say why its dependencies are still in. Taps aren't
@@ -75,7 +82,8 @@ public enum BundleExporter {
             case true?:
                 kept.append(package)
             case nil:
-                unknown.insert(package.id.engine)
+                // A language tool isn't exported either way, so its manager has nothing to explain.
+                if !package.id.engine.isLanguage { unknown.insert(package.id.engine) }
                 kept.append(package)
             }
         }
@@ -99,14 +107,42 @@ public struct ExportSummary: Equatable, Sendable {
     /// Engines, in an export without dependencies, that don't say which packages were dependencies: all their
     /// packages are in.
     public var dependenciesUnknown: Set<EngineID>
+    /// The language tools installed, by manager, which no bundle or Brewfile carries.
+    public var languageTools: [EngineID: Int]
+    /// The language managers whose listing failed: their tools aren't counted, and no file would carry them anyway,
+    /// so they're named in `languageToolsLine`, never in `failedEngines`.
+    public var languageToolsUnlisted: Set<EngineID>
 
     public init(counts: [EngineID: Int], failedEngines: [EngineID: String], refused: [String],
-                dependenciesLeftOut: Int = 0, dependenciesUnknown: Set<EngineID> = []) {
+                dependenciesLeftOut: Int = 0, dependenciesUnknown: Set<EngineID> = [],
+                languageTools: [EngineID: Int] = [:], languageToolsUnlisted: Set<EngineID> = []) {
         self.counts = counts
         self.failedEngines = failedEngines
         self.refused = refused
         self.dependenciesLeftOut = dependenciesLeftOut
         self.dependenciesUnknown = dependenciesUnknown
+        self.languageTools = languageTools
+        self.languageToolsUnlisted = languageToolsUnlisted
+    }
+
+    /// The one line saying the language tools aren't in the file: "Not included: 12 language tools (npm, Cargo)",
+    /// the managers in the sidebar's order, then those that couldn't be listed: "… and pipx's tools, which couldn't
+    /// be listed". Nil when there are none of either.
+    public var languageToolsLine: String? {
+        var parts: [String] = []
+        let total = languageTools.values.reduce(0, +)
+        if total > 0 {
+            let managers = EngineID.allCases.filter { (languageTools[$0] ?? 0) > 0 }.map(\.displayName)
+            let tools = total == 1 ? "1 language tool" : "\(total) language tools"
+            parts.append("\(tools) (" + managers.joined(separator: ", ") + ")")
+        }
+        let unlisted = EngineID.allCases.filter(languageToolsUnlisted.contains).map(\.possessive)
+        if let last = unlisted.last {
+            let names = unlisted.count == 1 ? last : unlisted.dropLast().joined(separator: ", ") + " and " + last
+            parts.append(names + " tools, which couldn't be listed")
+        }
+        guard !parts.isEmpty else { return nil }
+        return "Not included: " + parts.joined(separator: " and ")
     }
 
     /// A failed tap listing counts as a Homebrew failure; when Homebrew's installed list failed too, both messages

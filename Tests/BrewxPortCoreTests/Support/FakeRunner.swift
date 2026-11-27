@@ -1,20 +1,31 @@
 import Foundation
 @testable import BrewxPortCore
 
-/// Test double for `CommandRunning`. Responses are keyed by arguments only.
+/// Test double for `CommandRunning`. Responses are keyed by arguments only, unless `byExecutable` has an answer for
+/// the executable's file name (cargo and the `rustc` beside it both answer `--version`).
 /// Unknown argv yields exit code 127.
 final class FakeRunner: CommandRunning, @unchecked Sendable {
     private let lock = NSLock()
-    private let responses: [[String]: CommandResult]
+    private var responses: [[String]: CommandResult]
+    private let byExecutable: [String: [[String]: CommandResult]]
     private var _calls: [[String]] = []
     private var _options: [RunOptions] = []
     private var _executables: [URL] = []
 
-    init(_ responses: [[String]: CommandResult]) { self.responses = responses }
+    init(_ responses: [[String]: CommandResult], byExecutable: [String: [[String]: CommandResult]] = [:]) {
+        self.responses = responses
+        self.byExecutable = byExecutable
+    }
 
     var calls: [[String]] {
         lock.lock(); defer { lock.unlock() }
         return _calls
+    }
+
+    /// Answers `arguments` with `result` from now on.
+    func respond(_ arguments: [String], _ result: CommandResult) {
+        lock.lock(); defer { lock.unlock() }
+        responses[arguments] = result
     }
 
     /// The executable each call was made with, in call order (parallel to `calls`).
@@ -53,7 +64,7 @@ final class FakeRunner: CommandRunning, @unchecked Sendable {
         _executables.append(executable)
         _calls.append(arguments)
         _options.append(options)
-        return responses[arguments]
+        return byExecutable[executable.lastPathComponent]?[arguments] ?? responses[arguments]
             ?? CommandResult(exitCode: 127, stdout: "", stderr: "FakeRunner: no response for \(arguments)")
     }
 }

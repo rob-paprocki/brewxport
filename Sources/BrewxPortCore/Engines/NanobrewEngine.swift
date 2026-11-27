@@ -196,6 +196,9 @@ public struct NanobrewEngine: Engine, DependentsMapping {
         guard op != .markRequested, op != .markDependency else {
             throw EngineError(engine: .nanobrew, message: "\(EngineID.nanobrew.displayName) can't mark packages")
         }
+        guard op != .repair else {
+            throw EngineError(engine: .nanobrew, message: "nanobrew has no tools to repair")
+        }
         guard options.version == nil else {
             throw EngineError(engine: .nanobrew, message: "nanobrew can't install a specific version")
         }
@@ -213,7 +216,7 @@ public struct NanobrewEngine: Engine, DependentsMapping {
         case .install: verb = "install"
         case .upgrade: verb = "upgrade"
         case .remove: verb = "remove"
-        case .markRequested, .markDependency: preconditionFailure("refused above")
+        case .markRequested, .markDependency, .repair: preconditionFailure("refused above")
         }
         let flag = casks > 0 ? ["--cask"] : []
         return CommandSpec(executable: exe, arguments: [verb] + flag + options.extraArgs + names, needsRoot: false)

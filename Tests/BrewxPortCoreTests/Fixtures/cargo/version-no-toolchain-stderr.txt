@@ -1,0 +1,2 @@
+error: toolchain 'stable-aarch64-apple-darwin' is not installed
+help: run `rustup toolchain install` to install it

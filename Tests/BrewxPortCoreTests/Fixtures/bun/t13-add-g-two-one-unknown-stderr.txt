@@ -1,0 +1,5 @@
+Resolving dependencies
+Resolved, downloaded and extracted [5]
+warn: deprecated left-pad@1.3.0: use String.prototype.padStart()
+
+error: GET https://registry.npmjs.org/no-such-package-for-brewxport - 404

@@ -1,0 +1,82 @@
+{
+    "pipx_spec_version": "0.1",
+    "venvs": {
+        "black": {
+            "metadata": {
+                "injected_packages": {},
+                "main_package": {
+                    "app_paths": [
+                        {
+                            "__Path__": "/Users/tester/oldpipx/home-1.5.0/venvs/black/bin/black",
+                            "__type__": "Path"
+                        },
+                        {
+                            "__Path__": "/Users/tester/oldpipx/home-1.5.0/venvs/black/bin/blackd",
+                            "__type__": "Path"
+                        }
+                    ],
+                    "app_paths_of_dependencies": {},
+                    "apps": [
+                        "black",
+                        "blackd"
+                    ],
+                    "apps_of_dependencies": [],
+                    "include_apps": true,
+                    "include_dependencies": false,
+                    "man_pages": [],
+                    "man_pages_of_dependencies": [],
+                    "man_paths": [],
+                    "man_paths_of_dependencies": {},
+                    "package": "black",
+                    "package_or_url": "black==24.2.0",
+                    "package_version": "24.2.0",
+                    "pip_args": [],
+                    "suffix": ""
+                },
+                "pipx_metadata_version": "0.4",
+                "python_version": "Python 3.12.16",
+                "source_interpreter": {
+                    "__Path__": "/Users/tester/oldpipx/venv-1.5.0/bin/python",
+                    "__type__": "Path"
+                },
+                "venv_args": []
+            }
+        },
+        "cowsay": {
+            "metadata": {
+                "injected_packages": {},
+                "main_package": {
+                    "app_paths": [
+                        {
+                            "__Path__": "/Users/tester/oldpipx/home-1.5.0/venvs/cowsay/bin/cowsay",
+                            "__type__": "Path"
+                        }
+                    ],
+                    "app_paths_of_dependencies": {},
+                    "apps": [
+                        "cowsay"
+                    ],
+                    "apps_of_dependencies": [],
+                    "include_apps": true,
+                    "include_dependencies": false,
+                    "man_pages": [],
+                    "man_pages_of_dependencies": [],
+                    "man_paths": [],
+                    "man_paths_of_dependencies": {},
+                    "package": "cowsay",
+                    "package_or_url": "cowsay==5.0",
+                    "package_version": "5.0",
+                    "pip_args": [],
+                    "suffix": ""
+                },
+                "pipx_metadata_version": "0.4",
+                "python_version": "Python 3.12.16",
+                "source_interpreter": {
+                    "__Path__": "/Users/tester/oldpipx/venv-1.5.0/bin/python",
+                    "__type__": "Path"
+                },
+                "venv_args": []
+            }
+        }
+    }
+}

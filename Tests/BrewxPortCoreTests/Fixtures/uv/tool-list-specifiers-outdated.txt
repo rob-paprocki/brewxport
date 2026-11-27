@@ -1,0 +1,5 @@
+isort v5.13.2 [required: ==5.13.2] [latest: 9.0.2]
+- isort
+- isort-identify-imports
+ruff v0.6.0 [required: ==0.6.0] [latest: 0.17.6]
+- ruff

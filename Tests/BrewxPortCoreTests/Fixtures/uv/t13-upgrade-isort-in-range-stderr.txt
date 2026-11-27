@@ -1,0 +1,5 @@
+Updated isort v5.13.2 -> v6.1.0
+ - isort==5.13.2
+ + isort==6.1.0
+Installed 2 executables: isort, isort-identify-imports
+warning: `/Users/tester/.local/bin` is not on your PATH. To use installed tools, add the directory to your PATH.

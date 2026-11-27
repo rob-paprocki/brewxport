@@ -72,6 +72,18 @@ import Testing
         #expect(model.list.rows.count == 2)
     }
 
+    /// Post-VM fix: the search field names the engine the filter shows ("Search npm"), and every engine without one.
+    @Test func searchPromptNamesTheFilteredEngine() {
+        let model = Self.model(FakeCatalog())
+        #expect(model.searchPrompt == "Search all engines")
+        model.engineFilter = .npm
+        #expect(model.searchPrompt == "Search npm")
+        model.engineFilter = .gem
+        #expect(model.searchPrompt == "Search RubyGems")
+        model.engineFilter = nil
+        #expect(model.searchPrompt == "Search all engines")
+    }
+
     @Test func newSearchCancelsOlder() async {
         let catalog = FakeCatalog()
         // The first search: Homebrew answers late, MacPorts never does.

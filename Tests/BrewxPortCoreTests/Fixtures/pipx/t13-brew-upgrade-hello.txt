@@ -1,0 +1,8 @@
+==> Upgrading hello
+  2.12.2 -> 2.12.3 
+==> Pouring hello--2.12.3.arm64_sequoia.bottle.1.tar.gz
+🍺  /opt/homebrew/Cellar/hello/2.12.3: 12 files, 193.3KB
+==> Cleanup
+Removing: /opt/homebrew/Cellar/hello/2.12.2... (12 files, 193.3KB)
+Disable this behaviour by setting `HOMEBREW_NO_INSTALL_CLEANUP=1`.
+Hide these hints with `HOMEBREW_NO_ENV_HINTS=1` (see `man brew`).

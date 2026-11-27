@@ -22,9 +22,10 @@ public struct EngineSetup: Equatable, Sendable {
         self.skippedCount = skippedCount
     }
 
-    /// Setup help for an engine that's `.missing` or `.unusable`; nil when it's `.present`.
+    /// Setup help for an engine that's `.missing` or `.unusable`; nil when it's `.present`, and for a language engine
+    /// (bundles never carry their tools, so an import never needs one; its Set Up is on its own page).
     public static func setup(for engine: EngineID, status: EngineStatus) -> EngineSetup? {
-        guard let reason = PackageCatalog.message(for: engine, status: status) else { return nil }
+        guard !engine.isLanguage, let reason = PackageCatalog.message(for: engine, status: status) else { return nil }
         let first: String
         if case .unusable = status {
             first = "Reinstall \(engine == .mas ? "mas" : engine.displayName) from \(site(engine)), or fix the problem shown above."
@@ -43,6 +44,8 @@ public struct EngineSetup: Equatable, Sendable {
         case .macports: return URL(string: "https://www.macports.org/install.php")!
         case .mas: return URL(string: "https://github.com/mas-cli/mas")!
         case .nanobrew: return URL(string: "https://nanobrew.trilok.ai")!
+        // Not reached: `setup(for:status:)` gives nil for language engines (their pages' Set Up installs them).
+        case .npm, .pipx, .uv, .cargo, .bun, .gem, .mint: return URL(string: "https://brew.sh")!
         }
     }
 
@@ -52,6 +55,7 @@ public struct EngineSetup: Equatable, Sendable {
         case .macports: return "macports.org"
         case .mas: return "its GitHub page"
         case .nanobrew: return "nanobrew.trilok.ai"
+        case .npm, .pipx, .uv, .cargo, .bun, .gem, .mint: return "brew.sh"  // not reached, as `link`
         }
     }
 
@@ -61,6 +65,7 @@ public struct EngineSetup: Equatable, Sendable {
         case .macports: return "Install MacPorts with the installer for your macOS version from macports.org."
         case .mas: return "Install mas by following the steps on its GitHub page."
         case .nanobrew: return "Install nanobrew with the command on nanobrew.trilok.ai."
+        case .npm, .pipx, .uv, .cargo, .bun, .gem, .mint: return "Install Homebrew from brew.sh."  // not reached
         }
     }
 }

@@ -1,0 +1,2 @@
+error: binary `rg` already exists in destination as part of `ripgrep v16.0.0`
+Add --force to overwrite

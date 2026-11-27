@@ -1,0 +1,3 @@
+  installed package cowsay 5.0, installed using Python 3.12.16
+  These apps are now globally available
+    - cowsay

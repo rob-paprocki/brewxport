@@ -1,0 +1,7 @@
+Ignoring existing environment for `ruff`: the Python interpreter does not match the environment interpreter
+Resolved 1 package in 109ms
+Prepared 1 package in 0.20ms
+Installed 1 package in 1ms
+ + ruff==0.6.0
+Installed 1 executable: ruff
+warning: `/Users/tester/.local/bin` is not on your PATH. To use installed tools, add the directory to your PATH.

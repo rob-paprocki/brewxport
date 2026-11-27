@@ -212,6 +212,16 @@ private func lines(_ text: String) -> [String] {
         #expect(leftOut.allSatisfy { !$0.reason.isEmpty })
     }
 
+    @Test func languageToolsLeftOut() {
+        let tool = BundleEntry(engine: .npm, kind: .tool, name: "typescript", displayName: "typescript")
+        let jq = BundleEntry(engine: .homebrew, kind: .formula, name: "jq", displayName: "jq")
+        let bundle = BundleFile(createdBy: "BrewxPort 0.8.0", arch: .arm64, entries: [tool, jq])
+        let (text, leftOut) = BrewfileWriter.write(bundle, date: noon)
+        #expect(lines(text).dropFirst() == ["brew \"jq\""])
+        #expect(leftOut == [LeftOut(ref: tool.ref, displayName: "typescript",
+                                    reason: "language tools aren't included in Brewfiles")])
+    }
+
     @Test func headerHasNoUserOrHost() async throws {
         var bundle = try await fixtureExport()
         bundle.createdBy = "BrewxPort 0.3.0\nsystem(\"echo injected\")"

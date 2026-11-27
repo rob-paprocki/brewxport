@@ -1,0 +1,17 @@
+{
+  "command": [
+    "upgrade"
+  ],
+  "data": {},
+  "errors": [
+    {
+      "code": "pipx_error",
+      "environment": null,
+      "message": "'/opt/homebrew/bin/uv pip install --python /Users/tester/Library/Application\nSupport/pipx/venvs/black/bin/python --quiet --upgrade-package black black'\nfailed",
+      "package": null
+    }
+  ],
+  "exit_code": 1,
+  "pipx_result_version": "1",
+  "status": "error"
+}

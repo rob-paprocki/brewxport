@@ -1,0 +1,27 @@
+{
+  "command": [
+    "upgrade"
+  ],
+  "data": {
+    "packages": [
+      {
+        "backend": "uv",
+        "environment": "cowsay",
+        "injected": false,
+        "interpreter": "Python 3.15.2",
+        "location": "/Users/tester/Library/Application Support/pipx/venvs/cowsay",
+        "package": "cowsay",
+        "previous_version": "5.0",
+        "source": null,
+        "status": "upgraded",
+        "suffix": "",
+        "version": "6.1"
+      }
+    ],
+    "skipped": []
+  },
+  "errors": [],
+  "exit_code": 0,
+  "pipx_result_version": "1",
+  "status": "success"
+}

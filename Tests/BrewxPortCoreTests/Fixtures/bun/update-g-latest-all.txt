@@ -1,0 +1,5 @@
+bun update v1.4.5 (826ef2a6f)
+
+^ semver 7.8.0 -> 7.8.6
+
+1 package installed [333.00ms]

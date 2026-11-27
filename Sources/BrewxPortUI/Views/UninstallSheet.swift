@@ -73,7 +73,7 @@ public enum UninstallSheetText {
 }
 
 /// The uninstall confirmation: per package manager the picks (with versions), what stays and why, the leftovers box,
-/// and a note when leftovers couldn't be worked out. Then the password line when it applies (on a standard account, the
+/// and a note when leftovers couldn't be worked out. Then what removing a Python would break (pipx's and uv's tools). Then the password line when it applies (on a standard account, the
 /// line saying those removals need an administrator, with their managers dimmed), Cancel and Uninstall.
 struct UninstallSheet: View {
     /// The tallest the package list gets before it scrolls.
@@ -123,6 +123,11 @@ struct UninstallSheet: View {
         .scrollBounceBehavior(.basedOnSize)
         .frame(maxHeight: Self.listMaxHeight)
         .fixedSize(horizontal: false, vertical: true)
+        if let warning = model.runtimeWarning {
+            Label(warning, systemImage: "exclamationmark.triangle")
+                .foregroundStyle(.orange)
+                .fixedSize(horizontal: false, vertical: true)
+        }
         if let line = confirmation.line {
             Text(line)
                 .foregroundStyle(.secondary)

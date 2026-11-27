@@ -1,0 +1,3 @@
+Downloading pypy-3.12.15-macos-aarch64-none (download) (24.7MiB)
+ Downloaded pypy-3.12.15-macos-aarch64-none (download)
+error: Invalid environment at `.local/share/uv/tools/tabulate`: missing Python executable at `.local/share/uv/tools/tabulate/bin/python`

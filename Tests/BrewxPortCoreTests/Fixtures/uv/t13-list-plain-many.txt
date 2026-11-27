@@ -1,0 +1,14 @@
+black v24.2.0
+- black
+- blackd
+isort v5.13.2
+- isort
+- isort-identify-imports
+pyfiglet v1.0.2
+- pyfiglet
+ruff v0.6.0
+- ruff
+sampleproject v4.0.0
+- sample
+tabulate v0.10.0
+- tabulate

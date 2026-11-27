@@ -1,0 +1,4 @@
+Cloning into 'github.com_JohnSundell_NoSuchRepoForBrewxPort'...
+fatal: could not read Username for 'https://github.com': terminal prompts disabled
+🌱 Encountered error during "git clone --depth 1 -b 1.0.0 https://github.com/JohnSundell/NoSuchRepoForBrewxPort.git github.com_JohnSundell_NoSuchRepoForBrewxPort". Use --verbose to see full output
+🌱  Couldn't clone https://github.com/JohnSundell/NoSuchRepoForBrewxPort.git 1.0.0

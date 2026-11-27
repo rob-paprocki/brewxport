@@ -23,6 +23,16 @@ public enum BrewxPortTimeouts {
     /// The longest one engine-setup download or install command may take (a Command Line Tools install is about 1 GB).
     public static let engineSetup: Duration = .seconds(1800)
 
+    /// How long a language engine waits for one package registry request (npm, PyPI, crates.io, RubyGems, GitHub),
+    /// redirects included.
+    public static let registryQuery: Duration = .seconds(10)
+
+    /// `duration` in seconds, for Foundation APIs that take a `TimeInterval`.
+    public static func seconds(_ duration: Duration) -> TimeInterval {
+        let parts = duration.components
+        return Double(parts.seconds) + Double(parts.attoseconds) / 1e18
+    }
+
     /// "didn't answer within 60 seconds", with the seconds taken from `timeout`.
     public static func didntAnswer(within timeout: Duration) -> String {
         let parts = timeout.components

@@ -1,0 +1,5 @@
+'cowsay' (6.1) is already installed. Not
+modifying existing installation in '/Users/tester/Library/Application
+Support/pipx/venvs/cowsay'.
+Pass '--force' to force installation, or use
+'pipx upgrade cowsay' to upgrade.

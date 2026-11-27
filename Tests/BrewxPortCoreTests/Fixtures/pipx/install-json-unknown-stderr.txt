@@ -1,0 +1,4 @@
+
+Errors from uv install:
+    error: No solution found when resolving dependencies
+      cause: Because no-such-package-for-brewxport was not found in the package registry and you require no-such-package-for-brewxport, we can conclude that your requirements are unsatisfiable.

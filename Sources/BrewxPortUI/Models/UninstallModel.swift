@@ -24,6 +24,20 @@ import BrewxPortRun
 
     public private(set) var state: State = .hidden
 
+    /// What the plan on screen would break: the pipx and uv tools that run on a Homebrew python@3.x it removes (a
+    /// pick, or a ticked leftover), and where to repair them afterwards. Nil when it removes no such Python.
+    public var runtimeWarning: String? {
+        guard case .ready(let plan) = state else { return nil }
+        let lines = pythonsRemoved(plan).compactMap { ref in
+            Self.pythonWarning(ref.name, affected: affected(by: ref.name))
+        }
+        return lines.isEmpty ? nil : lines.joined(separator: " ")
+    }
+
+    /// What pipx and uv said their tools run on when the sheet opened (nil for one that couldn't say), when the plan
+    /// had a Homebrew python@3.x among its picks or leftovers.
+    @ObservationIgnored private var pythonUses: [EngineID: [RuntimeUse]?] = [:]
+
     /// The sheet is up: checking or showing the plan. Not while the uninstall runs.
     public var sheetShown: Bool {
         switch state {
@@ -64,7 +78,9 @@ import BrewxPortRun
     /// checking replaces that check.
     public func start(_ refs: Set<PackageRef>) {
         guard state != .running, let app, app.canRun, !app.busy else { return }
-        let picks = refs.compactMap(app.package(for:))
+        // A language engine this account can't change removes nothing (its page says why).
+        let readOnly = app.readOnlyEngines
+        let picks = refs.filter { !readOnly.contains($0.engine) }.compactMap(app.package(for:))
         guard !picks.isEmpty else { return }
         task?.cancel()
         generation += 1
@@ -75,8 +91,13 @@ import BrewxPortRun
             guard let self else { return }
             let (picks, outcomes) = await self.gather(picks)
             guard !Task.isCancelled, self.generation == mine else { return }
+            let plan = UninstallPlanner.plan(picks: picks, facts: outcomes)
+            let pythons = plan.sections.flatMap { $0.picks + $0.leftovers }.filter(Self.isHomebrewPython)
+            let uses = pythons.isEmpty ? [:] : await app.runtimeUses(of: [.pipx, .uv])
+            guard !Task.isCancelled, self.generation == mine else { return }
             self.facts = outcomes.compactMapValues { try? $0.get() }
-            self.state = .ready(UninstallPlanner.plan(picks: picks, facts: outcomes))
+            self.pythonUses = uses
+            self.state = .ready(plan)
         }
     }
 
@@ -125,12 +146,21 @@ import BrewxPortRun
         guard case .ready(let plan) = state, let app, app.canRun, !app.busy else { return }
         let run = UninstallRunBuilder.run(for: plan, engines: services.engines, facts: facts)
         guard !run.actions.steps.isEmpty || !run.actions.problems.isEmpty else { return }
+        let changes = pythonsRemoved(plan).compactMap { ref -> PendingRuntimeChange? in
+            let affected = affected(by: ref.name)
+            guard !affected.isEmpty else { return nil }
+            return PendingRuntimeChange(ref: ref, runtime: ref.name, change: "removed",
+                                        engines: Dictionary(uniqueKeysWithValues: affected.map { engine, tools in
+                                            (engine, app.installedTools(engine, plus: tools ?? []))
+                                        }))
+        }
         state = .running
         // A run that had nothing it could do never started (the run panel says why), so there's nothing to wait for.
         guard app.startUninstall(run.actions) else {
             hide()
             return
         }
+        for change in changes { app.runtimeChangeStarting(change) }
         running = (run, app.run.runNumber)
     }
 
@@ -147,6 +177,7 @@ import BrewxPortRun
     private func hide() {
         state = .hidden
         facts = [:]
+        pythonUses = [:]
         app?.openPendingFile()
     }
 
@@ -159,6 +190,46 @@ import BrewxPortRun
         if let note = UninstallRunSummary.note(for: run, rows: app.run.steps) {
             app.run.addProblem(note, run: number)
         }
+    }
+
+    // MARK: Python
+
+    private static func isHomebrewPython(_ package: Package) -> Bool {
+        package.id.engine == .homebrew && package.id.kind == .formula
+            && RuntimeHolds.engines(for: package.id.name) == [.pipx, .uv]
+    }
+
+    /// The Homebrew Pythons `plan` removes: picks, and leftovers when their box is ticked.
+    private func pythonsRemoved(_ plan: UninstallPlan) -> [PackageRef] {
+        UninstallSheetText.removed(plan).filter(Self.isHomebrewPython).map(\.id)
+    }
+
+    /// The engines whose tools run on `formula`, each with those tools (nil: the engine couldn't say).
+    private func affected(by formula: String) -> [EngineID: [String]?] {
+        var affected: [EngineID: [String]?] = [:]
+        for (engine, answer) in pythonUses {
+            guard let uses = answer else {
+                affected[engine] = .some(nil)
+                continue
+            }
+            if let use = uses.first(where: { $0.formula == formula }) { affected[engine] = .some(use.tools) }
+        }
+        return affected
+    }
+
+    /// "black and cowsay (pipx) and ruff (uv) run on python@3.15 and will stop working. Afterwards, use Repair tools
+    /// on the pipx and uv pages." An engine that couldn't say is named by its tools ("uv's tools"). Nil when nothing
+    /// runs on it.
+    static func pythonWarning(_ formula: String, affected: [EngineID: [String]?]) -> String? {
+        let engines = RuntimeHolds.ordered(affected.keys)
+        guard !engines.isEmpty else { return nil }
+        let parts = engines.map { engine -> String in
+            guard let tools = affected[engine] ?? nil, !tools.isEmpty else { return "\(engine.possessive) tools" }
+            return RuntimeHolds.list(tools) + " (\(engine.displayName))"
+        }
+        let pages = RuntimeHolds.list(engines.map(\.displayName)) + (engines.count == 1 ? " page" : " pages")
+        return RuntimeHolds.list(parts) + " run on \(formula) and will stop working. Afterwards, use Repair tools on "
+            + "the \(pages)."
     }
 
     // MARK: Gathering

@@ -255,6 +255,16 @@ private let everyEngineKind: [(EngineID, PackageKind)] = [
         #expect(isAccepted(check(.nanobrew, .cask, "firefox")))
     }
 
+    @Test func languageToolsNeverAccepted() {
+        // Bundles don't carry language tools (Plan 9 design), so an import never turns one into a request.
+        for engine in [EngineID.npm, .pipx, .uv, .cargo, .bun, .gem, .mint] {
+            #expect(reason(check(engine, .tool, "ripgrep")) == "language tools aren't included in bundles")
+            #expect(!isAccepted(check(engine, .formula, "ripgrep")))
+        }
+        #expect(!isAccepted(check(.homebrew, .tool, "ripgrep")))
+        #expect(reason(check(.homebrew, .tool, "ripgrep")) == "Homebrew has no tools")
+    }
+
     @Test func firstFailureIsTheReason() {
         // Wrong kind wins over a bad name, a bad name over bad options.
         let wrongKind = reason(check(.macports, .tap, "--force", extraArgs: ["--no-quarantine"]))

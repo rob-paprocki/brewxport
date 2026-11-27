@@ -1,0 +1,6 @@
+bun add v1.4.5 (826ef2a6f)
+
+installed is-number@6.0.0
+installed ms@2.0.0
+
+2 packages installed [181.00ms]

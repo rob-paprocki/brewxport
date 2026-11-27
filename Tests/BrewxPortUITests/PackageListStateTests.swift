@@ -218,4 +218,15 @@ struct PackageListStateTests {
         #expect(catalog.queries.count == 2)
         #expect(state.rows.map(\.name) == ["wget"])
     }
+
+    /// R34: a language tool's row shows no arch unless its engine reports the installed copy's. Its engine's own arch
+    /// says nothing about the tool (an npm package is JavaScript; a crate is built for whatever Rust targets). System
+    /// engines' rows still show the arch they run as.
+    @Test func languageToolRowsShowNoArchUnlessKnown() {
+        let tool = Package(id: PackageRef(engine: .npm, kind: .tool, name: "cowsay"), displayName: "cowsay",
+                           installedVersion: "1.5.0")
+        #expect(PackageRow(package: tool, arch: .arm64).archName == "")
+        #expect(PackageRow(package: tool, arch: .arm64, installedArchs: [.x86_64]).archName == "x86_64")
+        #expect(PackageRow(package: package("jq", installed: "1.8"), arch: .arm64).archName == "arm64")
+    }
 }

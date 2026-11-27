@@ -374,6 +374,164 @@ enum PlanFixtures {
         #expect(CaskRouting.route(needsRoot: nil, homebrewPresent: false) == .needsHomebrew)
     }
 
+    // MARK: One target per command
+
+    /// No registry: building commands never reads one.
+    struct NoRegistry: RegistryFetching {
+        func get(_ url: URL) async throws -> Data { throw URLError(.notConnectedToInternet) }
+    }
+
+    /// Not a capture: crates.io's index with one version per crate, in the index's line shape (the fields BrewxPort
+    /// reads), so Cargo's outdated check offers that version. Only ripgrep's index file was captured.
+    struct IndexRegistry: RegistryFetching {
+        let versions: [String: String]
+
+        func get(_ url: URL) async throws -> Data {
+            let name = url.lastPathComponent
+            guard url.host == "index.crates.io", let vers = versions[name] else { throw RegistryFetchError.status(404) }
+            return Data((#"{"name":"\#(name)","vers":"\#(vers)","deps":[],"cksum":"","features":{},"yanked":false}"#
+                         + "\n").utf8)
+        }
+    }
+
+    static let toolBin = "/opt/homebrew/bin"
+
+    static func tool(_ engine: EngineID, _ name: String) -> Package {
+        Package(id: PackageRef(engine: engine, kind: .tool, name: name), displayName: name, installedVersion: "1",
+                latestVersion: "2")
+    }
+
+    static func requests(_ operation: PackageOperation, _ engine: EngineID, _ names: [String]) -> [ActionRequest] {
+        names.map { ActionRequest(operation: operation, package: tool(engine, $0)) }
+    }
+
+    /// pipx before 1.6.0 upgrades one tool per command, and a step per tool gives each its own result. Installs still
+    /// share one command.
+    @Test func plannerSplitsPipxUpgrades() {
+        let pipx = PipxEngine(runner: F.runner, registry: NoRegistry(),
+                              executable: URL(fileURLWithPath: Self.toolBin + "/pipx"))
+        let plan = ActionPlanner.make(Self.requests(.upgrade, .pipx, ["black", "ruff"])
+                                      + Self.requests(.install, .pipx, ["isort", "httpie"]),
+                                      engines: [pipx], order: F.order)
+        #expect(plan.problems.isEmpty)
+        #expect(plan.steps.map(\.spec.arguments) == [["install", "isort", "httpie"], ["upgrade", "black"],
+                                                     ["upgrade", "ruff"]])
+        #expect(plan.steps.map(\.title) == ["pipx: isort, httpie", "pipx: black", "pipx: ruff"])
+    }
+
+    /// `uv tool install` takes one package: two installs are two steps; upgrades share one.
+    @Test func plannerSplitsUvInstalls() {
+        let uv = UvEngine(runner: F.runner, registry: NoRegistry(), executable: URL(fileURLWithPath: Self.toolBin + "/uv"))
+        let plan = ActionPlanner.make(Self.requests(.install, .uv, ["isort", "ruff"])
+                                      + Self.requests(.upgrade, .uv, ["black", "httpie"]),
+                                      engines: [uv], order: F.order)
+        #expect(plan.problems.isEmpty)
+        #expect(plan.steps.map(\.spec.arguments) == [
+            ["tool", "install", "--color", "never", "--no-progress", "isort"],
+            ["tool", "install", "--color", "never", "--no-progress", "ruff"],
+            ["tool", "upgrade", "--color", "never", "--no-progress", "black", "httpie"],
+        ])
+    }
+
+    /// Not a capture: the captured `.crates2.json` (Fixtures/cargo) with ripgrep's `"features":[]` changed to
+    /// `["pcre2"]` and a plain `bat` install added as a copy of ripgrep's entry, in cargo's own shape. T13 recorded
+    /// `--features` only for a path install (`t13-path-features-crates2.json`), which is never upgraded.
+    static func cargoRecord() throws -> Data {
+        let fixture = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
+            .appendingPathComponent("BrewxPortCoreTests/Fixtures/cargo/crates2.json")
+        let captured = try String(contentsOf: fixture, encoding: .utf8)
+        try #require(captured.contains(#""features":[]"#))
+        let object = try #require(try JSONSerialization.jsonObject(with: Data(captured.utf8)) as? [String: Any])
+        var installs = try #require(object["installs"] as? [String: Any])
+        let (key, value) = try #require(installs.first)
+        var ripgrep = try #require(value as? [String: Any])
+        installs["bat 0.24.0 (registry+https://github.com/rust-lang/crates.io-index)"] = ripgrep
+            .merging(["bins": ["bat"]]) { $1 }
+        ripgrep["features"] = ["pcre2"]
+        installs[key] = ripgrep
+        return try JSONSerialization.data(withJSONObject: ["installs": installs])
+    }
+
+    /// Cargo upgrades one crate per command, each with the options cargo recorded for it and the version its check
+    /// offered (R36): a crate with options among others is no longer refused, and nothing is reported.
+    @Test func plannerSplitsCargoUpgradesWithRecordedOptions() async throws {
+        let record = try Self.cargoRecord()
+        let cargo = CargoEngine(runner: F.runner, registry: IndexRegistry(versions: ["ripgrep": "16.0.0",
+                                                                                    "bat": "0.25.0"]),
+                                executable: URL(fileURLWithPath: "/opt/homebrew/opt/rustup/bin/cargo"),
+                                base: ["HOME": "/Users/someone", "PATH": "/usr/bin:/bin"],
+                                readRecord: { $0 == "/Users/someone/.cargo/.crates2.json" ? record : nil })
+        _ = try await cargo.checkOutdated()
+        let plan = ActionPlanner.make(Self.requests(.upgrade, .cargo, ["ripgrep", "bat"])
+                                      + Self.requests(.install, .cargo, ["fd-find", "tokei"]),
+                                      engines: [cargo], order: F.order)
+        #expect(plan.problems.isEmpty)
+        #expect(plan.steps.map(\.spec.arguments) == [["install", "fd-find"], ["install", "tokei"],
+                                                     ["install", "--features", "pcre2", "--version", "=16.0.0",
+                                                      "ripgrep"],
+                                                     ["install", "--version", "=0.25.0", "bat"]])
+        #expect(plan.steps.map(\.title) == ["Cargo: fd-find", "Cargo: tokei", "Cargo: ripgrep", "Cargo: bat"])
+    }
+
+    /// Homebrew, which takes many names per command, keeps one step per kind: formulae, then casks.
+    @Test func homebrewBatchesUnchanged() {
+        let plan = ActionPlanner.make([F.request(.upgrade, .homebrew, .formula, "wget"),
+                                       F.request(.upgrade, .homebrew, .formula, "jq"),
+                                       F.request(.upgrade, .homebrew, .cask, "firefox"),
+                                       F.request(.upgrade, .homebrew, .cask, "zoom"),
+                                       F.request(.install, .homebrew, .formula, "fd"),
+                                       F.request(.install, .homebrew, .formula, "bat"),
+                                       F.request(.install, .homebrew, .cask, "iterm2"),
+                                       F.request(.install, .homebrew, .cask, "rectangle")],
+                                      engines: F.engines, order: F.order)
+        #expect(plan.problems.isEmpty)
+        #expect(plan.steps.map(\.spec.arguments) == [["install", "--formula", "fd", "bat"],
+                                                     ["install", "--cask", "iterm2", "rectangle"],
+                                                     ["upgrade", "wget", "jq"],
+                                                     ["upgrade", "--cask", "firefox", "zoom"]])
+        #expect(plan.steps.map(\.kind) == [.formula, .cask, .formula, .cask])
+        for engine in F.engines {
+            for operation in [PackageOperation.install, .upgrade, .remove] {
+                #expect(engine.maxTargetsPerCommand(for: operation) == nil, "\(engine.id) \(operation)")
+            }
+        }
+    }
+
+    /// The limits the language engines declare: Mint does everything one package at a time.
+    @Test func languageEnginesDeclareTheirLimits() {
+        let url = URL(fileURLWithPath: Self.toolBin + "/x")
+        let engines: [any Engine] = [
+            NpmEngine(runner: F.runner, executable: url),
+            PipxEngine(runner: F.runner, registry: NoRegistry(), executable: url),
+            UvEngine(runner: F.runner, registry: NoRegistry(), executable: url),
+            CargoEngine(runner: F.runner, registry: NoRegistry(), executable: url, readRecord: { _ in nil }),
+            BunEngine(runner: F.runner, registry: NoRegistry(), executable: url),
+            GemEngine(runner: F.runner, registry: NoRegistry(), executable: url),
+            MintEngine(runner: F.runner, executable: url, git: nil, readMetadata: { _ in nil }),
+        ]
+        func limits(_ id: EngineID) -> [Int?] {
+            let engine = engines.first { $0.id == id }!
+            return [PackageOperation.install, .upgrade, .remove].map { engine.maxTargetsPerCommand(for: $0) }
+        }
+        #expect(limits(.npm) == [nil, nil, nil])
+        #expect(limits(.pipx) == [nil, 1, 1])
+        #expect(limits(.uv) == [1, nil, nil])
+        #expect(limits(.cargo) == [1, 1, nil])
+        #expect(limits(.bun) == [nil, nil, nil])
+        #expect(limits(.gem) == [nil, nil, nil])
+        #expect(limits(.mint) == [1, 1, 1])
+    }
+
+    /// An engine's limit splits a plain batch into steps of that size, in request order. (A request with options of
+    /// its own already gets a step to itself.)
+    @Test func plannerSplitsToTheEnginesLimit() {
+        let pipx = PipxEngine(runner: F.runner, registry: NoRegistry(),
+                              executable: URL(fileURLWithPath: Self.toolBin + "/pipx"))
+        let plan = ActionPlanner.make(Self.requests(.upgrade, .pipx, ["a", "b", "c"]), engines: [pipx],
+                                      order: F.order)
+        #expect(plan.steps.map(\.spec.arguments) == [["upgrade", "a"], ["upgrade", "b"], ["upgrade", "c"]])
+    }
+
     // MARK: Reason
 
     @Test func reasonNamesOperation() {

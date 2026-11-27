@@ -1,0 +1,6 @@
+/Users/tester/.bun/install/global node_modules (45 installed)
+├── @antfu/ni@0.21.0
+├── capture-pkg@../../../capture-pkg
+├── cowsay@1.5.0
+├── he@github:mathiasbynens/he#ab02411
+└── semver@7.8.0

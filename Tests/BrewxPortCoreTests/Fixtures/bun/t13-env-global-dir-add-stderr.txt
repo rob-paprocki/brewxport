@@ -1,0 +1,4 @@
+Resolving dependencies
+Resolved, downloaded and extracted [25]
+error: failed to link cowsay: EEXIST
+Saved lockfile

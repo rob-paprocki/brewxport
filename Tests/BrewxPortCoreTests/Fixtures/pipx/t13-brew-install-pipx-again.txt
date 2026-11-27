@@ -1,0 +1,5 @@
+==> Pouring pipx--1.19.1.arm64_sequoia.bottle.tar.gz
+🍺  /opt/homebrew/Cellar/pipx/1.19.1: 274 files, 4.5MB
+==> Caveats
+zsh completions have been installed to:
+  /opt/homebrew/share/zsh/site-functions

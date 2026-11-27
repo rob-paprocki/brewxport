@@ -1,0 +1,2 @@
+lrwxr-xr-x  1 tester  admin  38 Nov 27 07:26 /opt/homebrew/bin/npm -> ../lib/node_modules/npm/bin/npm-cli.js
+lrwxr-xr-x  1 tester  admin  38 Nov 27 07:26 /opt/homebrew/bin/npx -> ../lib/node_modules/npm/bin/npx-cli.js

@@ -1,0 +1,23 @@
+{
+  "command": [
+    "list"
+  ],
+  "data": {
+    "packages": [
+      {
+        "environment": "cowsay",
+        "injected": false,
+        "latest_version": "6.1",
+        "package": "cowsay",
+        "pinned": false,
+        "version": "5.0"
+      }
+    ],
+    "packages_checked": 1,
+    "skipped": []
+  },
+  "errors": [],
+  "exit_code": 0,
+  "pipx_result_version": "1",
+  "status": "success"
+}

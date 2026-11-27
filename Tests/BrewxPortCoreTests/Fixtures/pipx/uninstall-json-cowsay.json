@@ -1,0 +1,19 @@
+{
+  "command": [
+    "uninstall"
+  ],
+  "data": {
+    "packages": [
+      {
+        "environment": "cowsay",
+        "location": "/Users/tester/Library/Application Support/pipx/venvs/cowsay",
+        "package": "cowsay",
+        "version": "6.1"
+      }
+    ]
+  },
+  "errors": [],
+  "exit_code": 0,
+  "pipx_result_version": "1",
+  "status": "success"
+}

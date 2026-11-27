@@ -7,6 +7,34 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-11-27
+
+**Upgrading:** If automatic updates are set to Update what doesn't need a password or Update everything, they now also update the tools BrewxPort finds from npm, pipx, uv, Cargo, Bun, RubyGems and Mint, except held ones. To keep a tool as it is, choose Ignore updates on its row.
+
+### Added
+
+- Seven language package managers: npm, pipx, uv, Cargo, Bun, RubyGems and Mint. BrewxPort lists, searches, installs, updates and removes the command-line tools you install with them, under a new Languages group in the sidebar. Each one has its own section on Updates, Installed and Discover, with an Update button on Updates. Their updates show in the menu bar and run in automatic updates.
+- Set Up on a language package manager's page when you don't have it. It installs Homebrew's `node`, `pipx`, `uv`, `rustup` (then Rust's stable toolchain), `bun`, `ruby` or `mint`. On a Mac without Homebrew, pipx, uv, Rust and Mint come from MacPorts. No installer scripts are downloaded.
+- Language tools never ask for a password and never run as root, so Update what doesn't need a password includes them.
+- When your account can't change a package manager's folder, as with macOS's own Ruby, Install, Update and Uninstall are off for it, and its page says why and how to fix it. It offers Set Up Homebrew's Ruby… or Set Up Homebrew's Node… when Homebrew is there without that runtime and the two copies wouldn't clash.
+- Held updates show a pause symbol and the reason, such as "Needs Rust 1.96" or "Came with Ruby", and automatic updates leave them out.
+- When a registry doesn't answer for some tools, their section says how many it couldn't check, like "2 tools couldn't be checked", and still lists the rest.
+- When your language tools run on Homebrew's Node, Ruby or Python, automatic updates hold back the updates that would break them: a new major version of Node, a new minor version of Ruby, and a `python@3.x` update when pipx or uv tools were made with its old copy (or BrewxPort can't tell). Updates that would bring one of those along wait too, and you get one notification instead. Updating it yourself shows a warning first. Afterwards, Repair tools on the npm, RubyGems, pipx or uv page rebuilds or reinstalls those tools.
+- Before it removes a `python@3.x`, the Uninstall sheet names the pipx and uv tools that run on it and will stop working.
+- Installed's mark for a package installed twice also covers the same tool from two package managers. It pairs them by the command they install, like `fd` from Homebrew's fd and Cargo's fd-find, or by name, like `ripgrep` from Homebrew and Cargo. It ticks the copy your login shell runs, or says when it can't tell, as when both copies are in one folder.
+- A language package manager's page says when its folder for tools isn't on your PATH, and offers Add to PATH. RubyGems' folder is named but not added, because its name changes with each Ruby minor version.
+- Bundle and Brewfile exports say in one line which language tools they leave out, like "Not included: 3 language tools (npm, Cargo)".
+- Some steps take one tool at a time (pipx updates and removals, uv installs, Cargo installs and updates, and every Mint step), so BrewxPort runs one for each tool, and each tool gets its own result.
+- Bun older than 1.4.5 shows as Too old, with how to update it.
+
+### Changed
+
+- Homebrew updates no longer remove a Node, Ruby or Python that Homebrew installed only as a dependency when your language tools run on it. The npm, RubyGems, pipx or uv page says so.
+
+### Fixed
+
+- Refresh (⌘R) and Check again read your login shell's PATH again. Before, BrewxPort read it once per launch, so a PATH you changed in Terminal only showed up after you quit and reopened BrewxPort.
+
 ## [0.7.0] - 2026-11-26
 
 **Upgrading:** BrewxPort now stays in the menu bar when you close its window and checks for updates every 12 hours. To keep the old behaviour, set Settings > Check for updates to Never.

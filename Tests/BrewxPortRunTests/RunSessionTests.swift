@@ -113,6 +113,19 @@ final class VerifierProbe: @unchecked Sendable {
         #expect(RunRouting.route(for: Steps.nanobrew()) == .user)
     }
 
+    @Test func languageEnginesAlwaysRunAsTheUser() {
+        // Plan 9: never root, never the helper, never sudo, even if a spec asked for root.
+        for engine in [EngineID.npm, .pipx, .uv, .cargo, .bun, .gem, .mint] {
+            for root in [false, true] {
+                let step = RunStep(engine: engine, kind: .tool, operation: .upgrade,
+                                   spec: CommandSpec(executable: URL(fileURLWithPath: "/opt/homebrew/bin/x"),
+                                                     arguments: ["x"], needsRoot: root),
+                                   title: "")
+                #expect(RunRouting.route(for: step) == .user)
+            }
+        }
+    }
+
     @Test func nanobrewGoesToSudoOnlyForItsOwnInit() {
         func step(_ path: String, _ arguments: [String], root: Bool = true) -> RunStep {
             RunStep(engine: .nanobrew, operation: .install,
@@ -388,11 +401,31 @@ final class VerifierProbe: @unchecked Sendable {
         _ = await collect(h.session().run([Steps.mas("497799835")]))
         let call = try #require(h.runner.streamedCalls.first)
         #expect(call.executable.path == "/usr/bin/sudo")
-        #expect(call.arguments == ["-A", Steps.masPath, "upgrade", "497799835"])
+        #expect(call.arguments == ["-A", "-k", Steps.masPath, "upgrade", "497799835"])
         let env = try #require(call.environment)
         let server = try #require(h.servers.first)
         #expect(env == RunSessionTests.base.merging(server.environment) { $1 })
         #expect(h.helper.authorizeCalls == 0)  // no helper step, no helper authorization
+    }
+
+    /// R35: the sudo route runs `sudo -A -k <command>`, so sudo neither uses nor writes a cached credential that a
+    /// later child of BrewxPort's (a gem plugin's `sudo -n`) could reuse; askpass answers each sudo once. The other
+    /// routes are as they were: the password check is still `sudo -A -k -v`, Homebrew runs as the user (a cask with
+    /// askpass, never through sudo), and no run ends with `sudo -K`, which would clear the person's own Terminal sudo
+    /// sessions.
+    @Test func sudoRouteNeverKeepsATicket() async throws {
+        let h = Harness()
+        _ = await collect(h.session().run([Steps.formula("wget"), Steps.cask(), Steps.mas("497799835"),
+                                           Steps.nbInit()]))
+        #expect(h.runner.streamedCalls.map { [$0.executable.path] + $0.arguments } == [
+            [Steps.brewPath, "upgrade", "wget"],
+            [Steps.brewPath, "upgrade", "--cask", "blackhole-2ch"],
+            ["/usr/bin/sudo", "-A", "-k", Steps.masPath, "upgrade", "497799835"],
+            ["/usr/bin/sudo", "-A", "-k", Steps.nbPath, "init"],
+        ])
+        #expect(RunSession.verifyArguments == ["-A", "-k", "-v"])
+        #expect(h.runner.calls.filter { [$0.executable.path] + $0.arguments == Steps.sudoVerify }.count == 1)
+        #expect(!h.runner.calls.contains { $0.arguments.contains("-K") })
     }
 
     @Test func brewCaskGetsAskpassEnvWithoutSecret() async throws {
@@ -622,7 +655,7 @@ final class VerifierProbe: @unchecked Sendable {
         #expect(events.contains(.finished(0, 1)))
         #expect(!events.contains(.started(1)))
         #expect(!events.contains { if case .finished(1, _) = $0 { true } else { false } })
-        #expect(h.runner.calls.allSatisfy { $0.arguments != ["-A", Steps.nbPath, "init"] })
+        #expect(h.runner.calls.allSatisfy { $0.arguments != ["-A", "-k", Steps.nbPath, "init"] })
         // The independent step after it still runs.
         #expect(events.contains(.started(2)))
         #expect(events.contains(.finished(2, 0)))
@@ -1140,6 +1173,387 @@ final class VerifierProbe: @unchecked Sendable {
         #expect(sudo.environment?["EXTRA"] == nil)
         #expect(h.helper.runCalls.count == 1)
         #expect(!h.runner.calls.contains { $0.environment?["EXTRA"] != nil })
+    }
+
+    /// A language engine's command (npm here) carries the whole environment it runs with and its folder: the run uses
+    /// them, with the step's own variables on top.
+    @Test func userStepRunsWithItsCommandsEnvironmentAndFolder() async throws {
+        let h = Harness()
+        let npmEnvironment = ["PATH": "/Users/tester/.nvm/versions/node/v22.11.0/bin:/usr/bin:/bin",
+                              "HOME": "/Users/tester", "npm_config_fund": "false", "NO_COLOR": "1"]
+        let spec = CommandSpec(executable: URL(fileURLWithPath: "/Users/tester/.nvm/versions/node/v22.11.0/bin/npm"),
+                               arguments: ["install", "-g", "cowsay"], needsRoot: false,
+                               environment: npmEnvironment, workingDirectory: "/Users/tester")
+        let npm = RunStep(engine: .npm, kind: .tool, operation: .install, spec: spec, title: "Install cowsay")
+        _ = await collect(h.session().run([npm, Self.withEnvironment(npm, ["EXTRA": "1"]), Steps.formula()]))
+        let calls = h.runner.streamedCalls
+        #expect(calls.count == 3)
+        #expect(calls[0].environment == npmEnvironment)
+        #expect(calls[0].workingDirectory == "/Users/tester")
+        #expect(calls[1].environment == npmEnvironment.merging(["EXTRA": "1"]) { $1 })
+        #expect(calls[1].workingDirectory == "/Users/tester")
+        // A command without its own: the runner's base environment and BrewxPort's folder, as before.
+        #expect(calls[2].environment == nil)
+        #expect(calls[2].workingDirectory == nil)
+    }
+
+    @Test func commandEnvironmentNeverReachesSudoTheHelperOrACask() async throws {
+        let h = Harness()
+        func carrying(_ step: RunStep) -> RunStep {
+            let spec = CommandSpec(executable: step.spec.executable, arguments: step.spec.arguments,
+                                   needsRoot: step.spec.needsRoot, arch: step.spec.arch,
+                                   environment: ["PATH": "/evil/bin", "EXTRA": "1"], workingDirectory: "/tmp")
+            return RunStep(engine: step.engine, kind: step.kind, operation: step.operation, spec: spec, title: step.title)
+        }
+        _ = await collect(h.session().run([carrying(Steps.mas()), carrying(Steps.port()), carrying(Steps.cask())]))
+        #expect(h.helper.runCalls.count == 1)
+        #expect(!h.runner.calls.isEmpty)
+        #expect(!h.runner.calls.contains { $0.environment?["EXTRA"] != nil || $0.workingDirectory != nil })
+        #expect(!h.runner.calls.contains { $0.environment?["PATH"] == "/evil/bin" })
+    }
+
+    /// A Homebrew or nanobrew command never runs with a spec's own environment or folder: only a language engine's
+    /// command brings them. The step's own variables still go on the base.
+    @Test func commandEnvironmentIgnoredForSystemEngines() async throws {
+        let h = Harness()
+        func carrying(_ step: RunStep, userEnvironment: [String: String] = [:]) -> RunStep {
+            let spec = CommandSpec(executable: step.spec.executable, arguments: step.spec.arguments,
+                                   needsRoot: step.spec.needsRoot, arch: step.spec.arch,
+                                   environment: ["PATH": "/evil/bin", "EXTRA": "1"], workingDirectory: "/tmp")
+            return RunStep(engine: step.engine, kind: step.kind, operation: step.operation, spec: spec,
+                           title: step.title, userEnvironment: userEnvironment)
+        }
+        let steps = [carrying(Steps.formula()), carrying(Steps.nanobrew()),
+                     carrying(Steps.formula("jq"), userEnvironment: ["HOMEBREW_NO_INSTALL_CLEANUP": "1"])]
+        #expect(steps.allSatisfy { RunRouting.route(for: $0) == .user })
+        _ = await collect(h.session().run(steps))
+        let calls = h.runner.streamedCalls
+        #expect(calls.count == 3)
+        #expect(calls[0].environment == nil)
+        #expect(calls[1].environment == nil)
+        #expect(calls[2].environment == Self.base.merging(["HOMEBREW_NO_INSTALL_CLEANUP": "1"]) { $1 })
+        #expect(calls.allSatisfy { $0.workingDirectory == nil })
+    }
+
+    // MARK: Confirming a language command
+
+    static let gemPath = "/opt/homebrew/bin/gem"
+    static let rubyPath = "/opt/homebrew/bin/ruby"
+    static let gemEnvironment = ["PATH": "/opt/homebrew/bin:/usr/bin:/bin", "HOME": "/Users/tester", "NO_COLOR": "1"]
+    static let confirmArguments = ["-e", "exit 0", "--", "thor"]
+
+    /// A RubyGems removal whose spec says how to confirm it (`CommandSpec.confirmation`), as `GemEngine` builds one.
+    static func gemRemoval(engine: EngineID = .gem, confirmed: Bool = true) -> RunStep {
+        let confirmation = confirmed
+            ? CommandConfirmation(executable: URL(fileURLWithPath: rubyPath), arguments: confirmArguments) : nil
+        let spec = CommandSpec(executable: URL(fileURLWithPath: gemPath),
+                               arguments: ["uninstall", "--all", "--executables", "--abort-on-dependent", "thor"],
+                               needsRoot: false, environment: gemEnvironment, workingDirectory: "/Users/tester",
+                               confirmation: confirmation)
+        return RunStep(engine: engine, kind: engine == .homebrew ? .formula : .tool, operation: .remove, spec: spec,
+                       title: "Uninstall thor")
+    }
+
+    /// RubyGems' uninstall exits 0 when it removed nothing (a default gem, a gem in another of its folders): the
+    /// confirmation runs next, as the user with the same environment and folder, and the step fails unless it
+    /// passes. Its words are the step's output, after gem's own.
+    @Test func confirmationThatFailsFailsTheStep() async throws {
+        let h = Harness()
+        h.runner.respond([Self.gemPath, "uninstall", "--all", "--executables", "--abort-on-dependent", "thor"],
+                         stdout: ["Gem json-2.18.3 cannot be uninstalled because it is a default gem"])
+        h.runner.respond([Self.rubyPath] + Self.confirmArguments, code: 1, stderr: "thor is still installed.")
+        let events = await collect(h.session().run([Self.gemRemoval()]))
+        #expect(events.contains(.finished(0, 1)))
+        let output = events.compactMap { event -> OutputEvent? in
+            if case .output(0, let line) = event { return line }
+            return nil
+        }
+        #expect(output == [.stdout("Gem json-2.18.3 cannot be uninstalled because it is a default gem"),
+                           .stderr("thor is still installed.")])
+        let calls = h.runner.streamedCalls
+        #expect(calls.map(\.executable.path) == [Self.gemPath, Self.rubyPath])
+        #expect(calls[1].arguments == Self.confirmArguments)
+        #expect(calls[1].environment == Self.gemEnvironment)
+        #expect(calls[1].workingDirectory == "/Users/tester")
+    }
+
+    @Test func confirmationThatPassesKeepsTheStep() async throws {
+        let h = Harness()
+        let events = await collect(h.session().run([Self.gemRemoval()]))
+        #expect(events.contains(.finished(0, 0)))
+        #expect(h.runner.streamedCalls.map(\.executable.path) == [Self.gemPath, Self.rubyPath])
+    }
+
+    /// A command that failed already says so: nothing is confirmed. A spec without a confirmation runs alone, and a
+    /// system engine's step never runs one.
+    @Test func confirmationOnlyAfterSuccessAndOnlyForLanguageEngines() async throws {
+        let failing = Harness()
+        failing.runner.respond([Self.gemPath, "uninstall", "--all", "--executables", "--abort-on-dependent", "thor"],
+                               code: 1, stderr: "ERROR:  While executing gem ... (Gem::DependencyRemovalException)")
+        let events = await collect(failing.session().run([Self.gemRemoval()]))
+        #expect(events.contains(.finished(0, 1)))
+        #expect(failing.runner.streamedCalls.map(\.executable.path) == [Self.gemPath])
+
+        let plain = Harness()
+        _ = await collect(plain.session().run([Self.gemRemoval(confirmed: false)]))
+        #expect(plain.runner.streamedCalls.map(\.executable.path) == [Self.gemPath])
+
+        let system = Harness()
+        let systemEvents = await collect(system.session().run([Self.gemRemoval(engine: .nanobrew)]))
+        #expect(systemEvents.contains(.finished(0, 0)))
+        #expect(!system.runner.calls.contains { $0.executable.path == Self.rubyPath })
+    }
+
+    /// R17: a system engine's step never runs a confirmation, on any route (user, Homebrew's removal, askpass, sudo,
+    /// the helper), even when its spec carries one.
+    @Test func confirmationIgnoredForSystemEngines() async throws {
+        let h = Harness()
+        let confirmation = CommandConfirmation(executable: URL(fileURLWithPath: Self.rubyPath),
+                                               arguments: Self.confirmArguments)
+        func carrying(_ step: RunStep, operation: PackageOperation? = nil) -> RunStep {
+            let spec = CommandSpec(executable: step.spec.executable, arguments: step.spec.arguments,
+                                   needsRoot: step.spec.needsRoot, arch: step.spec.arch, confirmation: confirmation)
+            return RunStep(engine: step.engine, kind: step.kind, operation: operation ?? step.operation, spec: spec,
+                           title: step.title)
+        }
+        let steps = [carrying(Steps.formula()), carrying(Steps.formula("jq"), operation: .remove),
+                     carrying(Steps.nanobrew()), carrying(Steps.cask()), carrying(Steps.mas()), carrying(Steps.port())]
+        let events = await collect(h.session().run(steps))
+        #expect(events.last == .done)
+        #expect(!h.runner.calls.contains { $0.executable.path == Self.rubyPath })
+        #expect(h.helper.runCalls.count == 1)
+    }
+
+    /// R17: the confirmation's words go through the same credential scrub as the command's.
+    @Test func confirmationOutputLosesCredentials() async throws {
+        let h = Harness()
+        h.runner.respond([Self.rubyPath] + Self.confirmArguments, code: 1,
+                         stderr: "thor is still installed (https://user:s3cret@gems.example.com/?token=s3cret).")
+        let events = await collect(h.session().run([Self.gemRemoval()]))
+        #expect(events.contains(.finished(0, 1)))
+        let lines = events.compactMap { event -> String? in
+            if case .output(0, .stderr(let line)) = event { return line }
+            return nil
+        }
+        #expect(lines.count == 1)
+        #expect(lines.allSatisfy { !$0.contains("s3cret") && $0.hasPrefix("thor is still installed") })
+    }
+
+    /// R17: a confirmation that fails without a word still gives the step a plain reason; one that can't start fails
+    /// the step with why.
+    @Test func confirmationFailingSilentlyOrNotStartingGivesAReason() async throws {
+        let silent = Harness()
+        silent.runner.respond([Self.rubyPath] + Self.confirmArguments, code: 1)
+        let events = await collect(silent.session().run([Self.gemRemoval()]))
+        #expect(events.contains(.finished(0, 1)))
+        #expect(events.contains(.output(0, .stderr(RunSession.unconfirmed))))
+
+        let missing = Harness()
+        missing.runner.respond([Self.rubyPath] + Self.confirmArguments,
+                               error: .launchFailed("No such file or directory"))
+        let failed = await collect(missing.session().run([Self.gemRemoval()]))
+        #expect(failed.contains(.finished(0, -1)))
+        #expect(failed.contains { event in
+            if case .output(0, .stderr(let line)) = event { return line.contains("No such file or directory") }
+            return false
+        })
+    }
+
+    // MARK: Checking a confirmation's output
+
+    static let mintPath = "/opt/homebrew/bin/mint"
+    static let mintUpgradeArguments = ["install", "--overwrite", "n", "JohnSundell/Ink@0.6.0"]
+    static let mintFixtures = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
+        .appendingPathComponent("BrewxPortCoreTests/Fixtures/mint")
+    /// The check reads Mint's captured `metadata.json` (JohnSundell/Ink), as a run reads the user's.
+    static let linkedInk = ConfirmationCheck.mintLinked(
+        package: "JohnSundell/Ink", version: "0.6.0",
+        metadata: mintFixtures.appendingPathComponent("metadata.json").path)
+
+    /// A captured `mint list` from the Core tests' `Fixtures/mint` (see its SOURCES.md), as the lines a run streams.
+    static func mintList(_ name: String) throws -> [String] {
+        let file = mintFixtures.appendingPathComponent("\(name).txt")
+        return try String(contentsOf: file, encoding: .utf8).split(separator: "\n", omittingEmptySubsequences: false)
+            .map(String.init)
+    }
+
+    /// A Mint upgrade confirmed by `mint list`, whose output must show the new version linked, as `MintEngine` builds
+    /// one. `check` nil: the confirmation's exit code alone decides.
+    static func mintUpgrade(engine: EngineID = .mint, check: ConfirmationCheck? = linkedInk) -> RunStep {
+        let mint = URL(fileURLWithPath: mintPath)
+        let spec = CommandSpec(executable: mint, arguments: mintUpgradeArguments, needsRoot: false,
+                               environment: gemEnvironment, workingDirectory: "/Users/tester",
+                               confirmation: CommandConfirmation(executable: mint, arguments: ["list"], check: check))
+        return RunStep(engine: engine, kind: engine.isLanguage ? .tool : .formula, operation: .upgrade, spec: spec,
+                       title: "Update JohnSundell/Ink")
+    }
+
+    /// `mint list` exits 0 whatever it lists, and Mint's install exits 0 when it skipped the link: the step fails
+    /// unless the list shows the new version linked, with the list's lines and then the check's reason.
+    @Test func confirmationOutputThatDoesNotShowTheChangeFailsTheStep() async throws {
+        let h = Harness()
+        let list = try Self.mintList("list-final")
+        h.runner.respond([Self.mintPath, "list"], stdout: list)
+        let events = await collect(h.session().run([Self.mintUpgrade()]))
+        #expect(events.contains(.finished(0, 1)))
+        let output = events.compactMap { event -> OutputEvent? in
+            if case .output(0, let line) = event { return line }
+            return nil
+        }
+        let reason = try #require(Self.linkedInk.failure(in: list.joined(separator: "\n")))
+        #expect(output == list.map { .stdout($0) } + [.stderr(reason)])
+        let calls = h.runner.streamedCalls
+        #expect(calls.map(\.arguments) == [Self.mintUpgradeArguments, ["list"]])
+        #expect(calls[1].environment == Self.gemEnvironment)
+        #expect(calls[1].workingDirectory == "/Users/tester")
+    }
+
+    @Test func confirmationOutputThatShowsTheChangeKeepsTheStep() async throws {
+        let h = Harness()
+        h.runner.respond([Self.mintPath, "list"], stdout: try Self.mintList("list-two-versions"))
+        let events = await collect(h.session().run([Self.mintUpgrade()]))
+        #expect(events.contains(.finished(0, 0)))
+        #expect(!events.contains { event in
+            if case .output(0, .stderr) = event { return true }
+            return false
+        })
+    }
+
+    /// Without a check, only the confirmation's exit code counts, as before; a confirmation that fails is the step's
+    /// failure whatever its output would have shown.
+    @Test func confirmationWithoutACheckReadsOnlyTheExitCode() async throws {
+        let plain = Harness()
+        plain.runner.respond([Self.mintPath, "list"], stdout: try Self.mintList("list-final"))
+        let events = await collect(plain.session().run([Self.mintUpgrade(check: nil)]))
+        #expect(events.contains(.finished(0, 0)))
+
+        let failing = Harness()
+        failing.runner.respond([Self.mintPath, "list"], code: 1, stdout: try Self.mintList("list-two-versions"),
+                               stderr: "Error: The folder “build” doesn’t exist.")
+        let failed = await collect(failing.session().run([Self.mintUpgrade()]))
+        #expect(failed.contains(.finished(0, 1)))
+        #expect(failed.contains(.output(0, .stderr("Error: The folder “build” doesn’t exist."))))
+    }
+
+    /// R23: a check that can't read the confirmation's output fails the step (fail closed), with a plain reason.
+    @Test func confirmationCheckThatCannotReadTheOutputFailsTheStep() async throws {
+        let h = Harness()
+        // Not a capture: output that isn't a Mint listing, from a `mint list` that still exited 0.
+        h.runner.respond([Self.mintPath, "list"], stdout: ["Error: something went wrong"])
+        let events = await collect(h.session().run([Self.mintUpgrade()]))
+        #expect(events.contains(.finished(0, 1)))
+        let reason = "BrewxPort couldn't read Mint's list of packages, so it couldn't confirm the change."
+        #expect(Self.linkedInk.failure(in: "Error: something went wrong") == reason)
+        #expect(events.contains(.output(0, .stderr(reason))))
+    }
+
+    /// R23: a checked confirmation's output, and the check's reason, go through the same credential scrub as
+    /// everything else a language step prints.
+    @Test func checkedConfirmationOutputLosesCredentials() async throws {
+        let h = Harness()
+        // Not a capture: a listing whose second package came from a URL with credentials.
+        h.runner.respond([Self.mintPath, "list"], stdout: [
+            "🌱 Installed mint packages:", "  Ink (https://github.com/JohnSundell/Ink.git)", "    - 0.5.0 (ink-cli) *",
+            "  Ink (https://user:s3cret@git.example.com/someone/Ink.git?token=s3cret)", "    - 0.6.0 (ink-cli) *",
+        ])
+        let events = await collect(h.session().run([Self.mintUpgrade()]))
+        #expect(events.contains(.finished(0, 1)))
+        let lines = events.compactMap { event -> String? in
+            if case .output(0, let line) = event {
+                switch line {
+                case .stdout(let text), .stderr(let text): return text
+                }
+            }
+            return nil
+        }
+        #expect(lines.count == 6)
+        #expect(lines.allSatisfy { !$0.contains("s3cret") })
+        #expect(lines.last == "Mint finished, but its list doesn't show JohnSundell/Ink 0.6.0 linked.")
+    }
+
+    /// A system engine's step never runs a confirmation, so its check is never read either.
+    @Test func confirmationCheckIgnoredForSystemEngines() async throws {
+        let h = Harness()
+        h.runner.respond([Self.mintPath, "list"], stdout: try Self.mintList("list-final"))
+        let events = await collect(h.session().run([Self.mintUpgrade(engine: .nanobrew)]))
+        #expect(events.contains(.finished(0, 0)))
+        #expect(h.runner.streamedCalls.map(\.arguments) == [Self.mintUpgradeArguments])
+    }
+
+    // MARK: Credentials in language tools' output
+
+    /// Not a capture: what pip or uv could print around an index URL with a token.
+    static let tokenedOutput = ["Looking in indexes: https://__token__:s3cret@pypi.example.com/simple/"]
+    static let tokenedError = "error: Failed to fetch: https://pypi.example.com/simple/isort/?token=s3cret\n"
+        + "  hint: --index-url https://__token__:s3cret@pypi.example.com/simple"
+
+    static func uvStep(_ name: String) -> RunStep {
+        let spec = CommandSpec(executable: URL(fileURLWithPath: "/opt/homebrew/bin/uv"),
+                               arguments: ["tool", "install", "--color", "never", "--no-progress", name],
+                               needsRoot: false, environment: ["PATH": "/opt/homebrew/bin:/usr/bin:/bin"],
+                               workingDirectory: "/Users/tester")
+        return RunStep(engine: .uv, kind: .tool, operation: .install, spec: spec, title: "uv: \(name)")
+    }
+
+    /// A language tool's output loses URL credentials before any event carries it, so the run log, a step's failure
+    /// text and a notification never see a token. So does the reason a step couldn't run.
+    @Test func runLogScrubsCredentialsFromLanguageOutput() async throws {
+        let h = Harness()
+        let isort = Self.uvStep("isort")
+        let ruff = Self.uvStep("ruff")
+        h.runner.respond([isort.spec.executable.path] + isort.spec.arguments, code: 2, stdout: Self.tokenedOutput,
+                         stderr: Self.tokenedError)
+        h.runner.respond([ruff.spec.executable.path] + ruff.spec.arguments,
+                         error: .launchFailed("no index at https://__token__:s3cret@pypi.example.com/simple"))
+        let steps = [isort, ruff]
+        let events = await collect(h.session().run(steps))
+        var log = RunLog(steps: steps)
+        for event in events { log.apply(event) }
+        let text = log.lines.map(\.text).joined(separator: "\n")
+        #expect(!text.contains("s3cret"))
+        #expect(!text.contains("__token__"))
+        #expect(text.contains("Looking in indexes: https://pypi.example.com/simple/"))
+        #expect(text.contains("Failed to fetch: https://pypi.example.com/simple/isort/\n"))
+        #expect(text.contains("--index-url https://pypi.example.com/simple"))
+        #expect(text.contains("no index at https://pypi.example.com/simple"))
+        #expect(events.contains(.finished(0, 2)))
+        #expect(events.contains(.finished(1, -1)))
+    }
+
+    /// Cargo's Set Up toolchain step (Plan 9 Task 11) runs through RunSession as the user, never through the helper's
+    /// setup runner: its output loses URL credentials like any language tool's, and it runs with its own environment,
+    /// where rustup may install the toolchain.
+    @Test func rustToolchainSetUpOutputLosesCredentials() async throws {
+        let h = Harness()
+        let spec = CargoEngine.toolchainSetup(from: .homebrew(prefix: "/opt/homebrew"), captured: [:],
+                                              base: ["HOME": "/Users/tester", "PATH": "/usr/bin:/bin"])
+        let step = RunStep.rustToolchain(spec)
+        #expect(step.setupTarget == nil)
+        #expect(RunRouting.route(for: step) == .user)
+        h.runner.respond([spec.executable.path] + spec.arguments, code: 1, stdout: Self.tokenedOutput,
+                         stderr: Self.tokenedError)
+        let events = await collect(h.session().run([step]))
+        var log = RunLog(steps: [step])
+        for event in events { log.apply(event) }
+        let text = log.lines.map(\.text).joined(separator: "\n")
+        #expect(!text.contains("s3cret"))
+        #expect(!text.contains("__token__"))
+        #expect(text.contains("Looking in indexes: https://pypi.example.com/simple/"))
+        #expect(events.contains(.finished(0, 1)))
+        let call = try #require(h.runner.calls.first)
+        #expect(call.environment?["RUSTUP_AUTO_INSTALL"] == "1")
+        #expect(call.workingDirectory == "/Users/tester")
+    }
+
+    /// The system engines' output is passed on exactly as it came.
+    @Test func systemEngineOutputUnchanged() async throws {
+        let h = Harness()
+        let step = Steps.formula()
+        h.runner.respond([Steps.brewPath, "upgrade", "wget"], code: 1, stdout: Self.tokenedOutput,
+                         stderr: Self.tokenedError)
+        let events = await collect(h.session().run([step]))
+        #expect(events == [.started(0), .output(0, .stdout(Self.tokenedOutput[0])),
+                           .output(0, .stderr(Self.tokenedError)), .finished(0, 1), .done])
     }
 
     @Test func passedCheckGateSkipsAfterAFailedCheck() async {

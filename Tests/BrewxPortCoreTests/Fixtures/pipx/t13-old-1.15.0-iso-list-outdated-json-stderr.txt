@@ -1,0 +1,4 @@
+usage: pipx [-h] [--version]
+            {install,install-all,uninject,inject,pin,unpin,upgrade,upgrade-all,upgrade-shared,uninstall,uninstall-all,reinstall,reinstall-all,list,interpreter,run,runpip,ensurepath,environment,completions,help}
+            ...
+pipx: error: unrecognized arguments: --outdated --output json

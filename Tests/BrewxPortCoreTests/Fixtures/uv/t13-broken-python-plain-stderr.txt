@@ -1,0 +1,4 @@
+warning: Tool `black` environment not found (run `uv tool install black --reinstall` to reinstall)
+warning: Tool `pyfiglet` environment not found (run `uv tool install pyfiglet --reinstall` to reinstall)
+warning: Tool `sampleproject` environment not found (run `uv tool install sampleproject --reinstall` to reinstall)
+warning: Invalid environment at `.local/share/uv/tools/tabulate`: missing Python executable at `.local/share/uv/tools/tabulate/bin/python` (run `uv tool install tabulate --reinstall` to reinstall)

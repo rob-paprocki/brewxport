@@ -1,0 +1,5 @@
+Successfully installed manpages-0.6.1
+Successfully installed optimist-3.0.1
+Successfully installed paint-2.1.1
+Successfully installed lolcat-100.0.0
+4 gems installed

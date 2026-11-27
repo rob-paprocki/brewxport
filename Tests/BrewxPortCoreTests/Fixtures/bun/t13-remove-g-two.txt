@@ -1,0 +1,5 @@
+bun remove v1.4.5 (826ef2a6f)
+
+- is-number
+- ms
+2 packages removed [4.00ms]

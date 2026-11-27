@@ -1,0 +1,4 @@
+Resolved 1 package in 0.42ms
+Installed 1 package in 1ms
+ + cowsay==6.1
+error: Executable already exists: cowsay (use `--force` to overwrite)

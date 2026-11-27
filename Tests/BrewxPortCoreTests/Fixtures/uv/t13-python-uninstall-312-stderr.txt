@@ -1,0 +1,4 @@
+Searching for Python versions matching: Python 3.12
+Uninstalled 2 versions in 89ms
+ - pypy-3.12.15-macos-aarch64-none
+ - cpython-3.12.16-macos-aarch64-none

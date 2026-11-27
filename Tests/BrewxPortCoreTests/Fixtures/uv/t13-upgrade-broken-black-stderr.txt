@@ -1,0 +1,2 @@
+error: Failed to upgrade black
+  cause: `black` is not installed; run `uv tool install black` to install

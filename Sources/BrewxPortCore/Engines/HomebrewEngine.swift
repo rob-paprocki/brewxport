@@ -309,6 +309,9 @@ public struct HomebrewEngine: Engine, TapListing, DependentsListing {
         guard refs.allSatisfy({ $0.engine == .homebrew }) else {
             throw EngineError(engine: .homebrew, message: "Package belongs to a different engine")
         }
+        guard op != .repair else {
+            throw EngineError(engine: .homebrew, message: "Homebrew has no tools to repair")
+        }
         if op == .markRequested || op == .markDependency {
             return try markCommand(for: op, refs, options: options)
         }
@@ -333,6 +336,7 @@ public struct HomebrewEngine: Engine, TapListing, DependentsListing {
         case .upgrade: verb = "upgrade"
         case .remove: verb = "uninstall"
         case .markRequested, .markDependency: preconditionFailure("handled by markCommand")
+        case .repair: preconditionFailure("refused above")
         }
         var args = [verb]
         if first.kind == .cask {

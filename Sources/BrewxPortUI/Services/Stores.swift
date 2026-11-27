@@ -1,4 +1,5 @@
 import Foundation
+import BrewxPortCore
 
 /// Small key-value storage behind the preferences, so tests don't touch UserDefaults.
 public protocol KeyValueStoring: AnyObject, Sendable {
@@ -31,18 +32,42 @@ public final class MemoryStore: KeyValueStoring, @unchecked Sendable {
     }
 }
 
-/// The PATH entries BrewxPort shows and uses to find tools.
+/// The PATH entries BrewxPort shows and uses to find tools, and the login shell's tool-location variables.
 public struct ResolvedPath: Sendable, Equatable {
     public enum Source: Sendable, Equatable { case loginShell, systemDefault }
     public let entries: [String]
     public let source: Source
     /// Why the system PATH was used instead of the login shell's; nil when the login shell answered.
     public let note: String?
+    /// The login shell's values of `ToolEnvironment.capturedVariables` that are absolute paths, for the language
+    /// tools' commands only; never logged. Empty when the system PATH was used.
+    public let environment: [String: String]
 
-    public init(entries: [String], source: Source, note: String? = nil) {
+    public init(entries: [String], source: Source, note: String? = nil, environment: [String: String] = [:]) {
         self.entries = entries
         self.source = source
         self.note = note
+        self.environment = ToolEnvironment.allowlisted(environment)
+    }
+}
+
+/// Printed, interpolated, debug-printed or dumped, a ResolvedPath shows its source, how many PATH entries it has, the
+/// captured variables' names and the note: never a variable's value or a PATH entry (they name the user's folders).
+extension ResolvedPath: CustomStringConvertible, CustomDebugStringConvertible, CustomReflectable {
+    public var description: String {
+        let names = environment.keys.sorted()
+        var text = "ResolvedPath(source: \(source), PATH entries: \(entries.count), variables: "
+            + (names.isEmpty ? "none" : names.joined(separator: " "))
+        if let note { text += ", note: \(note)" }
+        return text + ")"
+    }
+
+    public var debugDescription: String { description }
+
+    public var customMirror: Mirror {
+        Mirror(self, children: ["source": source, "pathEntryCount": entries.count,
+                                "variableNames": environment.keys.sorted(), "note": note as Any],
+               displayStyle: .struct)
     }
 }
 
@@ -50,8 +75,12 @@ public protocol PathResolving: Sendable {
     func resolve() async -> ResolvedPath
     /// Drops a cached answer, so the next `resolve()` asks again (after BrewxPort changed a shell startup file).
     func forget() async
+    /// `forget()` for a caller that can't wait (the person's Refresh and Check again): the next `resolve()` asks
+    /// again, whatever is cached.
+    func askAgain()
 }
 
 extension PathResolving {
     public func forget() async {}
+    public func askAgain() {}
 }

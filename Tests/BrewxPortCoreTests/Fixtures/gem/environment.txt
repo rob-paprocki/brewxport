@@ -1,0 +1,33 @@
+RubyGems Environment:
+  - RUBYGEMS VERSION: 4.1.0
+  - RUBY VERSION: 4.0.10 (2026-11-19 patchlevel 0) [arm64-darwin24]
+  - INSTALLATION DIRECTORY: /opt/homebrew/lib/ruby/gems/4.0.0
+  - USER INSTALLATION DIRECTORY: /Users/tester/.local/share/gem/ruby/4.0.0
+  - CREDENTIALS FILE: /Users/tester/.local/share/gem/credentials
+  - RUBY EXECUTABLE: /opt/homebrew/opt/ruby/bin/ruby
+  - GIT EXECUTABLE: /usr/bin/git
+  - EXECUTABLE DIRECTORY: /opt/homebrew/lib/ruby/gems/4.0.0/bin
+  - SPEC CACHE DIRECTORY: /Users/tester/.cache/gem/specs
+  - SYSTEM CONFIGURATION DIRECTORY: /opt/homebrew/Cellar/ruby/4.0.10/etc
+  - RUBYGEMS PLATFORMS:
+     - ruby
+     - arm64-darwin-24
+  - GEM PATHS:
+     - /opt/homebrew/lib/ruby/gems/4.0.0
+     - /Users/tester/.local/share/gem/ruby/4.0.0
+     - /opt/homebrew/Cellar/ruby/4.0.10/lib/ruby/gems/4.0.0
+  - GEM CONFIGURATION:
+     - :update_sources => true
+     - :verbose => true
+     - :backtrace => true
+     - :bulk_threshold => 1000
+  - REMOTE SOURCES:
+     - https://rubygems.org/
+  - SHELL PATH:
+     - /opt/homebrew/bin
+     - /usr/local/bin
+     - /opt/local/bin
+     - /usr/bin
+     - /bin
+     - /usr/sbin
+     - /sbin

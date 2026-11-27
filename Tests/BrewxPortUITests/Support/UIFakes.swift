@@ -56,6 +56,133 @@ final class UIFakeRunner: CommandRunning, @unchecked Sendable {
     }
 }
 
+/// A language engine whose every step runs as the user, with settable answers for what Task 10b reads: where it writes
+/// and whether this account can (`readOnlyReason`), the runtimes its tools run on, its repair steps (`repair <tool>`,
+/// or one `repair-all` when `repairsOneAtATime` is false) and its tools' commands. Its commands are
+/// `<verb> <names>` at `/opt/homebrew/bin/<id>`.
+final class FakeLanguageEngine: Engine, InstallLocationReporting, RuntimeReporting, ToolRepairing, ExecutableNaming,
+                                @unchecked Sendable {
+    let id: EngineID
+    let capabilities: EngineCapabilities = []
+    private let lock = NSLock()
+    private var _installLocation: URL?
+    private var _binLocation: URL?
+    private var _readOnlyReason: String?
+    private var _uses: Result<[RuntimeUse], EngineError> = .success([])
+    private var _commands: [String: [String]] = [:]
+    private var _usesAsked = 0
+    private var _refusals: [String: String] = [:]
+    let repairsOneAtATime: Bool
+    /// Like a real language engine's `LanguageTool`: no executable until a detect has finished (R44).
+    private let executableOnlyOnceDetected: Bool
+    private var _detected = false
+
+    init(_ id: EngineID, installLocation: URL? = nil, binLocation: URL? = nil, readOnlyReason: String? = nil,
+         uses: [RuntimeUse] = [], commands: [String: [String]] = [:], repairsOneAtATime: Bool = false,
+         executableOnlyOnceDetected: Bool = false) {
+        self.id = id
+        _installLocation = installLocation
+        _binLocation = binLocation
+        _readOnlyReason = readOnlyReason
+        _uses = .success(uses)
+        _commands = commands
+        self.repairsOneAtATime = repairsOneAtATime
+        self.executableOnlyOnceDetected = executableOnlyOnceDetected
+    }
+
+    var installLocation: URL? { lock.withLock { _installLocation } }
+    var binLocation: URL? { lock.withLock { _binLocation } }
+    var readOnlyReason: String? {
+        get { lock.withLock { _readOnlyReason } }
+        set { lock.withLock { _readOnlyReason = newValue } }
+    }
+    /// What `runtimeUses()` answers.
+    var uses: Result<[RuntimeUse], EngineError> {
+        get { lock.withLock { _uses } }
+        set { lock.withLock { _uses = newValue } }
+    }
+    /// How often `runtimeUses()` was asked.
+    var usesAsked: Int { lock.withLock { _usesAsked } }
+    /// Tools `repairCommands` leaves out, with why (`repairRefusals`).
+    var refusals: [String: String] {
+        get { lock.withLock { _refusals } }
+        set { lock.withLock { _refusals = newValue } }
+    }
+
+    var executableURL: URL? {
+        guard !executableOnlyOnceDetected || lock.withLock({ _detected }) else { return nil }
+        return URL(fileURLWithPath: "/opt/homebrew/bin/\(id.rawValue)")
+    }
+
+    /// When set, `detect()` answers only once it's released (a login shell that doesn't answer), or gives up, still
+    /// undetected, when its task is cancelled (the catalog's timer), as a real engine's command ends.
+    var detectGate: Gate? {
+        get { lock.withLock { _detectGate } }
+        set { lock.withLock { _detectGate = newValue } }
+    }
+    private var _detectGate: Gate?
+
+    func detect() async -> EngineStatus {
+        if let gate = detectGate {
+            await withTaskCancellationHandler { await gate.wait() } onCancel: { gate.release() }
+            if Task.isCancelled { return .unusable(path: URL(fileURLWithPath: "/"), reason: "cancelled") }
+        }
+        lock.withLock { _detected = true }
+        return .present(path: executableURL!, version: "1")
+    }
+    func search(_ query: String) async throws -> [Package] { [] }
+    func listInstalled() async throws -> [Package] { [] }
+    func listOutdated() async throws -> [Package] { [] }
+    func info(_ ref: PackageRef) async throws -> PackageDetails { PackageDetails(ref: ref) }
+    func privilege(for op: PackageOperation, _ ref: PackageRef) -> Privilege { .never }
+
+    func command(for op: PackageOperation, _ refs: [PackageRef], options: InstallOptions) throws -> CommandSpec {
+        if let reason = readOnlyReason { throw EngineError(engine: id, message: reason) }
+        let verb: String
+        switch op {
+        case .install: verb = "install"
+        case .upgrade: verb = "upgrade"
+        case .remove: verb = "uninstall"
+        case .repair, .markRequested, .markDependency: throw EngineError(engine: id, message: "no")
+        }
+        return CommandSpec(executable: executableURL!, arguments: [verb] + refs.map(\.name), needsRoot: false)
+    }
+
+    /// When set, `runtimeUses()` answers only once it's released.
+    var usesGate: Gate? {
+        get { lock.withLock { _usesGate } }
+        set { lock.withLock { _usesGate = newValue } }
+    }
+    private var _usesGate: Gate?
+
+    func runtimeUses() async throws -> [RuntimeUse] {
+        let (answer, gate) = lock.withLock { () -> (Result<[RuntimeUse], EngineError>, Gate?) in
+            _usesAsked += 1
+            return (_uses, _usesGate)
+        }
+        if let gate { await gate.wait() }
+        return try answer.get()
+    }
+
+    func repairCommands(for tools: [String]) throws -> [RepairCommand] {
+        if let reason = readOnlyReason { throw EngineError(engine: id, message: reason) }
+        guard repairsOneAtATime else {
+            return [RepairCommand(tool: nil, spec: CommandSpec(executable: executableURL!, arguments: ["repair-all"],
+                                                               needsRoot: false))]
+        }
+        guard !tools.isEmpty else { throw EngineError(engine: id, message: "nothing to repair") }
+        let refused = refusals
+        return Set(tools).subtracting(refused.keys).sorted().map {
+            RepairCommand(tool: $0, spec: CommandSpec(executable: executableURL!, arguments: ["repair", $0],
+                                                      needsRoot: false))
+        }
+    }
+
+    func repairRefusals(for tools: [String]) -> [String: String] { refusals.filter { tools.contains($0.key) } }
+
+    func executables(of name: String) -> [String]? { lock.withLock { _commands[name] } }
+}
+
 /// `RunExecuting` that replays scripted events.
 final class FakeRunExecutor: RunExecuting, @unchecked Sendable {
     private let lock = NSLock()
@@ -169,6 +296,9 @@ final class Gate: @unchecked Sendable {
 final class FakeCatalog: PackageQuerying, @unchecked Sendable {
     struct Script: Sendable {
         var result: Result<[Package], EngineError>
+        /// An outdated check's packages that couldn't be checked, and its held updates (`EngineOutcome`).
+        var unchecked = UncheckedPackages.none
+        var held: [HeldUpdate] = []
         var delay: Duration = .zero
         /// Answers only once the gate is released.
         var gate: Gate?
@@ -226,7 +356,26 @@ final class FakeCatalog: PackageQuerying, @unchecked Sendable {
     var queries: [CatalogQuery] { lock.withLock { _queries } }
     var infoCalls: [PackageRef] { lock.withLock { _infoCalls } }
 
-    func presentEngines() async -> [EngineID: EngineStatus] { lock.withLock { _engines } }
+    private var _enginesAsked = 0
+    private var _enginesGate: Gate?
+
+    /// How often `presentEngines()` was asked.
+    var enginesAsked: Int { lock.withLock { _enginesAsked } }
+    /// When set, `presentEngines()` reads the engines at once but answers only once the gate is released (a check
+    /// still going after the engines changed).
+    var enginesGate: Gate? {
+        get { lock.withLock { _enginesGate } }
+        set { lock.withLock { _enginesGate = newValue } }
+    }
+
+    func presentEngines() async -> [EngineID: EngineStatus] {
+        let (answer, gate) = lock.withLock { () -> ([EngineID: EngineStatus], Gate?) in
+            _enginesAsked += 1
+            return (_engines, _enginesGate)
+        }
+        if let gate { await gate.wait() }
+        return answer
+    }
 
     func stream(_ query: CatalogQuery) -> AsyncStream<EngineOutcome> {
         let plan = lock.withLock { () -> [EngineID: Script]? in
@@ -257,7 +406,8 @@ final class FakeCatalog: PackageQuerying, @unchecked Sendable {
                             if script.delay > .zero { try? await Task.sleep(for: script.delay) }
                             if let gate = script.gate { await gate.wait() }
                             guard !Task.isCancelled else { return }
-                            continuation.yield(EngineOutcome(engine: engine, result: script.result))
+                            continuation.yield(EngineOutcome(engine: engine, result: script.result,
+                                                             unchecked: script.unchecked, held: script.held))
                         }
                     }
                 }

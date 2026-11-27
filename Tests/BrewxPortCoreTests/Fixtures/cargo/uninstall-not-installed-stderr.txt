@@ -1,0 +1,1 @@
+error: package ID specification `ripgrep` did not match any packages

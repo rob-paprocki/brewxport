@@ -1,0 +1,2 @@
+ruff v0.6.0 [required: ==0.6.0] [latest: 0.17.6]
+- ruff

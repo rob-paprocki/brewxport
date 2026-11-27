@@ -59,6 +59,10 @@ import BrewxPortCore
     /// The engine filter's choices, in the list's engine order.
     public var filterChoices: [EngineID] { list.order }
 
+    /// The search field's placeholder: the engine the filter shows ("Search npm"), else every engine. The search
+    /// itself still asks every engine, so the filter can change without searching again.
+    public var searchPrompt: String { engineFilter.map { "Search \($0.displayName)" } ?? "Search all engines" }
+
     private func applyFilter() {
         let filter = engineFilter
         list.isVisible = { row in filter == nil || row.id.engine == filter }

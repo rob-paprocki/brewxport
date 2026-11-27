@@ -172,6 +172,19 @@ private func export(_ installed: [Package], taps: [String]) -> (bundle: BundleFi
         #expect(bundle.entries.count == installed.count - 1)
     }
 
+    @Test func languageToolsLeftOutOfExport() async throws {
+        // Hand-built: no language engine has captures until Plan 9's engine tasks.
+        let brewPkgs = try await homebrew(try fixture("homebrew/info-installed.json"))
+        let tool = Package(id: PackageRef(engine: .cargo, kind: .tool, name: "ripgrep"), displayName: "ripgrep",
+                           installedVersion: "14.1.1")
+        let (bundle, refused) = export(brewPkgs + [tool], taps: [])
+        #expect(!bundle.entries.contains { $0.engine.isLanguage })
+        #expect(bundle.entries.count == brewPkgs.count)
+        // Not one refusal per tool: the summary counts them in one line (`ExportSummary.languageToolsLine`).
+        #expect(refused.isEmpty)
+        #expect(BundleExporter.languageTools(brewPkgs + [tool, tool]) == [.cargo: 2])
+    }
+
     @Test func duplicateRefWrittenOnceAndReported() async throws {
         let apps = try await masInstalled()
         let (bundle, refused) = export(apps + apps, taps: [])

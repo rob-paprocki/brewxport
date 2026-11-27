@@ -1,0 +1,27 @@
+{
+  "command": [
+    "list"
+  ],
+  "data": {
+    "packages": [],
+    "packages_checked": 2,
+    "skipped": []
+  },
+  "errors": [
+    {
+      "code": "environment_outdated_check_failed",
+      "environment": "black",
+      "message": "Package backend exited with code 2.\nstderr: error: Request failed after 3 retries in 8.1s\n  cause: Failed to fetch: https://pypi.org/simple/black/\n  cause: error sending request for url (https://pypi.org/simple/black/)\n  cause: client error (Connect)\n  cause: tunnel error: failed to create underlying connection\n  cause: tcp connect error\n  cause: Connection refused (os error 61)\n",
+      "package": null
+    },
+    {
+      "code": "environment_outdated_check_failed",
+      "environment": "cowsay",
+      "message": "Package backend exited with code 2.\nstderr: error: Request failed after 3 retries in 8.8s\n  cause: Failed to fetch: https://pypi.org/simple/cowsay/\n  cause: error sending request for url (https://pypi.org/simple/cowsay/)\n  cause: client error (Connect)\n  cause: tunnel error: failed to create underlying connection\n  cause: tcp connect error\n  cause: Connection refused (os error 61)\n",
+      "package": null
+    }
+  ],
+  "exit_code": 1,
+  "pipx_result_version": "1",
+  "status": "error"
+}

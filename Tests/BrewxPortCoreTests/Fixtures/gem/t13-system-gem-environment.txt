@@ -1,0 +1,31 @@
+RubyGems Environment:
+  - RUBY VERSION: 2.6.10 (2022-04-12 patchlevel 210) [universal.arm64e-darwin24]
+  - INSTALLATION DIRECTORY: /Library/Ruby/Gems/2.6.0
+  - USER INSTALLATION DIRECTORY: /Users/tester/.gem/ruby/2.6.0
+  - RUBY EXECUTABLE: /System/Library/Frameworks/Ruby.framework/Versions/2.6/usr/bin/ruby
+  - GIT EXECUTABLE: /usr/bin/git
+  - EXECUTABLE DIRECTORY: /usr/local/bin
+  - SPEC CACHE DIRECTORY: /Users/tester/.gem/specs
+  - SYSTEM CONFIGURATION DIRECTORY: /Library/Ruby/Site
+  - RUBYGEMS PLATFORMS:
+    - ruby
+    - universal-darwin-24
+  - GEM PATHS:
+     - /Library/Ruby/Gems/2.6.0
+     - /Users/tester/.gem/ruby/2.6.0
+     - /System/Library/Frameworks/Ruby.framework/Versions/2.6/usr/lib/ruby/gems/2.6.0
+  - GEM CONFIGURATION:
+     - :update_sources => true
+     - :verbose => true
+     - :backtrace => false
+     - :bulk_threshold => 1000
+  - REMOTE SOURCES:
+     - https://rubygems.org/
+  - SHELL PATH:
+     - /opt/homebrew/bin
+     - /usr/local/bin
+     - /opt/local/bin
+     - /usr/bin
+     - /bin
+     - /usr/sbin
+     - /sbin

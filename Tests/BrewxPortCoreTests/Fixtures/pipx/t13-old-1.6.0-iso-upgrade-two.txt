@@ -1,0 +1,4 @@
+upgraded package cowsay from 5.0 to 6.1 (location:
+/Users/tester/oldpipx/home-1.6.0/venvs/cowsay)
+upgraded package black from 24.2.0 to 26.10.1 (location:
+/Users/tester/oldpipx/home-1.6.0/venvs/black)

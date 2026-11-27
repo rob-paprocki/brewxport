@@ -416,8 +416,8 @@ struct BundlesFilePanels: ViewModifier {
     }
 }
 
-/// What an export leaves out, before the save panel: engines that couldn't list, names BrewxPort refused and, for a
-/// Brewfile, what `brew bundle` can't read. Save… goes on to the save panel.
+/// What an export leaves out, before the save panel: engines that couldn't list, names BrewxPort refused, for a
+/// Brewfile what `brew bundle` can't read, and the language tools in one line. Save… goes on to the save panel.
 private struct ExportReviewSheet: View {
     let pending: PendingExport
     let save: () -> Void
@@ -440,6 +440,10 @@ private struct ExportReviewSheet: View {
                     if !pending.leftOut.isEmpty {
                         section("Not in the Brewfile",
                                 pending.leftOut.map { "\($0.displayName): \($0.reason)" })
+                    }
+                    if let line = pending.summary.languageToolsLine {
+                        Text(verbatim: line)
+                            .foregroundStyle(.secondary)
                     }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)

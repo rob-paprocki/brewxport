@@ -7,7 +7,18 @@ import Testing
 @Suite struct LoginShellPathTests {
     static let shell = "/bin/zsh"
     static let system = ["/usr/bin", "/bin", "/usr/sbin", "/sbin"]
-    static let argv = ["-i", "-l", "-c", "printf '%s%s%s\\n' __BREWXPORT_PATH_BEGIN__ \"$PATH\" __BREWXPORT_PATH_END__"]
+    /// Every allowlisted location variable (each on its own marked line), then PATH between its markers.
+    static let script = #"printf '__BREWXPORT_VAR_BEGIN__%s=%s__BREWXPORT_VAR_END__\n'"#
+        + #" NVM_DIR "${NVM_DIR-}" NPM_CONFIG_PREFIX "${NPM_CONFIG_PREFIX-}" npm_config_prefix "${npm_config_prefix-}""#
+        + #" PIPX_HOME "${PIPX_HOME-}" PIPX_BIN_DIR "${PIPX_BIN_DIR-}" UV_TOOL_DIR "${UV_TOOL_DIR-}""#
+        + #" UV_TOOL_BIN_DIR "${UV_TOOL_BIN_DIR-}" CARGO_HOME "${CARGO_HOME-}""#
+        + #" CARGO_INSTALL_ROOT "${CARGO_INSTALL_ROOT-}" RUSTUP_HOME "${RUSTUP_HOME-}" GEM_HOME "${GEM_HOME-}""#
+        + #" GEM_PATH "${GEM_PATH-}" BUN_INSTALL "${BUN_INSTALL-}" BUN_INSTALL_GLOBAL_DIR "${BUN_INSTALL_GLOBAL_DIR-}""#
+        + #" BUN_INSTALL_BIN "${BUN_INSTALL_BIN-}" MINT_PATH "${MINT_PATH-}" MINT_LINK_PATH "${MINT_LINK_PATH-}""#
+        + #" XDG_DATA_HOME "${XDG_DATA_HOME-}" XDG_BIN_HOME "${XDG_BIN_HOME-}" XDG_CONFIG_HOME "${XDG_CONFIG_HOME-}""#
+        + #" XDG_CACHE_HOME "${XDG_CACHE_HOME-}""#
+        + #"; printf '%s%s%s\n' __BREWXPORT_PATH_BEGIN__ "$PATH" __BREWXPORT_PATH_END__"#
+    static let argv = ["-i", "-l", "-c", script]
 
     /// What the app's own process environment would hold (BrewxPort's pinned PATH and Homebrew settings included).
     static let processEnvironment = [
@@ -197,7 +208,11 @@ import Testing
         #expect(runner.optionsCalls.map(\.newSession) == [true])
     }
 
-    @Test func timeoutIsAskedAgainNextTime() async {
+    /// A shell that didn't answer in time keeps its fallback: the language engines' detects that follow (seven of
+    /// them on every check) get it at once instead of each waiting for the shell again. The person's Refresh or Check
+    /// again (`askAgain`) or `forget()` asks again, an answer the shell gave included, so a PATH fixed meanwhile is
+    /// read.
+    @Test func timedOutShellKeepsItsFallbackUntilRefresh() async {
         let runner = Self.runner(stdout: "__BREWXPORT_PATH_BEGIN__/opt/local/bin__BREWXPORT_PATH_END__\n")
         let calls = CallCount()
         runner.block = { _ in
@@ -207,11 +222,53 @@ import Testing
         let first = await resolver.resolve()
         #expect(first.source == .systemDefault)
         #expect(first.note == "Based on the system PATH: your login shell didn't answer within 5 seconds.")
-        let second = await resolver.resolve()
-        #expect(second == ResolvedPath(entries: ["/opt/local/bin"], source: .loginShell))
-        let third = await resolver.resolve()
-        #expect(third == second)
+        #expect(await resolver.resolve() == first)
+        #expect(await resolver.resolve() == first)
+        #expect(runner.calls.count == 1)
+        resolver.askAgain()
+        let answered = await resolver.resolve()
+        #expect(answered == ResolvedPath(entries: ["/opt/local/bin"], source: .loginShell))
         #expect(runner.calls.count == 2)
+        #expect(await resolver.resolve() == answered)
+        #expect(runner.calls.count == 2)
+        resolver.askAgain()
+        #expect(await resolver.resolve() == answered)
+        #expect(runner.calls.count == 3)
+        await resolver.forget()
+        _ = await resolver.resolve()
+        #expect(runner.calls.count == 4)
+    }
+
+    /// A PATH the person fixed after the shell answered (a Set Up added ~/.cargo/bin to .zprofile) is read on the next
+    /// call after `askAgain()`.
+    @Test func askAgainReadsAFixedPath() async {
+        let before = "__BREWXPORT_PATH_BEGIN__/usr/bin__BREWXPORT_PATH_END__\n"
+        let after = "__BREWXPORT_PATH_BEGIN__/Users/someone/.cargo/bin:/usr/bin__BREWXPORT_PATH_END__\n"
+        let runner = Self.runner(stdout: before)
+        let resolver = Self.resolver(runner)
+        #expect(await resolver.resolve().entries == ["/usr/bin"])
+        runner.respond(Self.argv, CommandResult(exitCode: 0, stdout: after, stderr: ""))
+        #expect(await resolver.resolve().entries == ["/usr/bin"])
+        resolver.askAgain()
+        #expect(await resolver.resolve().entries == ["/Users/someone/.cargo/bin", "/usr/bin"])
+    }
+
+    /// With a fake slow shell: once it didn't answer within the timeout, the next calls don't wait for it again.
+    @Test func slowShellIsWaitedForOnce() async {
+        let runner = Self.runner(stdout: "__BREWXPORT_PATH_BEGIN__/opt/homebrew/bin__BREWXPORT_PATH_END__\n")
+        runner.block = { _ in
+            await withCheckedContinuation { (done: CheckedContinuation<Void, Never>) in
+                DispatchQueue.global().asyncAfter(deadline: .now() + 3) { done.resume() }
+            }
+        }
+        let resolver = Self.resolver(runner, timeout: .milliseconds(200))
+        let first = await resolver.resolve()
+        #expect(first.source == .systemDefault)
+        let clock = ContinuousClock()
+        let start = clock.now
+        for _ in 0..<7 { #expect(await resolver.resolve() == first) }
+        #expect(clock.now - start < .milliseconds(150))
+        #expect(runner.calls.count == 1)
     }
 
     @Test func otherFallbacksAreKeptForTheLaunch() async {
@@ -220,6 +277,84 @@ import Testing
         _ = await resolver.resolve()
         _ = await resolver.resolve()
         #expect(runner.calls.count == 1)
+    }
+
+    /// What the probe prints for each variable: its own line, between the variable markers.
+    static func line(_ name: String, _ value: String) -> String {
+        "__BREWXPORT_VAR_BEGIN__\(name)=\(value)__BREWXPORT_VAR_END__\n"
+    }
+
+    static let pathLine = "__BREWXPORT_PATH_BEGIN__/opt/homebrew/bin:/usr/bin__BREWXPORT_PATH_END__\n"
+
+    @Test func capturesOnlyAllowlistedVariables() async {
+        let stdout = "Welcome!\n"
+            + Self.line("NVM_DIR", "/Users/someone/.nvm")
+            + Self.line("CARGO_HOME", "/Users/someone/.cargo")
+            + Self.line("GEM_PATH", "/Users/someone/.gem/ruby/4.0.0:/opt/homebrew/lib/ruby/gems/4.0.0")
+            + Self.line("npm_config_prefix", "/Users/someone/.npm-global")
+            + Self.line("PIPX_HOME", "")
+            // Never captured, whatever the shell prints: tokens, index URLs, proxies, PATH itself.
+            + Self.line("NPM_TOKEN", "/abc")
+            + Self.line("UV_INDEX_URL", "/simple")
+            + Self.line("HTTPS_PROXY", "/proxy")
+            + Self.line("PATH", "/evil/bin")
+            + Self.line("cargo_home", "/Users/someone/.cargo")
+            + Self.pathLine
+        let resolved = await Self.resolver(Self.runner(stdout: stdout)).resolve()
+        #expect(resolved.entries == ["/opt/homebrew/bin", "/usr/bin"])
+        #expect(resolved.environment == [
+            "NVM_DIR": "/Users/someone/.nvm", "CARGO_HOME": "/Users/someone/.cargo",
+            "GEM_PATH": "/Users/someone/.gem/ruby/4.0.0:/opt/homebrew/lib/ruby/gems/4.0.0",
+            "npm_config_prefix": "/Users/someone/.npm-global",
+        ])
+        // The script asks for each allowlisted variable once and nothing else.
+        let asked = LoginShellPath.script.components(separatedBy: CharacterSet(charactersIn: " ;"))
+            .filter { $0.hasPrefix("\"${") }
+        #expect(asked == ToolEnvironment.capturedVariables.map { "\"${\($0)-}\"" })
+    }
+
+    @Test func dropsRelativeAndCredentialValues() async {
+        let stdout = Self.line("CARGO_HOME", ".cargo")
+            + Self.line("RUSTUP_HOME", "~/.rustup")
+            + Self.line("BUN_INSTALL", "$HOME/.bun")
+            + Self.line("NPM_CONFIG_PREFIX", "https://someone:secret@registry.example.com/")
+            + Self.line("npm_config_prefix", "//someone:secret@registry.example.com/")
+            + Self.line("GEM_PATH", "/Users/someone/.gem:relative")
+            + Self.line("GEM_HOME", "/Users/some\u{7}one")
+            // A value with a line break spans two lines: neither half is taken.
+            + "__BREWXPORT_VAR_BEGIN__MINT_PATH=/Users/someone/.mint\n/second__BREWXPORT_VAR_END__\n"
+            + Self.line("XDG_DATA_HOME", "/Users/someone/.local/share")
+            + Self.pathLine
+        let resolved = await Self.resolver(Self.runner(stdout: stdout)).resolve()
+        #expect(resolved.source == .loginShell)
+        #expect(resolved.environment == ["XDG_DATA_HOME": "/Users/someone/.local/share"])
+    }
+
+    @Test func fallbackCapturesNothing() async {
+        let stdout = Self.line("CARGO_HOME", "/Users/someone/.cargo") + "no PATH markers\n"
+        let resolved = await Self.resolver(Self.runner(stdout: stdout)).resolve()
+        #expect(resolved.source == .systemDefault)
+        #expect(resolved.environment.isEmpty)
+    }
+
+    /// Printing, interpolating, debug-printing or dumping a ResolvedPath shows the variables' names and how many
+    /// PATH entries there are, never a value or an entry.
+    @Test func resolvedPathTextIsRedacted() {
+        let resolved = ResolvedPath(entries: ["/opt/homebrew/bin", "/Users/someone/hidden-bin"], source: .loginShell,
+                                    environment: ["NVM_DIR": "/Users/someone/hidden-nvm",
+                                                  "CARGO_HOME": "/Users/someone/hidden-cargo"])
+        var dumped = ""
+        dump(resolved, to: &dumped)
+        for text in [String(describing: resolved), String(reflecting: resolved), "\(resolved)", dumped] {
+            #expect(!text.contains("hidden"), "\(text)")
+            #expect(!text.contains("/opt/homebrew/bin"), "\(text)")
+            #expect(text.contains("CARGO_HOME") && text.contains("NVM_DIR"), "\(text)")
+        }
+        #expect(String(describing: resolved)
+                == "ResolvedPath(source: loginShell, PATH entries: 2, variables: CARGO_HOME NVM_DIR)")
+        let fallback = ResolvedPath(entries: ["/usr/bin"], source: .systemDefault, note: "Based on the system PATH.")
+        #expect(String(describing: fallback) == "ResolvedPath(source: systemDefault, PATH entries: 1, variables: none, "
+                + "note: Based on the system PATH.)")
     }
 
     @Test func argvIsTheFixedConstant() async {

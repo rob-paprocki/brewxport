@@ -74,7 +74,14 @@ typealias AskpassServerFactory = @Sendable (_ secret: SecretBuffer, _ askpassPat
 ///    `gateGroup` when it has one). A check step
 ///    (`verifyInstalled`) launches nothing: the run's verifier says which packages are missing. A step that
 ///    `requiresPassedCheck` runs only after a check passed and none failed. A step's `userEnvironment` is added only
-///    on the user routes.
+///    on the user routes. A command's own environment and folder (`CommandSpec.environment`, `workingDirectory`) are
+///    used only for a language engine's step on `.user`, never for a system engine's, nor with askpass, sudo or the
+///    helper. So is its confirmation (`CommandSpec.confirmation`): started after the command exits 0, with the same
+///    environment and folder, and the step fails (exit 1) unless it exits 0 too, with the confirmation's words or a
+///    plain reason (`unconfirmed`), and unless its stdout passes the confirmation's check when it has one
+///    (`ConfirmationCheck`: Mint's list shows the change), with the check's reason. Every output line of a language
+///    engine's step, a confirmation's included, loses URL credentials (`CredentialScrubber`) before an event carries
+///    it; the system engines' output is passed on as it came.
 /// 4. On every exit (done, rejected, cancelled) it wipes the password, stops the askpass server and calls
 ///    `helper.endAuthorization()`, then emits `.done`.
 ///
@@ -84,9 +91,13 @@ typealias AskpassServerFactory = @Sendable (_ secret: SecretBuffer, _ askpassPat
 public final class RunSession: Sendable {
     static let sudoPath = "/usr/bin/sudo"
     static let verifyArguments = ["-A", "-k", "-v"]
+    /// The `.sudoAskpass` route's options before the command: askpass, and no cached credential used or kept (R35).
+    static let sudoArguments = ["-A", "-k"]
     /// How many passwords a run asks for before it gives up, counting the first.
     static let passwordAttempts = 3
     static let passwordReason = "BrewxPort needs an administrator password to install these updates."
+    /// The step's reason when its confirmation (`CommandSpec.confirmation`) failed without saying why.
+    static let unconfirmed = "The command finished, but BrewxPort couldn't confirm that it worked."
 
     private let runner: any CommandRunning
     private let helper: any HelperConnecting
@@ -230,17 +241,18 @@ public final class RunSession: Sendable {
                 continue
             }
             emit(.started(index))
+            let stepEmit = step.engine.isLanguage ? Self.withoutCredentials(emit) : emit
             let code: Int32
             do {
                 if let refs = step.verifyInstalled {
-                    code = try await check(refs, on: step.engine, index: index, verify: verify, emit)
+                    code = try await check(refs, on: step.engine, index: index, verify: verify, stepEmit)
                 } else {
-                    code = try await run(step, index: index, route: routes[index], &state, emit)
+                    code = try await run(step, index: index, route: routes[index], &state, stepEmit)
                 }
             } catch is CancellationError {
                 return .cancelled
             } catch {
-                emit(.output(index, .stderr(Self.describe(error))))
+                stepEmit(.output(index, .stderr(Self.describe(error))))
                 code = -1
             }
             // A step that returned an exit code finished, even if the run was cancelled meanwhile. Only a step that
@@ -342,12 +354,46 @@ public final class RunSession: Sendable {
         let launch = step.spec.launchCommand(host: host)
         switch route {
         case .user:
-            // No extra variables: the runner's own base environment.
-            let options = step.userEnvironment.isEmpty
-                ? RunOptions() : RunOptions(environment: baseEnvironment.merging(step.userEnvironment) { $1 })
+            // A language engine's command brings its whole environment and its folder (`CommandSpec.environment`);
+            // the step's own variables go on top. Neither, and it's the runner's own base environment. A system
+            // engine's spec never brings either.
+            let environment = step.engine.isLanguage ? step.spec.environment : nil
+            let folder = step.engine.isLanguage ? step.spec.workingDirectory : nil
+            let options: RunOptions
+            if step.userEnvironment.isEmpty, environment == nil {
+                options = RunOptions(workingDirectory: folder)
+            } else {
+                options = RunOptions(environment: (environment ?? baseEnvironment).merging(step.userEnvironment) { $1 },
+                                     workingDirectory: folder)
+            }
             guard step.engine == .homebrew, step.operation == .remove else {
-                return try await runner.stream(launch.executable, launch.arguments, options: options,
-                                               onOutput: onOutput)
+                let code = try await runner.stream(launch.executable, launch.arguments, options: options,
+                                                   onOutput: onOutput)
+                guard code == 0, step.engine.isLanguage, let confirmation = step.spec.confirmation else { return code }
+                // The command exited 0, which for some tools doesn't mean it did anything (RubyGems' uninstall of a
+                // default gem): its confirmation says, in the same environment and folder. Its words follow the
+                // command's own in the step's output, through the same credential scrub; when it fails without a
+                // word, the step still gets a plain one. A confirmation that exits 0 whatever it finds (`mint list`)
+                // has a check its stdout must also pass, whose reason is the step's last line when it doesn't.
+                let saidWhy = Mutex(false)
+                let printed = Mutex<[String]>([])
+                let confirmed = try await runner.stream(confirmation.executable, confirmation.arguments,
+                                                        options: options) { event in
+                    switch event {
+                    case .stderr(let text) where !text.allSatisfy(\.isWhitespace): saidWhy.withLock { $0 = true }
+                    case .stdout(let line) where confirmation.check != nil: printed.withLock { $0.append(line) }
+                    default: break
+                    }
+                    onOutput(event)
+                }
+                if confirmed == 0, let check = confirmation.check,
+                   let reason = check.failure(in: printed.withLock { $0 }.joined(separator: "\n")) {
+                    onOutput(.stderr(reason))
+                    return 1
+                }
+                guard confirmed != 0 else { return 0 }
+                if !saidWhy.withLock({ $0 }) { onOutput(.stderr(Self.unconfirmed)) }
+                return 1
             }
             let errors = Mutex<[String]>([])
             let code = try await runner.stream(launch.executable, launch.arguments, options: options) { event in
@@ -371,10 +417,12 @@ public final class RunSession: Sendable {
                 return try await runner.stream(launch.executable, launch.arguments,
                                                options: RunOptions(environment: environment), onOutput: onOutput)
             }
-            // sudo: never the step's own variables.
+            // sudo: never the step's own variables. `-k` (R35): sudo neither uses nor writes a cached credential, so
+            // no ticket keyed to BrewxPort outlives the step for a later child to reuse with `sudo -n`. Askpass
+            // answers each sudo once. No `sudo -K` at the end: it would clear the person's own Terminal sessions.
             let options = RunOptions(environment: askpassEnvironment(server))
             return try await runner.stream(URL(fileURLWithPath: Self.sudoPath),
-                                           ["-A", launch.executable.path] + launch.arguments,
+                                           Self.sudoArguments + [launch.executable.path] + launch.arguments,
                                            options: options, onOutput: onOutput)
         case .helperSetup:
             guard let target = step.setupTarget else { throw StepFailure(message: "This step has no engine to set up.") }
@@ -431,6 +479,19 @@ public final class RunSession: Sendable {
 
     private func askpassEnvironment(_ server: any AskpassServing) -> [String: String] {
         baseEnvironment.merging(server.environment) { $1 }
+    }
+
+    /// `emit`, with URL credentials taken out of every output line first (`CredentialScrubber`): what a language
+    /// tool prints can name a private index with its token, and every output event reaches the run log, a step's
+    /// failure text or a notification.
+    static func withoutCredentials(_ emit: @escaping @Sendable (RunEvent) -> Void) -> @Sendable (RunEvent) -> Void {
+        { event in
+            switch event {
+            case .output(let index, .stdout(let line)): emit(.output(index, .stdout(CredentialScrubber.scrub(line))))
+            case .output(let index, .stderr(let line)): emit(.output(index, .stderr(CredentialScrubber.scrub(line))))
+            default: emit(event)
+            }
+        }
     }
 
     static let notAnAdministrator = "This account can't make admin changes. Sign in as an administrator to update."

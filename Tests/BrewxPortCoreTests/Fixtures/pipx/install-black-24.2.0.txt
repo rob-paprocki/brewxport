@@ -1,0 +1,4 @@
+  installed package black 24.2.0, installed using Python 3.15.2
+  These apps are now available
+    - black
+    - blackd

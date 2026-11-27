@@ -1,0 +1,4 @@
+Installing to existing venv 'cowsay'
+  installed package cowsay 5.0, installed using Python 3.15.2
+  These apps are now available
+    - cowsay

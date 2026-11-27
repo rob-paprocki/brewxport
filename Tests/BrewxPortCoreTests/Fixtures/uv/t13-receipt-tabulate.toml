@@ -1,0 +1,6 @@
+[tool]
+requirements = [{ name = "tabulate" }]
+python = "pypy"
+entrypoints = [
+    { name = "tabulate", install-path = "/Users/tester/.local/bin/tabulate", from = "tabulate" },
+]

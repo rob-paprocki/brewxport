@@ -1,0 +1,24 @@
+ruby-gems-separate
+bundler (4.1.0) default
+debug (1.11.1) user
+debug (1.11.1) ruby
+erb (6.0.7) default
+irb (1.16.0) user
+irb (1.16.0) ruby
+lolcat (100.0.0) user
+minitest (6.0.0) user
+minitest (6.0.0) ruby
+racc (1.8.1) user
+racc (1.8.1) ruby
+rake (13.3.1) user
+rake (13.3.1) ruby
+rbs (3.10.0) user
+rbs (3.10.0) ruby
+rdoc (7.0.4) user
+rdoc (7.0.4) ruby
+syntax_suggest (2.0.3) default
+test-unit (3.7.5) user
+test-unit (3.7.5) ruby
+thor (1.3.2) user
+typeprof (0.31.1) user
+typeprof (0.31.1) ruby

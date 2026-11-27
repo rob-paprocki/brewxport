@@ -1,0 +1,2 @@
+    Removing /Users/tester/.cargo/bin/cap-one
+    Removing /Users/tester/.cargo/bin/cap-two

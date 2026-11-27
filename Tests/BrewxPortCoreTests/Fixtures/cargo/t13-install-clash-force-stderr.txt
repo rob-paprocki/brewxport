@@ -1,0 +1,5 @@
+  Installing other-crate v0.1.0 (/Users/tester/othercrate)
+   Compiling other-crate v0.1.0 (/Users/tester/othercrate)
+    Finished `release` profile [optimized] target(s) in 0.31s
+   Replacing /Users/tester/.cargo/bin/rg
+    Replaced package `ripgrep v16.0.0` with `other-crate v0.1.0 (/Users/tester/othercrate)` (executable `rg`)

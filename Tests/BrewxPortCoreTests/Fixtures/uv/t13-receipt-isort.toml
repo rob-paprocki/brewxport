@@ -1,0 +1,6 @@
+[tool]
+requirements = [{ name = "isort", specifier = ">=5,<7" }]
+entrypoints = [
+    { name = "isort", install-path = "/Users/tester/.local/bin/isort", from = "isort" },
+    { name = "isort-identify-imports", install-path = "/Users/tester/.local/bin/isort-identify-imports", from = "isort" },
+]

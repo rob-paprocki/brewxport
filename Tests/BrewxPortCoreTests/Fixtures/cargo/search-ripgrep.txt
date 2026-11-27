@@ -1,0 +1,21 @@
+ripgrep = "16.0.0"            # ripgrep is a line-oriented search tool that recursively searches the current directory for a rege…
+gist-search = "1.3.2"         # Indexed code search for Rust - ripgrep-parity regex search over a persisted trigram index, with r…
+maxgrep = "0.0.0"             # Index-free parallel search engine that picks its scan strategy per pattern and per buffer
+cgx-core = "0.2.0"            # Core library for cgx, the Rust equivalent of uvx or npx for running Rust crates quickly and easil…
+cgx = "0.2.0"                 # Rust equivalent of uvx or npx, for running Rust crates quickly and easily
+ripgrep-edit = "0.3.18"       # Edit ripgrep search results across multiple files
+ripgrep-api = "0.2.0"         # Dev-friendly API wrapper around the ripgrep implementation to be used directly in Rust projects.
+scpr = "0.5.3"                # Manage your local binaries with ease.
+crg-rg = "0.1.0"              # Bounded ripgrep process and JSON event adapter for CRG
+crg-cli = "0.1.0"             # Deterministic local compression and ranking for ripgrep results
+crg-model = "0.1.0"           # Shared domain models and validated configuration for CRG
+crg-compress = "0.1.0"        # Deterministic scoring, deduplication, and selection for CRG
+crg-render = "0.1.0"          # Budgeted text and JSON rendering for CRG
+crg-context = "0.1.0"         # Validated source context extraction for selected CRG evidence
+crg-store = "0.1.0"           # Private reversible result storage and retrieval for CRG
+ripgrep_all = "0.10.10"       # rga: ripgrep, but also search in PDFs, E-Books, Office documents, zip, tar.gz, etc.
+weavatrix-search = "0.3.1"    # Fast, bounded repository content search built on Weavatrix Scan
+rgx-search = "0.1.11"         # Search inside everything — PDFs, Office documents, archives, 3D models, LLM checkpoints, database…
+hgrep = "0.3.9"               # hgrep is a grep tool with human-friendly search output. This is similar to `-C` option of `grep` …
+elgrep = "1.0.0"              # A high-performance ripgrep alternative using a sparse n-gram index
+... and 827 crates more (use --limit N to see more)

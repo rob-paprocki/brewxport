@@ -59,7 +59,7 @@ public enum MoveSheetText {
 
     /// "<picked>'s <Source> copy stays."
     static func keptCopy(_ plan: MovePlan) -> String {
-        "\(plan.picked.displayName)'s \(plan.picked.id.engine.displayName) copy stays."
+        "\(plan.picked.displayName.possessive) \(plan.picked.id.engine.displayName) copy stays."
     }
 
     private static func isNotOnTarget(_ entry: CantMove, _ plan: MovePlan) -> Bool {

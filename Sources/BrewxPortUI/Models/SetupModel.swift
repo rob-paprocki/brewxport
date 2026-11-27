@@ -99,7 +99,7 @@ import BrewxPortRun
             services.store.set(Data(String(choiceDate.timeIntervalSince1970).utf8), forKey: Self.choiceHandledKey)
             if present(recommended) { markDismissed() } else { begin(recommended) }
         } else if dismissedAt == nil, noEnginePresent {
-            let others = Self.withoutMasIfNoSource(EngineSetupPlanner.offered(host: host), present: present)
+            let others = Self.withoutMasIfNoSource(Self.packageManagers(host), present: present)
                 .filter { $0 != recommended && !present($0) }
             stage = .offer(recommended: recommended, others: others)
         }
@@ -123,6 +123,12 @@ import BrewxPortRun
         }
     }
 
+    /// What the sheet offers: the system package managers this Mac can set up. A language engine is set up from its
+    /// own page, through one of them (`EngineSetupPlanner.languageRoute`), never from here.
+    private static func packageManagers(_ host: HostInfo) -> [EngineID] {
+        EngineSetupPlanner.offered(host: host).filter { !$0.isLanguage }
+    }
+
     /// mas installs through Homebrew or MacPorts, so it isn't offered while neither is there.
     private static func withoutMasIfNoSource(_ engines: [EngineID], present: (EngineID) -> Bool) -> [EngineID] {
         present(.homebrew) || present(.macports) ? engines : engines.filter { $0 != .mas }
@@ -130,7 +136,7 @@ import BrewxPortRun
 
     /// The package managers that are missing (not "not working") and that this Mac can set up, in offer order.
     private var missingOffers: [EngineID] {
-        Self.withoutMasIfNoSource(EngineSetupPlanner.offered(host: services.hostInfo), present: present)
+        Self.withoutMasIfNoSource(Self.packageManagers(services.hostInfo), present: present)
             .filter { status($0) == .missing }
     }
 
@@ -150,7 +156,7 @@ import BrewxPortRun
     /// The offer as on a Mac with nothing installed, whatever the demo has: for the snapshot only.
     public func previewOffer() {
         guard stage == .hidden else { return }
-        makeOffer(from: EngineSetupPlanner.offered(host: services.hostInfo))
+        makeOffer(from: Self.packageManagers(services.hostInfo))
     }
 
     private func makeOffer(from missing: [EngineID]? = nil) {

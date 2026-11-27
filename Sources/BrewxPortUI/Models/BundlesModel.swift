@@ -256,12 +256,16 @@ public enum BundlesState: Equatable, Sendable {
         return (written.text, written.leftOut, summary)
     }
 
+    /// A language engine whose listing failed isn't one of `failedEngines` (no file carries its tools anyway): it's
+    /// named in the "Not included" line instead (`ExportSummary.languageToolsUnlisted`).
     private func inventory(includeDependencies: Bool) async -> (BundleFile, ExportSummary) {
         var packages: [Package] = []
         var errors: [EngineError] = []
+        var languagesUnlisted = Set<EngineID>()
         for await outcome in catalog.stream(.installed) {
             switch outcome.result {
             case .success(let found): packages += found
+            case .failure where outcome.engine.isLanguage: languagesUnlisted.insert(outcome.engine)
             case .failure(let error): errors.append(error)
             }
         }
@@ -274,6 +278,7 @@ public enum BundlesState: Equatable, Sendable {
         } catch {
             tapsError = EngineError(engine: .homebrew, message: "\(error)")
         }
+        let languageTools = BundleExporter.languageTools(packages)
         var dependencies = 0
         var unknown = Set<EngineID>()
         if !includeDependencies {
@@ -283,6 +288,8 @@ public enum BundlesState: Equatable, Sendable {
         var summary = ExportSummary.make(made.bundle, errors: errors, tapsError: tapsError, refused: made.refused)
         summary.dependenciesLeftOut = dependencies
         summary.dependenciesUnknown = unknown
+        summary.languageTools = languageTools
+        summary.languageToolsUnlisted = languagesUnlisted
         return (made.bundle, summary)
     }
 

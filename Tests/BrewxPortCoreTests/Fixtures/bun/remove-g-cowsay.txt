@@ -1,0 +1,4 @@
+bun remove v1.4.5 (826ef2a6f)
+
+- cowsay
+1 package removed [10.00ms]

@@ -1,0 +1,1 @@
+ruby 4.0.10 (2026-11-19 revision a704b7cd95) +PRISM [arm64-darwin24]

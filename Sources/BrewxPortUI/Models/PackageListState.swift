@@ -22,6 +22,9 @@ import BrewxPortCore
     public private(set) var errors: [String] = []
     /// The engines whose latest answer was an error (the ones `errors` names).
     public private(set) var failedEngines: Set<EngineID> = []
+    /// Updates only: for each engine whose latest check answered but couldn't check some packages (R6), which. An
+    /// engine in `failedEngines` has no entry.
+    public private(set) var unchecked: [EngineID: UncheckedPackages] = [:]
     /// The engines whose answer the list holds, an error included. Once a load has ended, exactly the ones that
     /// answered it: an engine that didn't answer has no rows, but they weren't reported gone.
     public var answeredEngines: Set<EngineID> { Set(outcomes.keys) }
@@ -34,6 +37,8 @@ import BrewxPortCore
     /// The latest answer per engine. A refresh keeps the old ones until an engine's new answer replaces its entry.
     @ObservationIgnored private var outcomes: [EngineID: EngineOutcome] = [:]
     @ObservationIgnored private var answered: Set<EngineID> = []
+    /// Engines whose answers the load in flight leaves out (`dropRows`); the next load counts them again.
+    @ObservationIgnored private var dropped: Set<EngineID> = []
     @ObservationIgnored private var pending: (replacingAll: Bool, make: @MainActor () -> AsyncStream<EngineOutcome>)?
     @ObservationIgnored private var task: Task<Void, Never>?
     /// Bumped by every start, so a stream that was cancelled can't touch the list after its replacement started.
@@ -72,6 +77,16 @@ import BrewxPortCore
         start(replacingAll: replacingAll, makeStream)
     }
 
+    /// Takes `engines`' rows out at once, without waiting for their next answer: the copy of the engine they came from
+    /// isn't the one BrewxPort uses any more. The load in flight may have asked the old copy, so its answers from them
+    /// are left out too; the next load brings back what they answer then.
+    public func dropRows(of engines: Set<EngineID>) {
+        if loading { dropped.formUnion(engines) }
+        guard !engines.isDisjoint(with: outcomes.keys) else { return }
+        for engine in engines { outcomes[engine] = nil }
+        recompute()
+    }
+
     /// Returns once nothing is loading or pending (at once when idle).
     public func settled() async {
         guard loading else { return }
@@ -102,6 +117,7 @@ import BrewxPortCore
     private func start(replacingAll: Bool, _ makeStream: @escaping @MainActor () -> AsyncStream<EngineOutcome>) {
         loading = true
         answered = []
+        dropped = []
         generation += 1
         let mine = generation
         if replacingAll {
@@ -112,6 +128,7 @@ import BrewxPortCore
         task = Task { [weak self] in
             for await outcome in makeStream() {
                 guard let self, self.generation == mine else { return }
+                guard !self.dropped.contains(outcome.engine) else { continue }
                 self.answered.insert(outcome.engine)
                 self.outcomes[outcome.engine] = outcome
                 self.merge()
@@ -138,11 +155,15 @@ import BrewxPortCore
 
     private func merge() {
         let merged = PackageCatalog.merge(Array(outcomes.values), order: order)
-        all = merged.packages.map { PackageRow(package: $0, arch: archFor($0.id.engine), installedArchs: borrowedArchs[$0.id],
-                                                   isInstalled: $0.installedVersion != nil || installedRefs.contains($0.id)) }
+        all = merged.packages.map {
+            PackageRow(package: $0, arch: archFor($0.id.engine), installedArchs: borrowedArchs[$0.id],
+                       isInstalled: $0.installedVersion != nil || installedRefs.contains($0.id),
+                       hold: merged.holds[$0.id])
+        }
         byRef = Dictionary(all.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
         errors = merged.errors.map(EngineErrorText.line)
         failedEngines = Set(merged.errors.map(\.engine))
+        unchecked = merged.unchecked
         let visible = all.filter(isVisible)
         rows = sortOrder.isEmpty ? visible : visible.sorted(using: sortOrder)
     }

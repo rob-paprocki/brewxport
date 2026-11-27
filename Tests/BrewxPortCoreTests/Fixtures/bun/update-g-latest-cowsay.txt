@@ -1,0 +1,5 @@
+bun update v1.4.5 (826ef2a6f)
+
+^ cowsay 1.5.0 -> 1.6.0
+
+1 package installed [295.00ms]

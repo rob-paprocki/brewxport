@@ -175,6 +175,9 @@ public struct MasEngine: Engine {
         guard op != .markRequested, op != .markDependency else {
             throw EngineError(engine: .mas, message: "\(EngineID.mas.displayName) can't mark packages")
         }
+        guard op != .repair else {
+            throw EngineError(engine: .mas, message: "The Mac App Store has no tools to repair")
+        }
         guard options.version == nil else {
             throw EngineError(engine: .mas, message: "mas can't install a specific version")
         }
@@ -194,7 +197,7 @@ public struct MasEngine: Engine {
         case .install: verb = "install"
         case .upgrade: verb = "upgrade"
         case .remove: verb = "uninstall"
-        case .markRequested, .markDependency: preconditionFailure("refused above")
+        case .markRequested, .markDependency, .repair: preconditionFailure("refused above")
         }
         return CommandSpec(executable: exe, arguments: [verb] + ids, needsRoot: true)
     }

@@ -1,0 +1,6 @@
+   package cowsay has invalid interpreter /Users/tester/Library/Application Support/pipx/venvs/cowsay/bin/python
+⚠️
+
+One or more packages have a missing python interpreter.
+    To fix, execute: pipx reinstall-all
+

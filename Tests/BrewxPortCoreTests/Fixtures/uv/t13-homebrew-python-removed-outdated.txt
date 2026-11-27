@@ -1,0 +1,5 @@
+black v24.2.0 [required: >=24, <24.3.0] [latest: 26.10.1]
+- black
+- blackd
+pyfiglet v1.0.2 [required:  https://files.pythonhosted.org/packages/1a/03/bef6fff907e212d67a0003f8ea4819307bba91b2856074a0763dd483ccc4/pyfiglet-1.0.2-py3-none-any.whl] [latest: 1.0.4]
+- pyfiglet

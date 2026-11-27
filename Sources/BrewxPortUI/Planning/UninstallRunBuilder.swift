@@ -70,7 +70,7 @@ public enum UninstallRunBuilder {
                     let spec = try engine.command(for: .remove, [package.id], options: InstallOptions())
                     steps.append(RunStep(engine: engine.id, kind: kind, operation: .remove, spec: spec, title: title,
                                          requiresAllEarlier: true, userEnvironment: environment,
-                                         gateGroup: engine.id.rawValue))
+                                         gateGroup: engine.id.rawValue, refs: [package.id]))
                     removals[title] = UninstallRun.Removal(engine: engine.id, name: package.displayName)
                 } catch {
                     let message = (error as? EngineError).map(EngineErrorText.line) ?? "\(error)"

@@ -12,12 +12,16 @@ public struct RunStepRow: Sendable, Equatable, Identifiable {
     public let title: String
     public let operation: PackageOperation
     public var state: StepState
+    /// The packages the step acts on (`RunStep.refs`).
+    public let refs: [PackageRef]
 
-    public init(id: Int, title: String, operation: PackageOperation, state: StepState = .waiting) {
+    public init(id: Int, title: String, operation: PackageOperation, state: StepState = .waiting,
+                refs: [PackageRef] = []) {
         self.id = id
         self.title = title
         self.operation = operation
         self.state = state
+        self.refs = refs
     }
 }
 
@@ -222,7 +226,7 @@ public final class RunController: PasswordPrompting {
         self.log = log
         problems = plan.problems + notes
         self.steps = steps.enumerated().map { RunStepRow(id: $0.offset, title: $0.element.title,
-                                                         operation: $0.element.operation) }
+                                                         operation: $0.element.operation, refs: $0.element.refs) }
     }
 
     /// Starts the executor at once (so a `cancel()` right after reaches it) and follows its events.

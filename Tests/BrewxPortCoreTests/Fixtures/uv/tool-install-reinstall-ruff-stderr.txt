@@ -1,0 +1,7 @@
+Resolved 1 package in 113ms
+Prepared 1 package in 0.12ms
+Uninstalled 1 package in 0.41ms
+Installed 1 package in 2ms
+ ~ ruff==0.6.0
+Installed 1 executable: ruff
+warning: `/Users/tester/.local/bin` is not on your PATH. To use installed tools, add the directory to your PATH.

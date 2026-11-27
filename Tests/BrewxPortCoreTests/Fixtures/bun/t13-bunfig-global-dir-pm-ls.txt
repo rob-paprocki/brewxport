@@ -1,0 +1,2 @@
+/Users/tester/bun-alt-global2 node_modules (1 installed)
+└── semver@7.8.0

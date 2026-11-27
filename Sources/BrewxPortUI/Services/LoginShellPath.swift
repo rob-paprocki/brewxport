@@ -2,13 +2,19 @@ import Foundation
 import BrewxPortCore
 
 /// The PATH the user's login shell sets up, which decides whose copy of a command runs when several engines
-/// installed it. A GUI app doesn't inherit it, so BrewxPort asks the shell once.
+/// installed it, plus the shell's values of an allowlist of tool-location variables (`NVM_DIR`, `CARGO_HOME`,
+/// `GEM_HOME`… exactly `ToolEnvironment.capturedVariables`), so the language engines work on the same folders as
+/// Terminal. A GUI app doesn't inherit either, so BrewxPort asks the shell once.
 ///
 /// The one recorded exception to "argument arrays, never shell strings": the shell runs `-i -l -c <script>` (an
-/// interactive login shell, as Terminal opens, so PATH lines in .zshrc count too), where the script is a constant
-/// compiled into BrewxPort with nothing interpolated into it. It starts from a plain login environment (the system
-/// PATH, the user's identity, SHELL), never BrewxPort's own PATH or Homebrew settings. Only the text between the markers
-/// counts, so rc-file banners and stderr don't matter.
+/// interactive login shell, as Terminal opens, so lines in .zshrc count too), where the script is a constant compiled
+/// into BrewxPort with nothing interpolated into it. It prints each allowlisted variable on its own line between the
+/// variable markers, then PATH between the PATH markers, and nothing else: no other variable is ever asked for, so
+/// tokens, index URLs and proxies set in rc files never reach BrewxPort. A variable's value counts only when it is an
+/// absolute path (a list of them for GEM_PATH) on one line; it's passed only to the language tools' commands and
+/// never logged. The shell starts from a plain login environment (the system PATH, the user's identity, SHELL), never
+/// BrewxPort's own PATH or Homebrew settings. Only the text between the markers counts, so rc-file banners and
+/// stderr don't matter.
 ///
 /// The shell starts in a new session with no controlling terminal. When BrewxPort itself was started from a terminal
 /// (`arch -x86_64 …/BrewxPort`, a `.command` file), an interactive shell on that terminal would sit in a background
@@ -20,12 +26,23 @@ import BrewxPortCore
 /// A shell that isn't listed in /etc/shells or isn't a POSIX shell (sh, bash, zsh, dash, ksh), doesn't answer in
 /// time or prints no usable PATH gets the system PATH instead, with a note saying why.
 ///
-/// An actor so the answer is cached: resolved once per launch, the first time Installed loads. A shell that didn't
-/// answer in time is the exception: the next call (the next Refresh) asks it again.
+/// An actor so the answer is cached: resolved once per launch, the first time Installed loads or a language engine
+/// (npm…) is detected, whichever comes first. A shell that didn't answer in time keeps its fallback too, so seven
+/// language engines' detects don't each wait for it again. It's asked again only after `forget()`, or on the next
+/// call after `askAgain()` (the person's Refresh or Check again, so a PATH fixed meanwhile, say by a Set Up that added
+/// ~/.cargo/bin, is read too).
 public actor LoginShellPath: PathResolving {
     public static let markers = ("__BREWXPORT_PATH_BEGIN__", "__BREWXPORT_PATH_END__")
+    /// Around each captured variable's `NAME=value`, one variable per line.
+    public static let variableMarkers = ("__BREWXPORT_VAR_BEGIN__", "__BREWXPORT_VAR_END__")
+    /// The constant script: one `printf` whose format is reused for each `NAME "${NAME-}"` pair (`-` so an unset
+    /// variable is empty even under `set -u`), then PATH. The variable lines come first because the answer counts as
+    /// soon as the PATH end marker arrives. Built once from the constant allowlist; nothing from outside goes in.
+    static let script = "printf '" + variableMarkers.0 + "%s=%s" + variableMarkers.1 + "\\n'"
+        + ToolEnvironment.capturedVariables.map { " \($0) \"${\($0)-}\"" }.joined()
+        + "; printf '%s%s%s\\n' " + markers.0 + " \"$PATH\" " + markers.1
     /// The shell's whole argument list.
-    public static let arguments = ["-i", "-l", "-c", "printf '%s%s%s\\n' __BREWXPORT_PATH_BEGIN__ \"$PATH\" __BREWXPORT_PATH_END__"]
+    public static let arguments = ["-i", "-l", "-c", script]
 
     static let unlistedNote =
         "Based on the system PATH: your login shell isn't zsh, bash or another shell listed in /etc/shells."
@@ -52,11 +69,12 @@ public actor LoginShellPath: PathResolving {
     private let processEnvironment: [String: String]
     private let newSession: Bool
     private var answer: Task<Answer, Never>?
+    /// `askAgain()` was called since the last `resolve()`.
+    private nonisolated let retryAsked = RetryFlag()
 
-    /// What one question to the shell gave, and whether a later call should ask again.
+    /// What one question to the shell gave.
     struct Answer: Sendable {
         var path: ResolvedPath
-        var askAgain = false
     }
 
     /// runner: the live ProcessRunner (BrewxPort target passes it). shell: the user's pw_shell, used only if it's
@@ -86,9 +104,15 @@ public actor LoginShellPath: PathResolving {
     /// Drops the cached answer: the next call asks the shell again.
     public func forget() async { answer = nil }
 
+    /// `forget()` for a caller that can't wait (the person's Refresh and Check again): the next `resolve()` drops the
+    /// cached answer, whatever it was, and asks the shell again. Synchronous, so it's in place before the reload or
+    /// detect it comes with starts asking.
+    public nonisolated func askAgain() { retryAsked.set() }
+
     /// The first call asks the shell; every later call (and any call made while the first is waiting) gets the
-    /// same answer, unless the shell didn't answer in time: then the next call asks again.
+    /// same answer, the fallback for a shell that didn't answer in time included, until `forget()` or `askAgain()`.
     public func resolve() async -> ResolvedPath {
+        if retryAsked.take() { answer = nil }
         if let answer { return await answer.value.path }
         let runner = runner, shell = shell, allowed = allowedShells, systemPaths = systemPaths, timeout = timeout
         let environment = processEnvironment, newSession = newSession
@@ -97,17 +121,14 @@ public actor LoginShellPath: PathResolving {
                            environment: environment, newSession: newSession)
         }
         answer = task
-        let result = await task.value
-        // Only forget this task's own answer: a call that came in meanwhile may already have started another.
-        if result.askAgain, answer == task { answer = nil }
-        return result.path
+        return await task.value.path
     }
 
     private static func ask(runner: any CommandRunning, shell: String?, allowed: Set<String>,
                             systemPaths: @Sendable () -> [String], timeout: Duration,
                             environment: [String: String], newSession: Bool) async -> Answer {
-        func fallback(_ note: String, askAgain: Bool = false) -> Answer {
-            Answer(path: ResolvedPath(entries: systemPaths(), source: .systemDefault, note: note), askAgain: askAgain)
+        func fallback(_ note: String) -> Answer {
+            Answer(path: ResolvedPath(entries: systemPaths(), source: .systemDefault, note: note))
         }
         guard let shell, !shell.isEmpty, allowed.contains(shell) else { return fallback(unlistedNote) }
         guard posixShells.contains(URL(fileURLWithPath: shell).lastPathComponent) else {
@@ -122,14 +143,14 @@ public actor LoginShellPath: PathResolving {
                 try await untilEndMarker(runner: runner, shell: shell, options: options)
             }
         } catch is CallTimedOut {
-            return fallback(timeoutNote(timeout), askAgain: true)
+            return fallback(timeoutNote(timeout))
         } catch CommandRunnerError.timedOut {
-            return fallback(timeoutNote(timeout), askAgain: true)
+            return fallback(timeoutNote(timeout))
         } catch {
             return fallback(unusableNote)
         }
         guard let entries = entries(in: output) else { return fallback(unusableNote) }
-        return Answer(path: ResolvedPath(entries: entries, source: .loginShell))
+        return Answer(path: ResolvedPath(entries: entries, source: .loginShell, environment: variables(in: output)))
     }
 
     /// The shell's stdout up to and including the first line that completes the markers, or all of it when the
@@ -173,6 +194,40 @@ public actor LoginShellPath: PathResolving {
         let entries = output[begin.upperBound..<end.lowerBound].split(separator: ":").map(String.init)
         guard !entries.isEmpty, entries.allSatisfy({ $0.hasPrefix("/") }) else { return nil }
         return entries
+    }
+
+    /// The allowlisted variables with usable values from the lines that end with the variable end marker: the text
+    /// after the last begin marker on the line, split at the first `=`. A later line for the same name wins (the
+    /// script's own lines come after any rc-file output). A value broken over lines is on no complete line, so it's
+    /// dropped. Values are filtered by `ToolEnvironment.allowlisted`.
+    static func variables(in output: String) -> [String: String] {
+        var found: [String: String] = [:]
+        for line in output.split(separator: "\n") {
+            guard let end = line.range(of: variableMarkers.1, options: [.backwards, .anchored]),
+                  let begin = line[..<end.lowerBound].range(of: variableMarkers.0, options: .backwards) else {
+                continue
+            }
+            let pair = line[begin.upperBound..<end.lowerBound]
+            guard let equals = pair.firstIndex(of: "=") else { continue }
+            found[String(pair[..<equals])] = String(pair[pair.index(after: equals)...])
+        }
+        return ToolEnvironment.allowlisted(found)
+    }
+
+    /// `askAgain()`'s request, taken by the next `resolve()`.
+    private final class RetryFlag: @unchecked Sendable {
+        private let lock = NSLock()
+        private var asked = false
+
+        func set() { lock.withLock { asked = true } }
+
+        /// Whether it was set, clearing it.
+        func take() -> Bool {
+            lock.withLock {
+                defer { asked = false }
+                return asked
+            }
+        }
     }
 
     /// Collects the shell's stdout lines and hands the text over once the end marker arrives or the shell ends.

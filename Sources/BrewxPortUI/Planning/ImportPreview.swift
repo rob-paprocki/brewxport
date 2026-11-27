@@ -62,7 +62,7 @@ public struct ImportRow: Identifiable, Hashable, Sendable {
     var isInstallable: Bool { state.isInstallable }
 }
 
-public struct EngineGroup: Equatable, Sendable {
+public struct ImportEngineGroup: Equatable, Sendable {
     public var engine: EngineID
     public var rows: [ImportRow]
 
@@ -125,7 +125,7 @@ public struct ImportPreview: Equatable, Sendable {
     }
 
     /// Engines in `order` (any not in it after, by name); within Homebrew, taps first, then file order.
-    public var groups: [EngineGroup]
+    public var groups: [ImportEngineGroup]
     /// Engines with rows in the file that are missing or unusable, in group order.
     public var missingEngines: [EngineSetup]
     /// In file order.
@@ -134,7 +134,7 @@ public struct ImportPreview: Equatable, Sendable {
     /// A Brewfile's line counts; nil for a bundle.
     public var brewfileLines: BrewfileLines?
 
-    public init(groups: [EngineGroup], missingEngines: [EngineSetup], unhandled: [PreviewUnhandled],
+    public init(groups: [ImportEngineGroup], missingEngines: [EngineSetup], unhandled: [PreviewUnhandled],
                 initiallyChecked: Set<PackageRef>, brewfileLines: BrewfileLines? = nil) {
         self.groups = groups
         self.missingEngines = missingEngines
@@ -320,12 +320,12 @@ public struct ImportPreview: Equatable, Sendable {
                              options: c.options, notes: notes)
         }
 
-        var groups: [EngineGroup] = []
+        var groups: [ImportEngineGroup] = []
         var missing: [EngineSetup] = []
         for engine in Set(rows.map(\.id.engine)).sorted(by: byPosition) {
             let mine = rows.filter { $0.id.engine == engine }
-            groups.append(EngineGroup(engine: engine, rows: mine.filter { $0.id.kind == .tap }
-                                                            + mine.filter { $0.id.kind != .tap }))
+            groups.append(ImportEngineGroup(engine: engine, rows: mine.filter { $0.id.kind == .tap }
+                                                                  + mine.filter { $0.id.kind != .tap }))
             if !usable(engine), var setup = EngineSetup.setup(for: engine, status: status[engine] ?? .missing) {
                 setup.skippedCount = mine.count
                 missing.append(setup)

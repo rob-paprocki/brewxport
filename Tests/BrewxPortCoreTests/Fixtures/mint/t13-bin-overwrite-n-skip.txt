@@ -1,0 +1,4 @@
+total 8
+lrwxr-xr-x  1 tester  staff  75 Nov 26 19:31 ink-cli -> /Users/tester/.mint/packages/github.com_JohnSundell_Ink/build/0.5.0/ink-cli
+lrwxr-xr-x  1 tester  staff  81 Nov 27 07:24 multi-a -> /Users/tester/.mint/packages/_Users_tester_mintpkgs_MultiTool/build/1.1.0/multi-a
+-rwxr-xr-x  1 tester  staff  20 Nov 27 07:24 multi-b

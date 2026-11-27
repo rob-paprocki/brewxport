@@ -1,0 +1,7 @@
+🌱 Cloning MultiTool 1.1.0
+🌱 Resolving package
+🌱 Building product multi-a
+🌱 Building product multi-b
+🌱 Installed MultiTool 1.1.0
+🌱 Linked multi-a 1.1.0 to /Users/tester/.mint/bin, replacing version 1.0.0
+🌱 /Users/tester/.mint/bin must be added to your $PATH if you wish to run this package outside of mint

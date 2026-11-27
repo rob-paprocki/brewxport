@@ -255,6 +255,22 @@ import BrewxPortRun
         #expect(h.available.last?.id == h.available.first?.id)
     }
 
+    /// Final review (R6): a check whose registry lookup failed for one tool leaves it off Updates while pipx still
+    /// answers; once it's looked up again at the same version, that's no new notice.
+    @Test func toolAPartialCheckMissedDoesNotNotifyAgain() async {
+        let black = Self.package(.pipx, .tool, "black", latest: "25.1")
+        let h = await harness([wget, black])
+        await h.background.checkNow()
+        #expect(h.available.map(\.title) == ["2 updates available"])
+        h.catalog.script(.outdated, .pipx, FakeCatalog.Script(
+            result: .success([]), unchecked: UncheckedPackages(reasons: ["black": "PyPI didn't answer"])))
+        await h.background.checkNow()
+        #expect(h.model.updates.list.byRef[black.id] == nil)
+        h.catalog.script(.outdated, .pipx, packages: [black])
+        await h.background.checkNow()
+        #expect(h.available.count == 1)
+    }
+
     @Test func ledgerSurvivesRelaunch() async {
         let store = MemoryStore()
         let first = await harness([wget, curl], store: store)
@@ -1258,21 +1274,491 @@ import BrewxPortRun
         #expect(h.windowOpens.count == 1)
     }
 
-    // MARK: After a run
+    // MARK: Held updates
 
-    @Test func summaryDoesNotCountUnansweredEngineAsUpdated() async {
+    /// A language engine whose every step runs as the user (so automatic updates would take its rows), building
+    /// `<tool> upgrade <names>`, at most `limit` names per command (pipx's real limit is 1).
+    struct ToolEngine: Engine {
+        let id: EngineID
+        var limit: Int?
+        let capabilities: EngineCapabilities = []
+        func maxTargetsPerCommand(for operation: PackageOperation) -> Int? { limit }
+        var executableURL: URL? { URL(fileURLWithPath: "/opt/homebrew/bin/\(id.rawValue)") }
+        func detect() async -> EngineStatus { .present(path: executableURL!, version: "1") }
+        func search(_ query: String) async throws -> [Package] { [] }
+        func listInstalled() async throws -> [Package] { [] }
+        func listOutdated() async throws -> [Package] { [] }
+        func info(_ ref: PackageRef) async throws -> PackageDetails { PackageDetails(ref: ref) }
+        func privilege(for op: PackageOperation, _ ref: PackageRef) -> Privilege { .never }
+        func command(for op: PackageOperation, _ refs: [PackageRef], options: InstallOptions) throws -> CommandSpec {
+            CommandSpec(executable: executableURL!, arguments: ["upgrade"] + refs.map(\.name), needsRoot: false)
+        }
+    }
+
+    static func tool(_ engine: EngineID, _ name: String) -> Package {
+        Package(id: PackageRef(engine: engine, kind: .tool, name: name), displayName: name, installedVersion: "1",
+                latestVersion: "2")
+    }
+
+    /// A harness whose Updates page also holds `held` (with `homebrew`'s rows), its engines able to run them all.
+    func heldHarness(_ homebrew: [Package], held: [EngineID: [HeldUpdate]], listed: [EngineID: [Package]] = [:],
+                     mode: AutoUpdateMode, executor: FakeRunExecutor) async -> Harness {
+        let engines = PlanFixtures.engines + held.keys.map { ToolEngine(id: $0) as any Engine }
+        let h = await harness(homebrew, mode: mode, executor: executor, engines: engines)
+        for (engine, holds) in held {
+            h.catalog.script(.outdated, engine, FakeCatalog.Script(result: .success(listed[engine] ?? []), held: holds))
+        }
+        h.model.refreshLists()
+        await h.model.updates.reloaded()
+        return h
+    }
+
+    /// Needs Rust 1.96: shown on Updates with why, never run, by an automatic update or Update all, and not told as
+    /// available (nobody can run it).
+    @Test func cargoNeedsNewerRustShownAndNotAutomatic() async {
+        let ripgrep = Self.tool(.cargo, "ripgrep")
+        let hold = UpdateHold(reason: "Needs Rust 1.96", blocksAutomatic: true, blocksManual: true)
         let executor = FakeRunExecutor(events: [], hang: true)
-        let h = await harness([wget, ada], mode: .passwordFree, executor: executor)
+        let h = await heldHarness([wget], held: [.cargo: [HeldUpdate(package: ripgrep, hold: hold)]],
+                                  mode: .passwordFree, executor: executor)
+        #expect(h.model.updates.list.byRef[ripgrep.id]?.hold == hold)
+        #expect(h.model.updates.badgeCount == 1)
+        #expect(!h.model.outdatedRefs.contains(ripgrep.id))
+        // The row's menu has Update off for it alone.
+        let items = h.model.rowMenuItems(for: [ripgrep.id], in: .updates)
+        #expect(items.first { $0.action == .update }?.isEnabled == false)
+        #expect(h.model.rowMenuItems(for: [ripgrep.id, wget.id], in: .updates)
+            .first { $0.action == .update }?.isEnabled == true)
         await h.background.checkNow()
         #expect(await waitUntil { executor.runs.count == 1 })
-        // After the run Homebrew can't answer; nanobrew no longer lists ada.
-        h.catalog.script(.outdated, .homebrew,
-                         FakeCatalog.Script(result: .failure(EngineError(engine: .homebrew, message: "brew broke"))))
-        h.catalog.script(.outdated, .nanobrew, packages: [])
-        Self.succeed(executor, run: 0)
+        #expect(executor.runs[0].steps.map(\.engine) == [.homebrew])
+        #expect(!executor.runs[0].steps.flatMap(\.spec.arguments).contains("ripgrep"))
+        #expect(h.available.isEmpty)
+    }
+
+    /// R19: a gem that came with Ruby is never updated automatically; it waits for the person like any update that
+    /// waits (told as available), and Update all and the row's own Update still take it.
+    @Test func gemShippedWithRubyNotAutomatic() async {
+        let rake = Self.tool(.gem, "rake")
+        let hold = UpdateHold(reason: "Came with Ruby, so BrewxPort updates it only when you ask.",
+                              blocksAutomatic: true, blocksManual: false)
+        let executor = FakeRunExecutor(events: [], hang: true)
+        let h = await heldHarness([wget], held: [.gem: [HeldUpdate(package: rake, hold: hold)]],
+                                  listed: [.gem: [rake]], mode: .passwordFree, executor: executor)
+        await h.background.checkNow()
+        #expect(await waitUntil { executor.runs.count == 1 })
+        #expect(executor.runs[0].steps.map(\.engine) == [.homebrew])
+        #expect(h.available.map(\.title) == ["1 update available"])
+        #expect(h.available.first?.body == "RubyGems 1")
+        #expect(h.model.updates.updateAllRequests().map(\.package.id) == [rake.id, wget.id])
+        #expect(h.model.outdatedRefs.contains(rake.id))
+    }
+
+    // MARK: Runtimes language tools use (design option A)
+
+    static func formula(_ name: String, _ installed: String, _ latest: String) -> Package {
+        Package(id: PackageRef(engine: .homebrew, kind: .formula, name: name), displayName: name,
+                installedVersion: installed, latestVersion: latest)
+    }
+
+    /// The runtime notices posted, by id.
+    func runtimeNotices(_ h: Harness) -> [FakeNotifier.Post] {
+        h.notifier.posts.filter { $0.id.hasPrefix(BackgroundUpdater.runtimeIDPrefix) }
+    }
+
+    /// A harness on `Related`'s engines plus `languages`, whose Installed lists `packages` (Homebrew's, nothing
+    /// depending on anything unless `relate` says so) and whose Updates holds them.
+    func runtimeHarness(_ packages: [Package], languages: [any Engine], mode: AutoUpdateMode = .passwordFree,
+                        executor: FakeRunExecutor = FakeRunExecutor(),
+                        relate: (Related) -> Void = { _ in }) async -> Harness {
+        let r = Related()
+        r.installed(.homebrew, packages)
+        for package in packages { r.needs(.homebrew, package.id.name, []) }
+        relate(r)
+        return await harness(packages, mode: mode, executor: executor, engines: r.engines + languages,
+                             catalog: r.catalog)
+    }
+
+    /// Homebrew's Ruby going from 4.0 to 4.1 leaves the gems RubyGems installed behind, so an automatic run skips it
+    /// and says so once, in the design's words; a Ruby patch update runs as usual.
+    @Test func autoRunHoldsBackRubyMinor() async {
+        let ruby = Self.formula("ruby", "4.0.10", "4.1.0")
+        let gem = FakeLanguageEngine(.gem, uses: [RuntimeUse(formula: "ruby")])
+        let h = await runtimeHarness([wget, ruby], languages: [gem])
+        #expect(h.model.updates.hold(for: h.model.updates.list.byRef[ruby.id]!)
+                == UpdateHold(reason: "Updating it needs your gems reinstalled.", blocksAutomatic: true,
+                              blocksManual: false))
+        await h.background.checkNow()
+        #expect(await waitUntil { h.executor.runs.count == 1 })
+        #expect(h.executor.runs[0].steps.flatMap(\.refs) == [wget.id])
+        #expect(runtimeNotices(h).map(\.title) == ["Ruby 4.1 is ready"])
+        #expect(runtimeNotices(h).map(\.body) == ["Updating it needs your gems reinstalled."])
+        #expect(runtimeNotices(h).first?.target == .updates)
+        // Not told again as available, nor as a runtime once more on the next check.
+        #expect(h.available.isEmpty)
+        #expect(h.attention.isEmpty)
+        #expect(await waitUntil { !h.model.run.isRunning })
+        await h.background.checkNow()
+        #expect(runtimeNotices(h).count == 1)
+        #expect(h.available.isEmpty)
+
+        // A patch update keeps its gems, so it runs.
+        let patch = Self.formula("ruby", "4.0.9", "4.0.10")
+        let next = await runtimeHarness([patch], languages: [gem])
+        #expect(next.model.updates.hold(for: next.model.updates.list.byRef[patch.id]!) == nil)
+        await next.background.checkNow()
+        #expect(await waitUntil { next.executor.runs.count == 1 })
+        #expect(next.executor.runs[0].steps.flatMap(\.refs) == [patch.id])
+        #expect(runtimeNotices(next).isEmpty)
+    }
+
+    /// Homebrew's Node going to a new major version needs npm's globals rebuilt; a minor one doesn't. Homebrew's own
+    /// revision suffix (`_1`) isn't a version part.
+    @Test func autoRunHoldsBackNodeMajor() async {
+        let node = Self.formula("node", "25.2.1_1", "26.0.0")
+        let npm = FakeLanguageEngine(.npm, uses: [RuntimeUse(formula: "node")])
+        let h = await runtimeHarness([node], languages: [npm])
+        await h.background.checkNow()
+        #expect(runtimeNotices(h).map(\.title) == ["Node 26 is ready"])
+        #expect(runtimeNotices(h).map(\.body) == ["Updating it needs your npm tools rebuilt."])
+        #expect(h.executor.runs.isEmpty)
+
+        let minor = Self.formula("node", "25.2.1", "25.3.0_1")
+        let next = await runtimeHarness([minor], languages: [npm])
+        await next.background.checkNow()
+        #expect(await waitUntil { next.executor.runs.count == 1 })
+        #expect(runtimeNotices(next).isEmpty)
+
+        // An npm on another Node (nvm's) isn't Homebrew's: its major update runs.
+        let nvm = FakeLanguageEngine(.npm, uses: [])
+        let other = await runtimeHarness([node], languages: [nvm])
+        await other.background.checkNow()
+        #expect(await waitUntil { other.executor.runs.count == 1 })
+    }
+
+    /// Any change to a python@3.x that pipx's or uv's tools run on breaks them until they're reinstalled; one no tool
+    /// uses updates as usual. A manager that can't say which Python its tools use counts as using it.
+    @Test func autoRunHoldsBackPythonUsedByTools() async {
+        let python15 = Self.formula("python@3.15", "3.15.2", "3.15.3")
+        let python14 = Self.formula("python@3.14", "3.14.4", "3.14.5")
+        let pipx = FakeLanguageEngine(.pipx, uses: [RuntimeUse(formula: "python@3.15", tools: ["black"])])
+        let uv = FakeLanguageEngine(.uv, uses: [RuntimeUse(formula: "python@3.15", tools: ["ruff"])])
+        let h = await runtimeHarness([python14, python15], languages: [pipx, uv])
+        await h.background.checkNow()
+        #expect(await waitUntil { h.executor.runs.count == 1 })
+        #expect(h.executor.runs[0].steps.flatMap(\.refs) == [python14.id])
+        #expect(runtimeNotices(h).map(\.title) == ["Python 3.15.3 is ready"])
+        #expect(runtimeNotices(h).map(\.body) == ["Updating it needs your pipx and uv tools reinstalled."])
+
+        uv.uses = .failure(EngineError(engine: .uv, message: "This uv doesn't say which Python its tools use"))
+        let unsure = await runtimeHarness([python14], languages: [pipx, uv])
+        await unsure.background.checkNow()
+        #expect(runtimeNotices(unsure).map(\.body) == ["Updating it needs your uv tools reinstalled."])
+        #expect(unsure.executor.runs.isEmpty)
+    }
+
+    /// `brew upgrade` brings a formula's outdated dependencies and dependents along, so an automatic run also leaves
+    /// out every update that would update a held runtime that way: yarn (which needs node) and pre-commit (which needs
+    /// the python@3.15 pipx's tools run on). They're told in one "need your attention" notice saying why; jq runs.
+    @Test func autoRunLeavesOutUpdatesThatBringAHeldRuntimeAlong() async {
+        let node = Self.formula("node", "25.2.1", "26.0.0")
+        let python = Self.formula("python@3.15", "3.15.2", "3.15.3")
+        let yarn = Self.formula("yarn", "1.22.21", "1.22.22")
+        let preCommit = Self.formula("pre-commit", "4.0.0", "4.0.1")
+        let npm = FakeLanguageEngine(.npm, uses: [RuntimeUse(formula: "node")])
+        let pipx = FakeLanguageEngine(.pipx, uses: [RuntimeUse(formula: "python@3.15", tools: ["black"])])
+        let h = await runtimeHarness([jq, node, python, yarn, preCommit], languages: [npm, pipx]) { r in
+            r.brew.setDependents("node", ["yarn"])
+            r.needs(.homebrew, "yarn", ["node"])
+            r.brew.setDependents("python@3.15", ["pre-commit"])
+            r.needs(.homebrew, "pre-commit", ["python@3.15"])
+        }
+        #expect(h.model.updates.runtimesBroughtAlong(by: yarn.id) == [node.id])
+        #expect(h.model.updates.runtimesBroughtAlong(by: preCommit.id) == [python.id])
+        #expect(h.model.updates.runtimesBroughtAlong(by: jq.id).isEmpty)
+        await h.background.checkNow()
+        #expect(await waitUntil { h.executor.runs.count == 1 })
+        #expect(h.executor.runs[0].steps.flatMap(\.refs) == [jq.id])
+        #expect(h.attention.map(\.title) == ["2 updates need your attention"])
+        #expect(h.attention.map(\.body) == ["Updating them would also update Node and Python, which your language "
+                                            + "tools run on."])
+        #expect(h.available.isEmpty)
+        #expect(BackgroundUpdater.attentionBody(count: 1, ignoredOrSkipped: true, runtimes: ["Ruby"])
+                == "Updating it would also update a package you ignored or skipped, or Ruby, which your language "
+                + "tools run on.")
+    }
+
+    /// The runtime notice has its own place in the notify-once ledger: a Ruby version told as available while
+    /// BrewxPort only notified is still told as "Ruby 4.1 is ready" once automatic updates hold it back.
+    @Test func runtimeNoticeAfterItWasToldAsAvailable() async {
+        let ruby = Self.formula("ruby", "4.0.10", "4.1.0")
+        let gem = FakeLanguageEngine(.gem, uses: [RuntimeUse(formula: "ruby")])
+        let h = await runtimeHarness([ruby], languages: [gem], mode: .notify)
+        await h.background.checkNow()
+        #expect(h.available.map(\.title) == ["1 update available"])
+        #expect(runtimeNotices(h).isEmpty)
+        h.background.settings.mode = .passwordFree
+        await h.background.checkNow()
+        #expect(runtimeNotices(h).map(\.title) == ["Ruby 4.1 is ready"])
+        await h.background.checkNow()
+        #expect(runtimeNotices(h).count == 1)
+        #expect(h.available.count == 1)
+    }
+
+    // MARK: Python patch updates (R29)
+
+    /// No registry: the runtime checks never look anything up.
+    struct NoRegistry: RegistryFetching {
+        func get(_ url: URL) async throws -> Data { throw URLError(.notConnectedToInternet) }
+    }
+
+    /// One captured pipx command from `Fixtures/pipx`.
+    static func pipxCapture(_ name: String) -> CommandResult {
+        let folder = UIFixtures.directory.appendingPathComponent("pipx")
+        func read(_ file: String) -> String? {
+            try? String(contentsOf: folder.appendingPathComponent(file), encoding: .utf8)
+        }
+        let exit = Int32(read(name + ".exit")?.trimmingCharacters(in: .whitespacesAndNewlines) ?? "") ?? 127
+        return CommandResult(exitCode: exit, stdout: read(name + ".json") ?? read(name + ".txt") ?? "", stderr: "")
+    }
+
+    /// The venvs' `pyvenv.cfg` files T13 captured: pipx's black through Homebrew's `opt/python@3.15` link, a uv tool on
+    /// uv's own CPython, and one on the Command Line Tools' Python.
+    nonisolated static let capturedVenvConfigs = ["pipx/t13-pyvenv-cfg-black.cfg", "uv/t13-pyvenv-cfg-black.cfg",
+                                                  "uv/t13-on-system-python-pyvenv-cfg-ruff.cfg"]
+
+    /// A venv's `pyvenv.cfg` naming `home`: the captured file that names it (`capturedVenvConfigs`). Not a capture for
+    /// any other `home` (one Cellar copy, Homebrew's `Frameworks` link: T13 made no venv there): the file as Python's
+    /// `venv` module writes it, `home` first.
+    nonisolated static func venvConfig(home: String, venv: String) -> String {
+        for file in capturedVenvConfigs {
+            if let text = try? String(contentsOf: UIFixtures.directory.appendingPathComponent(file), encoding: .utf8),
+               VenvConfig.home(text) == home {
+                return text
+            }
+        }
+        return "home = \(home)\ninclude-system-site-packages = false\nversion = 3.15.2\n"
+            + "executable = \(home)/python3.15\ncommand = \(home)/python3.15 -m venv \(venv)\n"
+    }
+
+    /// The captured pipx (black and cowsay on Homebrew's python@3.15, PIPX_HOME the VM's), detected, whose venvs'
+    /// `pyvenv.cfg` name `homes` (venv name → home; a venv without one has none).
+    static func pipxWithVenvs(_ homes: [String: String]) async -> PipxEngine {
+        let runner = UIFakeRunner([["--version"]: pipxCapture("version"),
+                                   ["environment", "--value", "PIPX_HOME"]: pipxCapture("environment-pipx-home"),
+                                   ["environment", "--value", "PIPX_BIN_DIR"]: pipxCapture("environment-pipx-bin-dir"),
+                                   ["list", "--json"]: pipxCapture("list-json")])
+        let venvs = "/Users/tester/Library/Application Support/pipx/venvs/"
+        let pipx = PipxEngine(runner: runner, registry: NoRegistry(),
+                              executable: URL(fileURLWithPath: "/opt/homebrew/bin/pipx"),
+                              readToolFile: { path in
+                                  guard path.hasPrefix(venvs), path.hasSuffix("/pyvenv.cfg") else { return nil }
+                                  let name = String(path.dropFirst(venvs.count).dropLast("/pyvenv.cfg".count))
+                                  return homes[name].map { Data(venvConfig(home: $0, venv: venvs + name).utf8) }
+                              })
+        _ = await pipx.detect()
+        return pipx
+    }
+
+    static let python15 = formula("python@3.15", "3.15.2", "3.15.3")
+    static let optHome = "/opt/homebrew/opt/python@3.15/bin"
+
+    /// R29: venvs made through Homebrew's `opt/python@3.15` link follow its patch updates, so the update isn't held.
+    @Test func pythonPatchNotHeldForOptPathVenvs() async {
+        let pipx = await Self.pipxWithVenvs(["black": Self.optHome, "cowsay": Self.optHome])
+        let h = await runtimeHarness([Self.python15], languages: [pipx])
+        #expect(h.model.updates.runtimeHolds.isEmpty)
+        await h.background.checkNow()
+        #expect(await waitUntil { h.executor.runs.count == 1 })
+        #expect(h.executor.runs[0].steps.flatMap(\.refs) == [Self.python15.id])
+        #expect(runtimeNotices(h).isEmpty)
+    }
+
+    /// R29: a venv pinned to one Cellar copy goes with it, so the patch update is held for that tool alone.
+    @Test func pythonPatchHeldForCellarPinnedVenv() async {
+        let pipx = await Self.pipxWithVenvs(["black": "/opt/homebrew/Cellar/python@3.15/3.15.2/bin",
+                                             "cowsay": Self.optHome])
+        let h = await runtimeHarness([Self.python15], languages: [pipx])
+        #expect(h.model.updates.runtimeHolds[Self.python15.id]?.engines == [.pipx: ["black"]])
+        await h.background.checkNow()
+        #expect(h.executor.runs.isEmpty)
+        #expect(runtimeNotices(h).map(\.body) == ["Updating it needs your pipx tools reinstalled."])
+    }
+
+    /// A venv made through Homebrew's `Frameworks` link is Homebrew's Python, resolved through the formula's versioned
+    /// folder: it counts as pinned, so the patch update is held for it.
+    @Test func pythonPatchHeldForFrameworksVenv() async {
+        let frameworks = "/opt/homebrew/Frameworks/Python.framework/Versions/3.15/bin"
+        let pipx = await Self.pipxWithVenvs(["black": frameworks, "cowsay": Self.optHome])
+        let h = await runtimeHarness([Self.python15], languages: [pipx])
+        #expect(h.model.updates.runtimeHolds[Self.python15.id]?.engines == [.pipx: ["black"]])
+    }
+
+    /// R29: a venv whose `pyvenv.cfg` can't be read could be pinned: the patch update is held (the careful way).
+    @Test func pythonPatchHeldWhenVenvUnreadable() async {
+        let pipx = await Self.pipxWithVenvs(["cowsay": Self.optHome])
+        let h = await runtimeHarness([Self.python15], languages: [pipx])
+        #expect(h.model.updates.runtimeHolds[Self.python15.id]?.engines == [.pipx: ["black"]])
+        await h.background.checkNow()
+        #expect(h.executor.runs.isEmpty)
+        #expect(runtimeNotices(h).map(\.title) == ["Python 3.15.3 is ready"])
+    }
+
+    /// R29: a venv whose `pyvenv.cfg` names a Python outside Homebrew (uv's own here, as captured) doesn't run on
+    /// Homebrew's python@3.15 at all: it isn't "used by" that formula, and its update isn't held for it.
+    @Test func pythonUpdateNotHeldForToolOnNonHomebrewPython() async throws {
+        let uvPython = "/Users/tester/.local/share/uv/python/cpython-3.12-macos-aarch64-none/bin"
+        let pipx = await Self.pipxWithVenvs(["black": uvPython, "cowsay": Self.optHome])
+        #expect(try await pipx.runtimeUses() == [RuntimeUse(formula: "python@3.15", tools: ["cowsay"],
+                                                            patchSafeTools: ["cowsay"])])
+        let h = await runtimeHarness([Self.python15], languages: [pipx])
+        #expect(h.model.updates.runtimeHolds.isEmpty)
+        await h.background.checkNow()
+        #expect(await waitUntil { h.executor.runs.count == 1 })
+        #expect(h.executor.runs[0].steps.flatMap(\.refs) == [Self.python15.id])
+        #expect(runtimeNotices(h).isEmpty)
+
+        // Neither venv on Homebrew's Python (the other on the Command Line Tools' Python): pipx's tools use none.
+        let elsewhere = await Self.pipxWithVenvs(["black": uvPython,
+                                                  "cowsay": "/Library/Developer/CommandLineTools/usr/bin"])
+        #expect(try await elsewhere.runtimeUses().isEmpty)
+    }
+
+    /// When Homebrew couldn't say what depends on a held runtime, an automatic run still leaves every Homebrew update
+    /// out, and its notice says they only may bring the runtime along, as the manual warning does.
+    @Test func attentionNoticeSaysMayWhenRelationsWerentRead() async {
+        let ruby = Self.formula("ruby", "4.0.10", "4.1.0")
+        let gem = FakeLanguageEngine(.gem, uses: [RuntimeUse(formula: "ruby")])
+        // The plain Homebrew engine can't say what depends on Ruby here (its runner knows no `brew uses`).
+        let h = await harness([wget, ruby], mode: .passwordFree, engines: PlanFixtures.engines + [gem])
+        await h.background.checkNow()
+        #expect(h.executor.runs.isEmpty)
+        #expect(h.attention.map(\.body) == ["Updating it may also update Ruby, which your language tools run on."])
+        #expect(BackgroundUpdater.attentionBody(count: 2, ignoredOrSkipped: false, runtimes: ["Node"],
+                                                maybeRuntimes: ["Python"])
+                == "Updating them would also update Node, and may also update Python, which your language tools run "
+                + "on.")
+        #expect(BackgroundUpdater.attentionBody(count: 2, ignoredOrSkipped: true, runtimes: [], maybeRuntimes: ["Ruby"])
+                == "Updating them would also update a package you ignored or skipped, and may also update Ruby, which "
+                + "your language tools run on.")
+    }
+
+    // MARK: After a run
+
+    /// R6: the summary counts what the run updated from the run's own results. A tool whose step failed isn't
+    /// "updated" because its row vanished from the next check (pipx couldn't check it then); one whose step worked is,
+    /// whatever the next check could look up. pipx upgrades one tool per step, as the real engine does.
+    @Test func updaterCountsFromRunResultsNotFromVanishedRows() async throws {
+        let black = Self.tool(.pipx, "black")
+        let isort = Self.tool(.pipx, "isort")
+        let notChecked = UncheckedPackages(reasons: ["black": "PyPI didn't answer", "isort": "PyPI didn't answer"])
+        let executor = FakeRunExecutor(events: [], hang: true)
+        let h = await harness([wget, black, isort], mode: .passwordFree, executor: executor,
+                              engines: PlanFixtures.engines + [ToolEngine(id: .pipx, limit: 1)])
+        await h.background.checkNow()
+        #expect(await waitUntil { executor.runs.count == 1 })
+        #expect(executor.runs[0].steps.map(\.refs) == [[wget.id], [black.id], [isort.id]])
+        // After the run, Homebrew no longer lists wget, and pipx couldn't look black or isort up: both vanish.
+        h.catalog.script(.outdated, .homebrew, packages: [])
+        h.catalog.script(.outdated, .pipx, FakeCatalog.Script(result: .success([]), unchecked: notChecked))
+        executor.finish([.started(0), .finished(0, 0), .started(1), .finished(1, 1), .started(2), .finished(2, 0),
+                         .done])
         #expect(await waitUntil { h.summaries.count == 1 })
-        #expect(h.summaries.first?.title == "Updated 1. Couldn't check: wget")
-        #expect(h.summaries.first?.body == "ada")
+        #expect(h.summaries.first?.title == "Updated 2. 1 failed: black")
+        #expect(h.summaries.first?.body == "isort, wget")
+    }
+
+    /// A package the reload still lists counts as failed only when it's offered at or below the version the run
+    /// targeted, or isn't held. A crate updated to 15 whose 16 now waits for a newer Rust was updated; one still
+    /// offered at 15 wasn't.
+    @Test func heldNewerVersionAfterTheRunIsntAFailure() async {
+        let hold = UpdateHold(reason: "Needs Rust 1.96", blocksAutomatic: true, blocksManual: true)
+        let ripgrep = Package(id: PackageRef(engine: .cargo, kind: .tool, name: "ripgrep"), displayName: "ripgrep",
+                              installedVersion: "14.1.0", latestVersion: "15.0.0")
+        for offered in ["16.0.0", "15.0.0"] {
+            let executor = FakeRunExecutor(events: [], hang: true)
+            let h = await harness([wget, ripgrep], mode: .passwordFree, executor: executor,
+                                  engines: PlanFixtures.engines + [ToolEngine(id: .cargo, limit: 1)])
+            await h.background.checkNow()
+            #expect(await waitUntil { executor.runs.count == 1 })
+            var after = ripgrep
+            after.installedVersion = offered == "16.0.0" ? "15.0.0" : "14.1.0"
+            after.latestVersion = offered
+            h.catalog.script(.outdated, .homebrew, packages: [])
+            h.catalog.script(.outdated, .cargo, FakeCatalog.Script(result: .success([]),
+                                                                   held: [HeldUpdate(package: after, hold: hold)]))
+            Self.succeed(executor, run: 0)
+            #expect(await waitUntil { h.summaries.count == 1 })
+            if offered == "16.0.0" {
+                #expect(h.summaries.first?.title == "Updated 2")
+                #expect(h.summaries.first?.body == "ripgrep, wget")
+            } else {
+                #expect(h.summaries.first?.title == "Updated 1. 1 failed: ripgrep")
+                #expect(h.summaries.first?.body == "wget")
+            }
+        }
+    }
+
+    /// R27: a step naming several packages that exits non-zero may still have updated some (Homebrew carries on past
+    /// one formula that fails). Each is decided by the reload: still listed failed; gone from an engine that checked
+    /// everything is updated, as before 10a.
+    @Test func failedBatchStepCountsWhatTheReloadShows() async {
+        let executor = FakeRunExecutor(events: [], hang: true)
+        let h = await harness([wget, jq], mode: .passwordFree, executor: executor)
+        await h.background.checkNow()
+        #expect(await waitUntil { executor.runs.count == 1 })
+        #expect(executor.runs[0].steps.map(\.refs) == [[jq.id, wget.id]])
+        h.catalog.script(.outdated, .homebrew, packages: [jq])
+        executor.finish([.started(0), .finished(0, 1), .done])
+        #expect(await waitUntil { h.summaries.count == 1 })
+        #expect(h.summaries.first?.title == "Updated 1. 1 failed: jq")
+        #expect(h.summaries.first?.body == "wget")
+    }
+
+    /// R27: gone after a failed batch step, from an engine whose check couldn't look it up, BrewxPort can't tell:
+    /// "not confirmed", never "updated".
+    @Test func failedBatchStepWithAPartialCheckIsNotConfirmed() async {
+        let rake = Self.tool(.gem, "rake")
+        let thor = Self.tool(.gem, "thor")
+        let executor = FakeRunExecutor(events: [], hang: true)
+        let h = await harness([rake, thor], mode: .passwordFree, executor: executor,
+                              engines: PlanFixtures.engines + [ToolEngine(id: .gem)])
+        await h.background.checkNow()
+        #expect(await waitUntil { executor.runs.count == 1 })
+        #expect(executor.runs[0].steps.map(\.refs) == [[rake.id, thor.id]])
+        h.catalog.script(.outdated, .gem, FakeCatalog.Script(
+            result: .success([thor]), unchecked: UncheckedPackages(reasons: ["rake": "RubyGems.org didn't answer"])))
+        executor.finish([.started(0), .finished(0, 1), .done])
+        #expect(await waitUntil { h.summaries.count == 1 })
+        #expect(h.summaries.first?.title == "Updates failed: thor. 1 not confirmed: rake")
+        #expect(h.summaries.first?.body == "")
+    }
+
+    /// An engine that can't answer the reload can't say what its failed batch step updated: "not confirmed". A step
+    /// that worked counts as updated whatever the reload says, unless the reload still lists the package.
+    @Test func unansweredEngineCountsSucceededStepsAndLeavesFailedBatchNotConfirmed() async {
+        for homebrewSucceeds in [false, true] {
+            let executor = FakeRunExecutor(events: [], hang: true)
+            let h = await harness([wget, jq, ada], mode: .passwordFree, executor: executor)
+            await h.background.checkNow()
+            #expect(await waitUntil { executor.runs.count == 1 })
+            let steps = executor.runs[0].steps
+            #expect(steps.map(\.refs) == [[ada.id], [jq.id, wget.id]])
+            // After the run Homebrew can't answer; nanobrew no longer lists ada.
+            let broke = EngineError(engine: .homebrew, message: "brew broke")
+            h.catalog.script(.outdated, .homebrew, FakeCatalog.Script(result: .failure(broke)))
+            h.catalog.script(.outdated, .nanobrew, packages: [])
+            executor.finish([.started(0), .finished(0, 0), .started(1), .finished(1, homebrewSucceeds ? 0 : 1),
+                             .done])
+            #expect(await waitUntil { h.summaries.count == 1 })
+            if homebrewSucceeds {
+                #expect(h.summaries.first?.title == "Updated 3")
+                #expect(h.summaries.first?.body == "ada, jq, wget")
+            } else {
+                #expect(h.summaries.first?.title == "Updated 1. 2 not confirmed: jq, wget")
+                #expect(h.summaries.first?.body == "ada")
+            }
+        }
     }
 
     @Test func summaryWhenNothingUpdatedSaysUpdatesFailed() async {

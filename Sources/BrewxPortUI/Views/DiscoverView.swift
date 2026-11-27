@@ -16,7 +16,7 @@ struct DiscoverView: View {
             }
             results(discover, list)
         }
-        .searchable(text: $discover.query, placement: .toolbar, prompt: "Search all engines")
+        .searchable(text: $discover.query, placement: .toolbar, prompt: discover.searchPrompt)
         .searchFocused($searchFocused)
         .onSubmit(of: .search) { discover.submit() }
         // Runs on appear too, so Find from another page focuses the field once Discover is on screen.
@@ -83,11 +83,13 @@ struct DiscoverView: View {
 /// One line per engine that failed, above the table.
 struct ErrorBanner: View {
     let lines: [String]
+    /// Each line's symbol: a warning, unless the lines are notes (Updates' "couldn't be checked").
+    var systemImage = "exclamationmark.triangle.fill"
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
             ForEach(lines, id: \.self) { line in
-                Label(line, systemImage: "exclamationmark.triangle.fill")
+                Label(line, systemImage: systemImage)
                     .lineLimit(1)
                     .truncationMode(.tail)
                     .help(line)

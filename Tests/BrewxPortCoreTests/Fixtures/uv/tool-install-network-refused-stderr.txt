@@ -1,0 +1,6 @@
+error: Request failed after 3 retries in 9.1s
+  cause: Failed to fetch: http://127.0.0.1:9/simple/isort/
+  cause: error sending request for url (http://127.0.0.1:9/simple/isort/)
+  cause: client error (Connect)
+  cause: tcp connect error
+  cause: Connection refused (os error 61)

@@ -1,0 +1,3 @@
+capture-crate v0.1.0 (/Users/tester/capcrate):
+    cap-one
+    cap-two

@@ -1,0 +1,5 @@
+⚠️ Found a space in the home path. We heavily discourage this, due to multiple
+    incompatibilities. Please check our docs for more information on this, as
+    well as some pointers on how to migrate to a different home path.
+black: Unknown metadata version 0.12. Perhaps it was installed with a later
+version of pipx.

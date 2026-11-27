@@ -19,9 +19,11 @@ public enum BundleRules {
     /// MacPorts extra arguments taken from a file: source-only and binary-only. Narrower than
     /// `RootArguments.macPortsExtraArgs`, which also covers flags people type in the app themselves.
     public static let macPortsExtraArgsFromFiles: Set<String> = ["-s", "-b"]
+    /// Bundles don't carry language tools (Plan 9 design): an export leaves them out and an import refuses them.
+    public static let languageToolReason = "language tools aren't included in bundles"
 
-    /// Checks one entry. Rules run in a fixed order (kind, name, variants, extra arguments, display name) and the
-    /// first failure is the reason.
+    /// Checks one entry. Rules run in a fixed order (engine, kind, name, variants, extra arguments, display name)
+    /// and the first failure is the reason.
     public static func check(
         engine: EngineID,
         kind: PackageKind,
@@ -30,6 +32,7 @@ public enum BundleRules {
         variants: [String],
         extraArgs: [String]
     ) -> BundleVerdict {
+        guard !engine.isLanguage else { return .rejected(reason: languageToolReason) }
         guard kindFits(kind, engine) else {
             return .rejected(reason: "\(engine.displayName) has no \(plural(kind))")
         }
@@ -40,6 +43,7 @@ public enum BundleRules {
         case .nanobrew: nameOK = isValidFormulaName(name, engine: .nanobrew)
         case .macports: nameOK = isPlainText(name) && RootArguments.isValidPortName(name)
         case .mas: nameOK = isValidMasID(name)
+        case .npm, .pipx, .uv, .cargo, .bun, .gem, .mint: nameOK = false  // refused above
         }
         guard nameOK else {
             return .rejected(reason: "“\(shown(name))” isn't a valid \(engine.displayName) \(singular(kind)) name")
@@ -88,7 +92,7 @@ public enum BundleRules {
         switch engine {
         case .homebrew: guard segments.count == 1 || segments.count == 3 else { return false }
         case .nanobrew: guard segments.count == 1 else { return false }
-        case .macports, .mas: return false
+        case .macports, .mas, .npm, .pipx, .uv, .cargo, .bun, .gem, .mint: return false
         }
         return segments.allSatisfy { isSegment($0, extra: "@._+-") }
     }
@@ -149,6 +153,7 @@ public enum BundleRules {
         case .nanobrew: return kind == .formula || kind == .cask
         case .macports: return kind == .port
         case .mas: return kind == .app
+        case .npm, .pipx, .uv, .cargo, .bun, .gem, .mint: return kind == .tool
         }
     }
 
@@ -159,6 +164,7 @@ public enum BundleRules {
         case .port: return "port"
         case .app: return "app id"
         case .tap: return "tap"
+        case .tool: return "tool"
         }
     }
 
@@ -169,6 +175,7 @@ public enum BundleRules {
         case .port: return "ports"
         case .app: return "App Store apps"
         case .tap: return "taps"
+        case .tool: return "tools"
         }
     }
 

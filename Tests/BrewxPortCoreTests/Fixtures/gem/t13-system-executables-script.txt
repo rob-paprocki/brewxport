@@ -1,0 +1,5 @@
+ruby-gems-separate
+bundler (1.17.2) default
+irb (1.0.0) default
+nokogiri (1.13.8) ruby
+rake (12.3.3) user

@@ -1,0 +1,3 @@
+black 24.2.0
+pygments 2.21.0
+pyjokes-private 0.6.0

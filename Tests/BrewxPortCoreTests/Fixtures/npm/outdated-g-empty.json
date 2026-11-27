@@ -1,0 +1,9 @@
+{
+  "npm": {
+    "current": "11.20.0",
+    "wanted": "12.2.3",
+    "latest": "12.2.3",
+    "dependent": "global",
+    "location": "/opt/homebrew/lib/node_modules/npm"
+  }
+}

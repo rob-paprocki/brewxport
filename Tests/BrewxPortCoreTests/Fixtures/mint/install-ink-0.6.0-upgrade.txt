@@ -1,0 +1,6 @@
+🌱 Cloning Ink 0.6.0
+🌱 Resolving package
+🌱 Building product ink-cli
+🌱 Installed Ink 0.6.0
+🌱 Linked ink-cli 0.6.0 to /Users/tester/.mint/bin, replacing version 0.5.0
+🌱 /Users/tester/.mint/bin must be added to your $PATH if you wish to run this package outside of mint

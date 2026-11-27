@@ -1,0 +1,1 @@
+error: `isort` is not installed

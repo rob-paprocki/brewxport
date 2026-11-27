@@ -212,6 +212,9 @@ public struct MacPortsEngine: Engine, DependentsListing, CatalogRefreshing {
         guard refs.allSatisfy({ $0.engine == .macports }) else {
             throw EngineError(engine: .macports, message: "Package belongs to a different engine")
         }
+        guard op != .repair else {
+            throw EngineError(engine: .macports, message: "MacPorts has no tools to repair")
+        }
         guard options.version == nil else {
             throw EngineError(engine: .macports, message: "MacPorts can't install a specific version")
         }
@@ -233,6 +236,8 @@ public struct MacPortsEngine: Engine, DependentsListing, CatalogRefreshing {
                 throw EngineError(engine: .macports, message: "Marking a port takes no variants or options")
             }
             verb = op == .markRequested ? "setrequested" : "unsetrequested"
+        case .repair:
+            preconditionFailure("refused above")
         case .upgrade, .remove:
             guard options.variants.isEmpty else {
                 throw EngineError(engine: .macports, message: "Variants only apply to install")

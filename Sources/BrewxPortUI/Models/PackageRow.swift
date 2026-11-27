@@ -10,6 +10,8 @@ public struct PackageRow: Identifiable, Hashable, Sendable {
     /// Installed row for the same ref (Updates rows). nil means unknown.
     public let installedArchs: Set<Arch>?
     public var isInstalled: Bool
+    /// Updates only: why the engine holds this update back (`UpdateHold`); nil for an ordinary row.
+    public let hold: UpdateHold?
 
     public var id: PackageRef { package.id }
     public var name: String { package.displayName }
@@ -20,17 +22,22 @@ public struct PackageRow: Identifiable, Hashable, Sendable {
     /// The tooltip on a dash in the version column. `brew search` returns names only; the inspector has the version.
     public var latestHelp: String? { package.latestVersion == nil ? "Version shown in details" : nil }
     /// The Arch column: the installed copy's arch where the engine reports it ("universal" for more than one),
-    /// otherwise the arch the engine runs as.
+    /// otherwise the arch the engine runs as. A language tool's engine says nothing about what the tool was built
+    /// for (npm's are JavaScript, Cargo's whatever Rust targeted), so its row is empty unless the copy's is known (R34).
     public var archName: String {
-        guard let archs = installedArchs, let first = archs.first else { return arch.rawValue }
+        guard let archs = installedArchs, let first = archs.first else {
+            return package.id.engine.isLanguage ? "" : arch.rawValue
+        }
         return archs.count > 1 ? "universal" : first.rawValue
     }
 
-    public init(package: Package, arch: Arch, installedArchs: Set<Arch>? = nil, isInstalled: Bool? = nil) {
+    public init(package: Package, arch: Arch, installedArchs: Set<Arch>? = nil, isInstalled: Bool? = nil,
+                hold: UpdateHold? = nil) {
         self.package = package
         self.arch = arch
         self.installedArchs = package.installedArchs ?? installedArchs
         self.isInstalled = isInstalled ?? (package.installedVersion != nil)
+        self.hold = hold
     }
 }
 

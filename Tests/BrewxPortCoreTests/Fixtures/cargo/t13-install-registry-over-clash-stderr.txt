@@ -1,0 +1,3 @@
+    Updating crates.io index
+error: binary `rg` already exists in destination as part of `other-crate v0.1.0 (/Users/tester/othercrate)`
+Add --force to overwrite

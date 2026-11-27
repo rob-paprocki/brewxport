@@ -1,0 +1,6 @@
+🌱 Cloning solo 1.0.0
+🌱 Resolving package
+🌱 Building product solo
+🌱 Installed solo 1.0.0
+🌱 Linked solo 1.0.0 to /Users/tester/.mint/bin
+🌱 /Users/tester/.mint/bin must be added to your $PATH if you wish to run this package outside of mint

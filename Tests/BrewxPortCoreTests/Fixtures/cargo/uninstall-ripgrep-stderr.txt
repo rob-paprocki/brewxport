@@ -1,0 +1,1 @@
+    Removing /Users/tester/.cargo/bin/rg

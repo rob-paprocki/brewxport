@@ -1,0 +1,7 @@
+error: unexpected argument '--show-python' found
+
+  tip: a similar argument exists: '--show-paths'
+
+Usage: uv tool list --show-version-specifiers --show-with --show-extras --show-paths
+
+For more information, try '--help'.

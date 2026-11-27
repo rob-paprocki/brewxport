@@ -7,7 +7,8 @@ guard CommandLine.arguments.count > 1 else {
     exit(1)
 }
 
-// `login-path`: the app's own login-shell PATH probe, printed as "source: …", "note: …" and one entry per line.
+// `login-path`: the app's own login-shell PATH probe, printed as "source: …", "note: …", "variables: …" (the names
+// of the captured location variables only, never their values) and one PATH entry per line.
 // `--same-session` turns off the new session (to show the hang on a terminal); `--shell` replaces pw_shell.
 if CommandLine.arguments[1] == "login-path" {
     let options = Array(CommandLine.arguments.dropFirst(2))
@@ -19,6 +20,7 @@ if CommandLine.arguments[1] == "login-path" {
     let resolved = await resolver.resolve()
     print("source: \(resolved.source == .loginShell ? "loginShell" : "systemDefault")")
     if let note = resolved.note { print("note: \(note)") }
+    print("variables: " + resolved.environment.keys.sorted().joined(separator: " "))
     for entry in resolved.entries { print(entry) }
     exit(0)
 }
@@ -53,6 +55,7 @@ for id in EngineID.allCases {
     switch status[id] {
     case .present(let path, let version)?: print("  \(pad(id.rawValue, 9)) \(version)  \(path.path)")
     case .unusable(let path, let reason)?: print("  \(pad(id.rawValue, 9)) unusable  \(path.path): \(reason)")
+    case .unsupported(let path, let version, _)?: print("  \(pad(id.rawValue, 9)) \(version) too old  \(path.path)")
     case .missing?, nil: print("  \(pad(id.rawValue, 9)) missing")
     }
 }

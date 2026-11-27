@@ -1,0 +1,5 @@
+cpython-3.15.2-macos-aarch64-none     /opt/homebrew/bin/python3.15 -> ../Cellar/python@3.15/3.15.2/bin/python3.15
+cpython-3.15.2-macos-aarch64-none     /opt/homebrew/bin/python3 -> ../Cellar/python@3.15/3.15.2/bin/python3
+cpython-3.12.16-macos-aarch64-none    .local/share/uv/python/cpython-3.12-macos-aarch64-none/bin/python3.12
+cpython-3.9.6-macos-aarch64-none      /usr/bin/python3
+pypy-3.12.15-macos-aarch64-none       .local/share/uv/python/pypy-3.12.15-macos-aarch64-none/bin/pypy3.12

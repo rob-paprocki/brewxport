@@ -1,0 +1,7 @@
+{
+  "error": {
+    "code": "EINVALIDPACKAGENAME",
+    "summary": "Invalid package name \"bad name!\" of package \"bad name!@latest\": name can only contain URL-friendly characters.",
+    "detail": ""
+  }
+}

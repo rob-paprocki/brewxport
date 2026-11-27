@@ -1,6 +1,6 @@
 # BrewxPort
 
-A native Mac app for finding, installing and updating software from Homebrew, nanobrew, MacPorts and the Mac App Store, all in one window.
+A native Mac app for finding, installing and updating software from Homebrew, nanobrew, MacPorts and the Mac App Store, and the command-line tools you install with npm, pipx, uv, Cargo, Bun, RubyGems and Mint, all in one window.
 
 [![Release](https://img.shields.io/github/v/release/rob-paprocki/brewxport)](https://github.com/rob-paprocki/brewxport/releases/latest)
 ![macOS](https://img.shields.io/badge/macOS-15%2B-blue)
@@ -15,6 +15,7 @@ A native Mac app for finding, installing and updating software from Homebrew, na
 ## Why
 
 - Search nanobrew, Homebrew, MacPorts and mas at once. Results are grouped by package manager, and you pick which one installs each package.
+- Keep the tools you installed with npm, pipx, uv, Cargo, Bun, RubyGems and Mint up to date in the same lists, without a password.
 - Update everything behind one admin password, like a single UAC prompt on Windows.
 - Set up a new Mac from a bundle file exported on the old one. Brewfiles work for import and export too.
 - Keep Intel Macs going. Homebrew plans to drop Intel in 2027, so MacPorts gets full support here.
@@ -28,6 +29,7 @@ A native Mac app for finding, installing and updating software from Homebrew, na
 | macOS | 15 Sequoia or later |
 | Hardware | Intel and Apple Silicon |
 | Engines | Any of Homebrew, nanobrew, MacPorts, mas |
+| Language package managers | Any of npm, pipx, uv, Cargo, Bun 1.4.5 or later, RubyGems, Mint |
 | Building from source | Swift 6 toolchain (Xcode 16 or later, or the Command Line Tools) |
 
 ### What each engine is for
@@ -38,6 +40,7 @@ A native Mac app for finding, installing and updating software from Homebrew, na
 | nanobrew | Faster installs of Homebrew's own packages on Apple Silicon |
 | MacPorts | Ports with variants, and long-term Intel support |
 | Mac App Store (`mas`) | Apps you got from the App Store |
+| npm, pipx, uv, Cargo, Bun, RubyGems, Mint | Command-line tools installed for your whole account. See [Language tools](#language-tools) |
 
 ## Install
 
@@ -122,7 +125,7 @@ The first time you open this version, a short sheet says so and lets you turn on
 The three modes:
 
 - **Notify me** only tells you. Nothing is installed until you choose.
-- **Update what doesn't need a password** installs Homebrew formulae and nanobrew packages by itself. Everything else is left for you, and you get a notification.
+- **Update what doesn't need a password** installs Homebrew formulae, nanobrew packages and language tools by itself. Everything else is left for you, and you get a notification.
 - **Update everything** also runs the updates that need a password (MacPorts, Mac App Store apps and Homebrew casks). The ones that don't need a password run at once. The rest wait until you're back at the Mac, then BrewxPort opens with the password sheet. If BrewxPort can't come to the front, you get a notification, "N updates need your password", and clicking it opens the sheet. If you walk away without answering the sheet, it closes and comes back when you return.
 
 Automatic updates leave out a package when updating it would also update one you ignored or skipped. Homebrew and MacPorts bring a package's out-of-date dependencies along when they update it, and Homebrew also updates the out-of-date packages that depend on it. If you ignore or skip an update, an automatic run also leaves out the packages that depend on it and the packages it depends on. Those get their own notification, "N updates need your attention", and stay on Updates for you to run.
@@ -132,6 +135,61 @@ If you cancel the password sheet or stop an automatic run, nothing updates by it
 MacPorts only learns about new versions when its catalogue is refreshed, and that needs your password. Every MacPorts update run refreshes it first with `port selfupdate`, which may update MacPorts itself. If that step fails, the upgrades are skipped and the run log says why. Until a refresh happens, checks show only what MacPorts already knows about. Refresh MacPorts… does just the refresh, from the menu bar menu or the Updates page.
 
 To turn all of this off, set Settings > Check for updates to Never. BrewxPort then quits when you close its window, as before. With checks on, Quit BrewxPort (stops update checks) really quits.
+
+## Language tools
+
+BrewxPort also looks after the command-line tools you install with seven language package managers. They're listed under Languages in the sidebar, and each one gets its own section on Updates, Installed and Discover, after the four system package managers. Their updates show in the menu bar and run in automatic updates like any other package's.
+
+| Package manager | What BrewxPort lists | Set Up installs |
+|-----------------|----------------------|-----------------|
+| npm | Packages installed with `npm install -g` | Homebrew's `node`, which includes npm |
+| pipx | Apps pipx installed, each in its own environment | `pipx` from Homebrew or MacPorts |
+| uv | Tools installed with `uv tool install` | `uv` from Homebrew or MacPorts |
+| Cargo | Crates installed with `cargo install` | `rustup` from Homebrew or MacPorts, then Rust's stable toolchain |
+| Bun | Packages installed with `bun add -g`, from Bun 1.4.5 on | Homebrew's `bun` |
+| RubyGems | Gems that come with commands | Homebrew's `ruby`, which includes RubyGems |
+| Mint | Swift command-line tools from GitHub | `mint` from Homebrew or MacPorts |
+
+Discover finds pipx and uv tools by their exact name, because PyPI has no search, and Mint tools by their GitHub `owner/repo`. For some checks, searches and details, BrewxPort asks PyPI, crates.io, RubyGems.org or the npm registry itself, over HTTPS, and it reads Mint tools' versions from their tags on GitHub. Only package names are sent.
+
+### Set Up
+
+A package manager you don't have shows as Not installed. Its page says what Set Up installs, and Set Up installs it through Homebrew like any other formula. On a Mac without Homebrew, pipx, uv, Rust and Mint come from MacPorts instead, which asks for your password once. npm, Bun and RubyGems need Homebrew, because MacPorts keeps Node's and Ruby's tools where only an administrator can change them and takes hours to build Bun. Without Homebrew, their pages say how to install them in your home folder instead.
+
+BrewxPort never downloads and runs an installer script. On an Intel Mac, Homebrew builds Rust, Bun and Mint from source, and the page warns that this takes a while. The setup screen at launch and File > Set Up Package Manager… still cover only the four system package managers.
+
+### No password
+
+Language tools are installed, updated and removed as you, so none of it asks for a password, and Update what doesn't need a password includes them. BrewxPort never runs these package managers as root or through its helper. If your account can't change a package manager's folder, as with macOS's own Ruby or Node from its installer, Install, Update and Uninstall are off for it, and its page says how to fix that. When Homebrew is there without that runtime, the page also offers Set Up Homebrew's Ruby… beside macOS's or MacPorts' Ruby, and Set Up Homebrew's Node… beside an npm you can't change. It doesn't offer Node when that npm is in Homebrew's own folder, as Node's installer puts it on an Intel Mac, because the two would clash.
+
+### Which copy runs, and PATH
+
+If you have two copies of a package manager, such as Homebrew's npm and one from nvm, BrewxPort uses the one your login shell finds first, and its page shows that copy's path and version.
+
+Two package managers can install the same tool, like `fd` from Homebrew's fd and Cargo's fd-find. Installed marks both copies and ticks the one your login shell runs first. It pairs copies by the command they install, or by name, like `ripgrep` from Homebrew and from Cargo. When it can't tell which copy runs, as when both are in one folder, it says so.
+
+If a package manager's folder for tools, such as `~/.cargo/bin`, `~/.local/bin`, `~/.bun/bin` or `~/.mint/bin`, isn't on your PATH, its page says so and offers Add to PATH. It works like the one in Move to. You see the line and the file first, and nothing changes until you click. RubyGems' folder is named but not added, because its name changes with each Ruby minor version. Refresh (⌘R) reads your login shell's PATH again.
+
+### Held updates
+
+Some updates show a pause symbol, with the reason in its tooltip. "Needs Rust 1.96" means the new version needs a newer Rust than you have, so it can't be updated. "Came with Ruby" marks a gem that came with your Ruby, which BrewxPort updates only when you ask. When a registry doesn't answer for some tools, the section says how many it couldn't check, like "2 tools couldn't be checked", and lists the rest as usual.
+
+### Node, Ruby and Python updates
+
+Language tools run on Node, Ruby or Python, and updating those through Homebrew can break them. A new major version of Node needs npm's tools rebuilt, a new minor version of Ruby needs your gems installed again, and a `python@3.x` update can stop the pipx and uv tools made with its old copy. When your tools run on Homebrew's `node`, `ruby` or a `python@3.x`:
+
+- Automatic updates hold that update back, along with any update that would bring it along. You get one notification instead, such as "Ruby 4.1 is ready".
+- Updating it yourself shows a warning first.
+- Afterwards, the npm, RubyGems, pipx or uv page offers Repair tools. It runs `npm rebuild -g` or `pipx reinstall-all`, or installs each gem or uv tool again. You can run it from those pages at other times, too.
+- Uninstalling a `python@3.x` your tools use names the tools that will stop working.
+- If Homebrew installed that runtime only because something else needed it, BrewxPort keeps Homebrew from removing it during updates.
+
+### What isn't covered
+
+- A project's own dependencies, such as `package.json`, `Cargo.toml`, `Gemfile` or `Package.swift`. Only tools installed for your whole account are listed.
+- Bundles and Brewfiles. Exports leave language tools out and say so in one line, like "Not included: 3 language tools (npm, Cargo)".
+- Moving a tool from one language package manager to another.
+- Bun older than 1.4.5, which shows as Too old, with how to update it.
 
 ## Uninstall a package
 
@@ -153,7 +211,7 @@ Right-click a command-line tool on the Installed page, or choose Package > Move 
 
 The new copies go in first. BrewxPort then checks that the other package manager lists every one of them, and only then removes the old copies. If an install fails, nothing is removed. Moves between Homebrew and nanobrew don't ask for a password; anything involving MacPorts asks once.
 
-Only command-line tools move. Mac App Store apps, Homebrew apps (casks) and formulae from third-party taps stay put. A package moves only if the other package manager has one with exactly the same name, and you get that package manager's current version.
+Only command-line tools from Homebrew, nanobrew and MacPorts move. Mac App Store apps, Homebrew apps (casks), formulae from third-party taps and language tools stay put. A package moves only if the other package manager has one with exactly the same name, and you get that package manager's current version.
 
 ## Move to another Mac
 
@@ -169,7 +227,7 @@ Open a `.brewxportbundle` or a Brewfile with File > Open Bundle (⌘O), or doubl
 - Third-party taps are flagged and start unticked, unless a package you ticked needs one.
 - Tick what you want and install it. It asks for your admin password at most once.
 
-To export, use the Export… menu in the Bundles toolbar, or File > Export Bundle… (⇧⌘E) and File > Export Brewfile… in the menu bar. A `.brewxportbundle` holds everything you have installed, from every engine. A Brewfile holds only what `brew bundle` can read, and BrewxPort names whatever it leaves out before it writes the file. To leave out packages that came in only as another package's dependency, turn off Include Dependencies in Exports in either menu; installing the file brings them back. nanobrew is the exception: it doesn't record dependencies, so every nanobrew package is exported.
+To export, use the Export… menu in the Bundles toolbar, or File > Export Bundle… (⇧⌘E) and File > Export Brewfile… in the menu bar. A `.brewxportbundle` holds everything you have installed from Homebrew, nanobrew, MacPorts and the Mac App Store. Language tools aren't in either kind of file yet, and the export says so in one line, like "Not included: 3 language tools (npm, Cargo)". A Brewfile holds only what `brew bundle` can read, and BrewxPort names whatever it leaves out before it writes the file. To leave out packages that came in only as another package's dependency, turn off Include Dependencies in Exports in either menu; installing the file brings them back. nanobrew is the exception: it doesn't record dependencies, so every nanobrew package is exported.
 
 Files you open are treated as untrusted. Only plain package, tap and App Store lines are read. Lines inside a Ruby block are marked "not handled". BrewxPort can follow simple platform checks like `if OS.mac?`. After any other Ruby code it can't tell what runs next, so every later line is marked "not handled" too. Most options aren't applied, and files over 8 MB or 10,000 entries are refused. Homebrew 7's `trusted: true` on third-party formulae is accepted. Version pins in a bundle are kept but not applied, and installing Mac App Store apps from a bundle hasn't been tested in a virtual machine yet.
 

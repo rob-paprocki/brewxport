@@ -1,0 +1,7 @@
+creating virtual environment...
+installing black from spec 'black==24.2.0'...
+⚠️  Note: '/Users/tester/oldpipx/bin-1.15.2' is not on your PATH environment
+    variable. These apps will not be globally accessible until your PATH is
+    updated. Run `pipx ensurepath` to automatically add it, or manually modify
+    your PATH in your shell's config file (e.g. ~/.bashrc).
+done! ✨ 🌟 ✨

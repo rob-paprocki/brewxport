@@ -63,7 +63,7 @@ public struct BrewxPortCommands: Commands {
                 set: { model?.groupByPackageManager = $0 }))
                 .keyboardShortcut("g", modifiers: [.command, .option])
                 .disabled(model == nil)
-            Button("Refresh") { model?.refreshLists() }
+            Button("Refresh") { model?.refresh() }
                 .keyboardShortcut("r")
                 .disabled(model == nil || model?.confirmingRemoval == true)
             Button(model?.inspectorOpen == true ? "Hide Details" : "Show Details") { model?.toggleInspector() }

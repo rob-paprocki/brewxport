@@ -3,8 +3,8 @@ import BrewxPortRun
 import SwiftUI
 
 /// The window: sidebar, the selected page, the run panel along the bottom, the inspector, the password sheet, the
-/// setup and move sheets, the uninstall confirmation, the one-time background sheet, and Bundles' open and save
-/// panels.
+/// setup and move sheets, the uninstall confirmation, the one-time background sheet, the warning before a runtime
+/// update, and Bundles' open and save panels.
 public struct RootView: View {
     @Bindable var model: BrewxPortAppModel
 
@@ -54,6 +54,19 @@ public struct RootView: View {
         // The one-time "BrewxPort now checks for updates", once nothing else is up (`backgroundIntroDue`). Esc closes
         // it like Done, keeping what its switches show.
         .sheet(isPresented: backgroundIntroShown) { BackgroundIntroSheet(model: model) }
+        // Before an update of a Homebrew runtime that language tools run on: Update goes ahead, Cancel (or Esc)
+        // starts nothing.
+        .alert(model.runtimeWarning?.title ?? "", isPresented: runtimeWarningShown, presenting: model.runtimeWarning) { _ in
+            Button("Cancel", role: .cancel) { model.cancelRuntimeUpdate() }
+            Button("Update") { model.confirmRuntimeUpdate() }
+        } message: { warning in
+            Text(warning.message)
+        }
+    }
+
+    private var runtimeWarningShown: Binding<Bool> {
+        Binding(get: { model.runtimeWarning != nil },
+                set: { shown in if !shown { model.cancelRuntimeUpdate() } })
     }
 
     private var backgroundIntroShown: Binding<Bool> {

@@ -1,0 +1,23 @@
+{
+  "cowsay": {
+    "current": "1.5.0",
+    "wanted": "1.6.0",
+    "latest": "1.6.0",
+    "dependent": "global",
+    "location": "/opt/homebrew/lib/node_modules/cowsay"
+  },
+  "npm": {
+    "current": "11.20.0",
+    "wanted": "12.2.3",
+    "latest": "12.2.3",
+    "dependent": "global",
+    "location": "/opt/homebrew/lib/node_modules/npm"
+  },
+  "semver": {
+    "current": "7.8.0",
+    "wanted": "7.8.6",
+    "latest": "7.8.6",
+    "dependent": "global",
+    "location": "/opt/homebrew/lib/node_modules/semver"
+  }
+}
