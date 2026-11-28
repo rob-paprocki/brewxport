@@ -122,13 +122,15 @@ import Testing
         #expect(model.list.errors == ["MacPorts couldn't read its port index"])
     }
 
-    @Test func searchShowsOtherEnginesWhileOneHangs() async {
+    @Test(.timeLimit(.minutes(1))) func searchShowsOtherEnginesWhileOneHangs() async {
         let catalog = FakeCatalog()
         catalog.script(.search("ripgrep"), .nanobrew, packages: [Self.package(.nanobrew, "ripgrep")])
         catalog.script(.search("ripgrep"), .homebrew, packages: [Self.package(.homebrew, "ripgrep")],
                        delay: .milliseconds(20))
+        // MacPorts runs out its time only once the test opens the gate, so no timer races the checks before that.
+        let macports = Gate()
         catalog.script(.search("ripgrep"), .macports,
-                       FakeCatalog.Script(result: .success([]), timeout: .milliseconds(600)))
+                       FakeCatalog.Script(result: .success([]), gate: macports, timeout: .zero))
         let model = Self.model(catalog)
         model.query = "ripgrep"
         model.submit()
@@ -137,6 +139,8 @@ import Testing
         #expect(model.list.errors.isEmpty)
         #expect(Set(model.list.rows.map(\.id.engine)) == [.nanobrew, .homebrew])
 
+        #expect(await waitUntil { macports.waiting >= 1 })
+        macports.release()
         #expect(await waitUntil { !model.searching })
         #expect(model.list.rows.count == 2)
         #expect(model.list.errors == ["MacPorts didn't answer within 60 seconds"])

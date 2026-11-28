@@ -71,6 +71,17 @@ import BrewxPortCore
         }
     }
 
+    /// R49: the kept copy is named by the package's name with "'s", whatever its last letter ("less's", never
+    /// "less'"): only a package manager's name ending in "s" takes the apostrophe alone.
+    @Test func keptCopyLineNamesAPackageEndingInS() {
+        let plan = MovePlan(picked: Self.formula(.homebrew, "less", installed: "668"), target: .nanobrew,
+                            moving: [Self.item("less", old: "668", new: "668")],
+                            cantMove: [CantMove(name: "pcre2", reason: "not on nanobrew")], keepPicked: true,
+                            leftovers: [], removeLeftovers: true, pathWarning: nil)
+        let line = MoveSheetText.cantMoveLine(plan.cantMove[0], in: plan)
+        #expect(line == "pcre2 isn't on nanobrew, so less's Homebrew copy stays.")
+    }
+
     static func keptCopyCount(_ lines: [String]) -> Int {
         lines.filter { $0.contains("ripgrep's Homebrew copy stays.") }.count
     }

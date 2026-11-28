@@ -83,7 +83,10 @@ struct EngineDetailView: View {
             }
 
             Section("Capabilities") {
-                ForEach(EngineRowText.capabilityLines(for: engine, capabilities), id: \.self) { Text($0) }
+                let style = capabilityStyle
+                ForEach(EngineRowText.capabilityLines(for: engine, capabilities), id: \.self) {
+                    Text($0).foregroundStyle(style)
+                }
             }
 
         }
@@ -162,6 +165,11 @@ struct EngineDetailView: View {
         _ = model.installed.list.loading
         _ = model.updates.list.loading
         return (model.services.engines.first { $0.id == engine } as? any EngineNoteReporting)?.note
+    }
+
+    /// The plain Capabilities line is secondary, as before 0.8.0; an engine's own capabilities are primary.
+    private var capabilityStyle: HierarchicalShapeStyle {
+        EngineRowText.capabilityLinesArePlain(for: engine, capabilities) ? .secondary : .primary
     }
 
     private var capabilities: EngineCapabilities {

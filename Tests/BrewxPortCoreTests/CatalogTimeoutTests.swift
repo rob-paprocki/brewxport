@@ -8,40 +8,48 @@ private func pkg(_ engine: EngineID, _ name: String) -> Package {
 }
 
 @Suite struct CatalogTimeoutTests {
+    /// The fast engine has to answer inside the same timeout as the slow one is cut off at, so the tests that have one
+    /// give it 1.5 s rather than 0.3 s: a loaded CI runner has delayed in-process work by up to 1.65 s.
+    static let raceTimeout: Duration = .milliseconds(1500)
+
     @Test func slowEngineTimesOutOthersReturn() async {
-        let slow = StubEngine(id: .mas, onSearch: { try? await Task.sleep(for: .seconds(10)) })
+        // Cancellable, so a passing run doesn't wait for it.
+        let slow = StubEngine(id: .mas, onSearch: { try? await Task.sleep(for: .seconds(60)) })
         let fast = StubEngine(id: .homebrew, search: .success([pkg(.homebrew, "fd")]))
-        let catalog = PackageCatalog(engines: [slow, fast], arch: .arm64, queryTimeout: .milliseconds(300))
+        let catalog = PackageCatalog(engines: [slow, fast], arch: .arm64, queryTimeout: Self.raceTimeout)
         let start = ContinuousClock.now
         let r = await catalog.search("q")
-        #expect(ContinuousClock.now - start < .seconds(5))
+        // Guards against waiting for the slow stub (60 s); the timeout plus CI's lag comes to about 3.7 s.
+        #expect(ContinuousClock.now - start < .seconds(15))
         #expect(r.packages.map(\.id.name) == ["fd"])
-        #expect(r.errors == [PackageCatalog.timeoutError(.mas, after: .milliseconds(300))])
+        #expect(r.errors == [PackageCatalog.timeoutError(.mas, after: Self.raceTimeout)])
         #expect(r.errors.first?.message.hasPrefix("Mac App Store didn't answer within ") == true)
         #expect(r.errors.first?.message.hasSuffix(" seconds") == true)
     }
 
     @Test func hangingDetectDoesNotStallOthers() async {
-        let hung = StubEngine(id: .mas, onDetect: { try? await Task.sleep(for: .seconds(10)) })
+        let hung = StubEngine(id: .mas, onDetect: { try? await Task.sleep(for: .seconds(60)) })
         let fast = StubEngine(id: .homebrew, search: .success([pkg(.homebrew, "fd")]))
-        let catalog = PackageCatalog(engines: [hung, fast], arch: .arm64, queryTimeout: .milliseconds(300))
+        let catalog = PackageCatalog(engines: [hung, fast], arch: .arm64, queryTimeout: Self.raceTimeout)
         let start = ContinuousClock.now
         let r = await catalog.search("q")
-        #expect(ContinuousClock.now - start < .seconds(5))
+        // Guards against waiting for the hung detect (60 s); the timeout plus CI's lag comes to about 3.7 s.
+        #expect(ContinuousClock.now - start < .seconds(15))
         #expect(r.packages.map(\.id.name) == ["fd"])
-        #expect(r.errors.map(\.message) == ["Mac App Store is installed but not working: didn't answer within 0.3 seconds"])
+        #expect(r.errors.map(\.message) == ["Mac App Store is installed but not working: didn't answer within 1.5 seconds"])
     }
 
     @Test func hangingDetectDoesNotStallPresentEngines() async {
-        let hung = StubEngine(id: .mas, onDetect: { try? await Task.sleep(for: .seconds(10)) })
+        let hung = StubEngine(id: .mas, onDetect: { try? await Task.sleep(for: .seconds(60)) })
         let fast = StubEngine(id: .homebrew)
-        let catalog = PackageCatalog(engines: [hung, fast], arch: .arm64, queryTimeout: .milliseconds(300))
+        let catalog = PackageCatalog(engines: [hung, fast], arch: .arm64, queryTimeout: Self.raceTimeout)
         let start = ContinuousClock.now
         let statuses = await catalog.presentEngines()
-        #expect(ContinuousClock.now - start < .seconds(5))
+        // Guards against waiting for the hung detect (60 s); the timeout plus CI's lag comes to about 3.7 s.
+        #expect(ContinuousClock.now - start < .seconds(15))
         if case .present = statuses[.homebrew] {} else { Issue.record("homebrew should be present") }
         if case .unusable(_, let reason) = statuses[.mas] {
-            #expect(reason == "didn't answer within 0.3 seconds")
+            #expect(reason == "didn't answer within 1.5 seconds")
         } else { Issue.record("mas should be unusable") }
     }
 
@@ -98,13 +106,15 @@ private func pkg(_ engine: EngineID, _ name: String) -> Package {
     }
 
     @Test func streamYieldsFastEngineBeforeHungOne() async {
-        let hung = StubEngine(id: .mas, onSearch: { try? await Task.sleep(for: .seconds(10)) })
+        // Cancellable: dropping the iterator ends the stream, which cancels the query, so a passing run doesn't wait.
+        let hung = StubEngine(id: .mas, onSearch: { try? await Task.sleep(for: .seconds(120)) })
         let fast = StubEngine(id: .homebrew, search: .success([pkg(.homebrew, "fd")]))
-        let catalog = PackageCatalog(engines: [hung, fast], arch: .arm64, queryTimeout: .seconds(5))
+        let catalog = PackageCatalog(engines: [hung, fast], arch: .arm64, queryTimeout: .seconds(60))
         let start = ContinuousClock.now
         var iterator = catalog.stream(.search("x")).makeAsyncIterator()
         let first = await iterator.next()
-        #expect(ContinuousClock.now - start < .seconds(1))
+        // Guards against the first element waiting for the 60 s timeout; CI took up to 1.65 s here.
+        #expect(ContinuousClock.now - start < .seconds(10))
         #expect(first?.engine == .homebrew)
         #expect((try? first?.result.get())?.map(\.id.name) == ["fd"])
     }
@@ -112,7 +122,8 @@ private func pkg(_ engine: EngineID, _ name: String) -> Package {
     @Test func cancellingStreamCancelsQueries() async {
         let sawCancel = Mutex(false)
         let hung = StubEngine(id: .mas, onSearch: {
-            do { try await Task.sleep(for: .seconds(10)) } catch { sawCancel.withLock { $0 = true } }
+            // Far longer than both polls below, so only the cancel can end it.
+            do { try await Task.sleep(for: .seconds(120)) } catch { sawCancel.withLock { $0 = true } }
         })
         let fast = StubEngine(id: .homebrew, search: .success([pkg(.homebrew, "fd")]))
         // A long timeout, so only the consumer going away can cancel the hung query.
@@ -124,12 +135,13 @@ private func pkg(_ engine: EngineID, _ name: String) -> Package {
             gotFirst.withLock { $0 = true }
             _ = await iterator.next()
         }
+        // Each poll allows at least 5 s, like waitUntil: CI has taken 1.65 s to deliver a first element.
         var waited = 0
-        while !gotFirst.withLock({ $0 }), waited < 200 { try? await Task.sleep(for: .milliseconds(10)); waited += 1 }
+        while !gotFirst.withLock({ $0 }), waited < 500 { try? await Task.sleep(for: .milliseconds(10)); waited += 1 }
         #expect(gotFirst.withLock { $0 })
         consumer.cancel()
         waited = 0
-        while !sawCancel.withLock({ $0 }), waited < 200 { try? await Task.sleep(for: .milliseconds(10)); waited += 1 }
+        while !sawCancel.withLock({ $0 }), waited < 500 { try? await Task.sleep(for: .milliseconds(10)); waited += 1 }
         #expect(sawCancel.withLock { $0 })
         _ = await consumer.value
     }

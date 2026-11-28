@@ -180,8 +180,10 @@ private final class FakeConnection: HelperConnecting, VersionReporting {
         // A cold launch: the first version call times out, the retry on a fresh connection answers.
         let service = FakeService(.enabled)
         let connection = FakeConnection(.neverUntilReset(brewxPortHelperVersion))
+        // The retry's answer has to beat its own fresh timer, so give it 1 s: a loaded CI runner has delayed
+        // in-process work by up to 1.65 s, and 200 ms only won by queue order.
         let registration = HelperRegistration(service: service, connection: connection,
-                                              bundledVersion: brewxPortHelperVersion, timeout: .milliseconds(200))
+                                              bundledVersion: brewxPortHelperVersion, timeout: .seconds(1))
         #expect(await registration.ensureRegistered() == .enabled)
         #expect(service.calls.isEmpty)
         #expect(connection.resets.withLock { $0 } == 1)
@@ -226,12 +228,17 @@ private final class FakeConnection: HelperConnecting, VersionReporting {
     }
 
     @Test(.timeLimit(.minutes(1))) func versionCallTimesOut() async {
-        let registration = HelperRegistration(service: FakeService(.enabled), connection: FakeConnection(.never))
+        // The production timeout is pinned here, and a short one is timed below, so the test doesn't wait 5 s.
+        #expect(HelperRegistration.defaultTimeout == BrewxPortTimeouts.helperCall)
+        let registration = HelperRegistration(service: FakeService(.enabled), connection: FakeConnection(.never),
+                                              bundledVersion: brewxPortHelperVersion, timeout: .milliseconds(200))
         let start = ContinuousClock.now
         let state = await registration.refresh()
         let elapsed = ContinuousClock.now - start
         guard case .failed = state else { Issue.record("expected .failed, got \(state)"); return }
-        #expect(elapsed < .seconds(6))
+        // Guards against waiting for a call that never answers (a hang, cut off at the 60 s time limit); CI took
+        // up to 2.3 s for the same 200 ms firstResult timeout.
+        #expect(elapsed < .seconds(11))
     }
 
     @Test func concurrentEnsureRegisteredRegistersOnce() async {

@@ -144,11 +144,24 @@ private final class HeldIndex: RegistryFetching, @unchecked Sendable {
     private let body: Data
     private var held = false
     private var waiters: [CheckedContinuation<Void, Never>] = []
+    private var arrival: CheckedContinuation<Void, Never>?
 
     init(_ body: String) { self.body = Data(body.utf8) }
 
     var waiting: Int { lock.withLock { waiters.count } }
     func hold() { lock.withLock { held = true } }
+
+    /// Returns once a caller is held, without polling.
+    func waitUntilHeld() async {
+        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+            let already = lock.withLock { () -> Bool in
+                if !waiters.isEmpty { return true }
+                arrival = continuation
+                return false
+            }
+            if already { continuation.resume() }
+        }
+    }
 
     func release() {
         let released = lock.withLock { () -> [CheckedContinuation<Void, Never>] in
@@ -161,12 +174,14 @@ private final class HeldIndex: RegistryFetching, @unchecked Sendable {
 
     func get(_ url: URL) async throws -> Data {
         await withCheckedContinuation { (waiter: CheckedContinuation<Void, Never>) in
-            let now = lock.withLock { () -> Bool in
-                if !held { return true }
+            let (now, arrived) = lock.withLock { () -> (Bool, CheckedContinuation<Void, Never>?) in
+                if !held { return (true, nil) }
                 waiters.append(waiter)
-                return false
+                defer { arrival = nil }
+                return (false, arrival)
             }
             if now { waiter.resume() }
+            arrived?.resume()
         }
         return body
     }
@@ -698,7 +713,7 @@ private func expectEngineError(_ message: String, _ work: () async throws -> Voi
     /// Updates keeps showing the last check's rows while the next check runs (a Refresh, a run's reload), and a row's
     /// Update can be clicked then: the offers change only when a check ends, so that upgrade still passes the version
     /// the row showed.
-    @Test func offersChangeOnlyWhenACheckEnds() async throws {
+    @Test(.timeLimit(.minutes(1))) func offersChangeOnlyWhenACheckEnds() async throws {
         let index = HeldIndex(try text("index-ripgrep.txt"))
         let record = try fixture("crates2.json")
         let engine = CargoEngine(runner: FakeRunner([:], byExecutable: ["rustc": [versionArguments:
@@ -708,7 +723,8 @@ private func expectEngineError(_ message: String, _ work: () async throws -> Voi
         #expect(try await engine.listOutdated().map(\.latestVersion) == ["16.0.0"])
         index.hold()
         let next = Task { try await engine.listOutdated() }
-        for _ in 0..<500 where index.waiting == 0 { try await Task.sleep(for: .milliseconds(2)) }
+        // Resumed when the second check reaches the index, however long a loaded runner takes: nothing races a clock.
+        await index.waitUntilHeld()
         #expect(index.waiting == 1)
         #expect(try Self.upgrade(engine) == ["install", "--version", "=16.0.0", "ripgrep"])
         index.release()
@@ -1431,7 +1447,8 @@ private func expectEngineError(_ message: String, _ work: () async throws -> Voi
                                  apiPacing: clock.pacing())
         let started = ContinuousClock.now
         #expect(try await engine.listOutdated().map(\.id.name) == ["a", "b", "c", "d", "ripgrep"])
-        #expect(ContinuousClock.now - started < .seconds(5))
+        // Guards against a real-clock wait for the budget (up to 20 s); CI took up to about 2.2 s here.
+        #expect(ContinuousClock.now - started < .seconds(7))
         #expect(clock.time <= .seconds(21))
         #expect(clock.sleeps == [.seconds(1)])
         #expect(try Self.upgrade(engine, ["a"]) == ["install", "--bin", "a", "--version", "=2.0.0", "a"])
@@ -1451,7 +1468,8 @@ private func expectEngineError(_ message: String, _ work: () async throws -> Voi
                                  }, apiPacing: CargoEngine.APIPacing(spacing: .zero, budget: .milliseconds(200)))
         let started = ContinuousClock.now
         #expect(try await engine.listOutdated().map(\.latestVersion) == ["16.0.0"])
-        #expect(ContinuousClock.now - started < .seconds(5))
+        // Guards against waiting for the check-wide 60 s limit instead of the budget; CI took up to about 2.3 s here.
+        #expect(ContinuousClock.now - started < .seconds(11))
         #expect(try Self.upgrade(engine) == ["install", "--version", "=16.0.0", "ripgrep"])
     }
 

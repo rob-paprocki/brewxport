@@ -250,7 +250,8 @@ private struct Boom: Error {}
     }
 
     @Test func infoTimesOut() async {
-        let slow = StubEngine(id: .homebrew, onInfo: { try? await Task.sleep(for: .seconds(10)) })
+        // Cancellable, so a passing run doesn't wait for it.
+        let slow = StubEngine(id: .homebrew, onInfo: { try? await Task.sleep(for: .seconds(60)) })
         let catalog = PackageCatalog(engines: [slow], arch: .arm64, queryTimeout: .milliseconds(300))
         let start = ContinuousClock.now
         do {
@@ -261,7 +262,8 @@ private struct Boom: Error {}
         } catch {
             Issue.record("unexpected error \(error)")
         }
-        #expect(ContinuousClock.now - start < .seconds(5))
+        // Guards against waiting for the slow stub (60 s); CI took up to about 2.5 s here.
+        #expect(ContinuousClock.now - start < .seconds(12))
     }
 
     /// Details asked for before any list detect the engine first (a language engine knows its tool only after a

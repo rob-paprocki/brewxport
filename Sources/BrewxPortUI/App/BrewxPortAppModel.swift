@@ -248,11 +248,14 @@ public enum RunOrigin: Sendable { case user, background }
     /// (`checkEnginesAgainSoon`). The login shell is asked again too, so a tool whose folder the person (or Set Up) just
     /// added to the PATH is found, and a language engine's folder the person made writable shows on Updates at once
     /// (`engineAccessChecked`). A language engine found on another copy than the last check found loses the rows that
-    /// copy listed, and the lists load again (`reloadRows(of:)`).
+    /// copy listed, and the lists load again (`reloadRows(of:)`), unless a run's end already reloads them from the
+    /// copies found (`listsReloadedAfter`).
     public func checkEnginesAgain() {
         guard !checkingEngines else { return }
         services.path.askAgain()
         checkingEngines = true
+        let reloadedAfter = listsReloadedAfter
+        listsReloadedAfter = nil
         let catalog = services.catalog
         Task {
             let statuses = await catalog.presentEngines()
@@ -262,7 +265,11 @@ public enum RunOrigin: Sendable { case user, background }
             enginesChecked = true
             // Before the holds are worked out again: a hold must not lift from a row the old copy listed (macOS's
             // Ruby's rake, once Homebrew's Ruby, which this account can change, is found).
-            reloadRows(of: moved)
+            if let reloadedAfter {
+                dropRows(of: moved, loadedUpTo: reloadedAfter)
+            } else {
+                reloadRows(of: moved)
+            }
             engineAccessChecked()
             for observer in enginesCheckedObservers { observer(statuses) }
             if engineCheckQueued {
@@ -319,6 +326,15 @@ public enum RunOrigin: Sendable { case user, background }
         updates.list.dropRows(of: engines)
         installed.list.dropRows(of: engines)
         refreshLists()
+    }
+
+    /// `reloadRows(of:)` for the check after a run's end, whose reload read the login shell again first and so asks
+    /// the copies the check found (R49: a Set Up's end loaded the lists twice). Only the rows that loads up to `loads`
+    /// listed go, at once; the reload's answers stay, and nothing loads again.
+    private func dropRows(of engines: Set<EngineID>, loadedUpTo loads: (updates: Int, installed: Int)) {
+        guard !engines.isEmpty else { return }
+        updates.list.dropRows(of: engines, loadedUpTo: loads.updates)
+        installed.list.dropRows(of: engines, loadedUpTo: loads.installed)
     }
 
     // MARK: Helper
@@ -981,6 +997,10 @@ public enum RunOrigin: Sendable { case user, background }
 
     /// The engines are checked again when the run going ends: a Set Up run, or one Add to PATH came during.
     @ObservationIgnored private var recheckEnginesAfterRun = false
+    /// Set by such a run's end for the check that follows it: the last loads of Updates and Installed (`loadsStarted`)
+    /// before the run end's reload, which read the login shell again first. Older loads may have asked an engine's old
+    /// copy; that reload asks the one the check finds.
+    @ObservationIgnored private var listsReloadedAfter: (updates: Int, installed: Int)?
     /// The first problem of the last setup plan that had nothing to run; the setup screen words it.
     @ObservationIgnored private(set) var lastSetupPlanProblem: String?
 
@@ -1117,10 +1137,12 @@ public enum RunOrigin: Sendable { case user, background }
         runtimeChangesEnded()
         // A setup may have put a new bin folder on the login shell's PATH: the reload and the engine check read it.
         if recheckEnginesAfterRun { services.path.askAgain() }
+        let loadedBefore = (updates: updates.list.loadsStarted, installed: installed.list.loadsStarted)
         reloadListsNow()
         retryListsAfterHomebrewLock()
         if recheckEnginesAfterRun {
             recheckEnginesAfterRun = false
+            listsReloadedAfter = loadedBefore
             checkEnginesAgainSoon()
         }
         checkUpdatesTookEffect()

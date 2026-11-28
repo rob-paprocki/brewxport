@@ -16,13 +16,26 @@ public final class DemoRunExecutor: RunExecuting {
     private let provider: PromptPasswordProvider
     private let inventory: DemoInventory
     private let delay: Duration
+    private let pause: Pause
     private let runs = Mutex<[UUID: Task<Void, Never>]>([:])
 
+    /// Waits out `delay` before an output line, and throws once the run is cancelled.
+    typealias Pause = @Sendable (Duration) async throws -> Void
+    /// What the app pauses with.
+    static let taskSleep: Pause = { try await Task.sleep(for: $0) }
+
     /// `delay` is the pause before each output line. Tests pass `.zero`.
-    public init(provider: PromptPasswordProvider, inventory: DemoInventory, delay: Duration = .milliseconds(400)) {
+    public convenience init(provider: PromptPasswordProvider, inventory: DemoInventory,
+                            delay: Duration = .milliseconds(400)) {
+        self.init(provider: provider, inventory: inventory, delay: delay, pause: Self.taskSleep)
+    }
+
+    /// `pause` replaces the sleep, so a test can hold a line until it cancels the run instead of racing a timer.
+    init(provider: PromptPasswordProvider, inventory: DemoInventory, delay: Duration, pause: @escaping Pause) {
         self.provider = provider
         self.inventory = inventory
         self.delay = delay
+        self.pause = pause
     }
 
     public func run(_ steps: [RunStep], reason: String, verify: @escaping InstalledVerifier) -> AsyncStream<RunEvent> {
@@ -107,7 +120,7 @@ public final class DemoRunExecutor: RunExecuting {
                 continue
             }
             for line in Self.lines(for: step) {
-                do { try await Task.sleep(for: delay) } catch { return .cancelled }
+                do { try await pause(delay) } catch { return .cancelled }
                 if Task.isCancelled { return .cancelled }
                 emit(.output(index, .stdout(line)))
             }

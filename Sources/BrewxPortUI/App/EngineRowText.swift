@@ -47,6 +47,12 @@ public enum EngineRowText {
         return names.isEmpty ? ["Install, update and remove"] : names
     }
 
+    /// Whether `capabilityLines` is the plain line rather than capabilities of the engine's own: every language
+    /// engine's, or a system engine's with none (as on a not-installed engine's page). The page shows it secondary.
+    public static func capabilityLinesArePlain(for engine: EngineID, _ capabilities: EngineCapabilities) -> Bool {
+        engine.isLanguage || Self.capabilities(capabilities).isEmpty
+    }
+
     /// The engine page's capability list, in a fixed order.
     public static func capabilities(_ capabilities: EngineCapabilities) -> [String] {
         var names: [String] = []

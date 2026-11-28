@@ -6,14 +6,16 @@ import Foundation
 enum WireClient {
     enum Failure: Error { case socket, connect(Int32), pathTooLong }
 
-    /// Connects, sends `payload`, then reads until the server closes.
-    static func send(_ payload: [UInt8], to path: String, closeWrite: Bool = true) throws -> [UInt8] {
+    /// Connects, sends `payload`, then reads until the server closes, or until nothing has arrived for
+    /// `receiveTimeout` seconds.
+    static func send(_ payload: [UInt8], to path: String, closeWrite: Bool = true,
+                     receiveTimeout: Int = 10) throws -> [UInt8] {
         let fd = socket(AF_UNIX, SOCK_STREAM, 0)
         guard fd >= 0 else { throw Failure.socket }
         defer { close(fd) }
         var on: Int32 = 1
         setsockopt(fd, SOL_SOCKET, SO_NOSIGPIPE, &on, socklen_t(MemoryLayout<Int32>.size))
-        var timeout = timeval(tv_sec: 10, tv_usec: 0)
+        var timeout = timeval(tv_sec: receiveTimeout, tv_usec: 0)
         setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &timeout, socklen_t(MemoryLayout<timeval>.size))
         var addr = sockaddr_un()
         addr.sun_family = sa_family_t(AF_UNIX)
@@ -44,6 +46,14 @@ enum WireClient {
 
     static func request(nonce: String, to path: String) throws -> [UInt8] {
         try send(Array("\(nonce)\n".utf8), to: path)
+    }
+}
+
+/// Runs blocking `work` on a thread of its own, so an async test that waits on a socket doesn't hold one of the few
+/// threads Swift's concurrency pool has (three on a CI runner) while other tests need them.
+func onOwnThread<T: Sendable>(_ work: @escaping @Sendable () throws -> T) async throws -> T {
+    try await withCheckedThrowingContinuation { continuation in
+        Thread { continuation.resume(with: Result { try work() }) }.start()
     }
 }
 
@@ -412,12 +422,18 @@ final class FakePeer: @unchecked Sendable {
         defer { server.stop() }
         let path = try socketPath(server)
         let n = try nonce(server)
-        let stalled = Task.detached {
-            try WireClient.send(Array(n.prefix(10).utf8), to: path, closeWrite: false)
+        // The stalled client waits up to 60 s for the server. A wedged server still holds it when the real request's
+        // own 10 s receive timeout passes, so that request comes back empty and the password check fails.
+        let stalled = Task {
+            try await onOwnThread {
+                try WireClient.send(Array(n.prefix(10).utf8), to: path, closeWrite: false, receiveTimeout: 60)
+            }
         }
         try await Task.sleep(for: .milliseconds(200))
         let start = Date()
-        #expect(try WireClient.request(nonce: n, to: path) == Array(Self.password.utf8))
+        #expect(try await onOwnThread { try WireClient.request(nonce: n, to: path) } == Array(Self.password.utf8))
+        // Guards a slow drop: the 2 s client timeout, about 1.8 s after this request, not up to the request's 10 s;
+        // CI took up to 3.4 s for the whole test.
         #expect(Date().timeIntervalSince(start) < 6)
         #expect(try await stalled.value.isEmpty)
     }

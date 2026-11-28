@@ -25,15 +25,13 @@ private let languageEngines: [EngineID] = [.npm, .pipx, .uv, .cargo, .bun, .gem,
     #expect(EngineID.allCases == systemEngines + languageEngines)
 }
 
-/// Post-VM fix: a possessive built from a name ending in "s" takes the apostrophe alone ("RubyGems' tools", never
-/// "RubyGems's"), as the copy already wrote "MacPorts' uv"; every other name takes "'s".
+/// Post-VM fix: a package manager's name ending in "s" takes the apostrophe alone ("RubyGems' tools", never
+/// "RubyGems's"), as the copy already wrote "MacPorts' uv"; every other manager's name takes "'s". R49: only managers'
+/// names do; a package's name always takes "'s" ("less's Homebrew copy", `MoveSheetTextTests`, `MintEngineTests`).
 @Test func possessivesOfNamesEndingInS() {
-    #expect(EngineID.allCases.map(\.possessive) == ["Homebrew's", "nanobrew's", "MacPorts'", "Mac App Store's",
-                                                    "npm's", "pipx's", "uv's", "Cargo's", "Bun's", "RubyGems'",
-                                                    "Mint's"])
-    #expect("less".possessive == "less'")
-    #expect("ripgrep".possessive == "ripgrep's")
-    #expect("AWS".possessive == "AWS's")
+    let expected = ["Homebrew's", "nanobrew's", "MacPorts'", "Mac App Store's", "npm's", "pipx's", "uv's", "Cargo's",
+                    "Bun's", "RubyGems'", "Mint's"]
+    #expect(EngineID.allCases.map(\.possessive) == expected)
 }
 
 @Test func existingEnginesUnchanged() throws {

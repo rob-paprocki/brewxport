@@ -667,7 +667,7 @@ public struct MintEngine: Engine, InstallLocationReporting {
         switch op {
         case .install:
             guard let tag = state.newest(name) ?? state.update(name) else {
-                throw EngineError(engine: .mint, message: "BrewxPort hasn't looked up \(name.possessive) versions on "
+                throw EngineError(engine: .mint, message: "BrewxPort hasn't looked up \(name)'s versions on "
                                   + "GitHub, so it doesn't know which to install. Find it in Discover first.")
             }
             return try install(name, tag: tag)
@@ -693,7 +693,7 @@ public struct MintEngine: Engine, InstallLocationReporting {
     /// came from a lookup and is checked again here, since Mint passes it to bash.
     private func install(_ name: String, tag: String) throws -> CommandSpec {
         guard Self.isSafeTag(tag) else {
-            throw EngineError(engine: .mint, message: "BrewxPort doesn't pass \(name.possessive) version tag to Mint.")
+            throw EngineError(engine: .mint, message: "BrewxPort doesn't pass \(name)'s version tag to Mint.")
         }
         return try tool.command(["install", "--overwrite", "n", "\(name)@\(tag)"],
                                 confirmedBy: (sibling: "mint", arguments: Self.listArguments),
@@ -722,7 +722,7 @@ public struct MintEngine: Engine, InstallLocationReporting {
         let matching = try repositories().filter { $0.lowercased().contains(argument.lowercased()) }
         guard matching.count == 1, isOwn(matching[0]) else {
             let why = matching.contains(where: isOwn) ? "would also match another package"
-                : "doesn't match \(name.possessive) own address in Mint's metadata"
+                : "doesn't match \(name)'s own address in Mint's metadata"
             throw EngineError(engine: .mint, message: "Mint's uninstall finds packages by part of their address, and "
                               + "what BrewxPort would pass for \(name) \(why), so it doesn't remove it.")
         }

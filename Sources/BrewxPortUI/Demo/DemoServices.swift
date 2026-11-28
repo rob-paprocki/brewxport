@@ -22,8 +22,10 @@ public enum DemoServices {
         try make(options, delay: .milliseconds(400))
     }
 
-    /// `delay` is `DemoRunExecutor`'s; tests pass `.zero`. `bundleResources` is where the bundled fixtures would be.
+    /// `delay` and `pause` are `DemoRunExecutor`'s; tests pass a `.zero` delay. `bundleResources` is where the bundled
+    /// fixtures would be.
     @MainActor static func make(_ options: DemoOptions, delay: Duration,
+                                pause: @escaping DemoRunExecutor.Pause = DemoRunExecutor.taskSleep,
                                 bundleResources: URL? = Bundle.main.resourceURL) throws -> Services {
         guard let fixtures = fixturesDirectory(options, bundleResources: bundleResources) else {
             throw DemoServicesError.noFixtures
@@ -96,7 +98,8 @@ public enum DemoServices {
         let passwords = PromptPasswordProvider()
         return Services(
             engines: engines, catalog: PackageCatalog(engines: engines, arch: host),
-            executor: DemoRunExecutor(provider: passwords, inventory: inventory, delay: delay), helper: nil,
+            executor: DemoRunExecutor(provider: passwords, inventory: inventory, delay: delay, pause: pause),
+            helper: nil,
             passwords: passwords, isAdministrator: { true }, store: MemoryStore(), path: DemoPath(),
             fileExists: { files.contains($0) }, host: host,
             hostInfo: HostInfo(appleSilicon: host == .arm64,

@@ -272,13 +272,15 @@ final class VerifierProbe: @unchecked Sendable {
 
     static let rejected: [Error?] = Array(repeating: HelperError.notAuthorized, count: RunSession.passwordAttempts)
 
-    @Test func wrongPasswordStopsBeforeFirstCommand() async {
+    @Test(.timeLimit(.minutes(1))) func wrongPasswordStopsBeforeFirstCommand() async {
         // Rejected by the helper's authorization, every time.
         let h = Harness()
         h.helper.authorizeResults = Self.rejected
         let start = ContinuousClock.now
         let events = await collect(h.session().run([Steps.port(), Steps.cask(), Steps.formula()]))
-        #expect(ContinuousClock.now - start < .seconds(2))
+        // Guards against a pause per rejected attempt (3 x 2 s, like the askpass client timeout); CI took up to
+        // 2.1 s for the whole test.
+        #expect(ContinuousClock.now - start < .milliseconds(3500))
         #expect(events == [.needsPassword, .passwordRejected, .done])
         #expect(h.passwords.calls == 3)
         #expect(h.runner.streamedCalls.isEmpty)

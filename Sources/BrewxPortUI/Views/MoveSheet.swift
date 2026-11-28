@@ -57,9 +57,9 @@ public enum MoveSheetText {
         return lines
     }
 
-    /// "<picked>'s <Source> copy stays."
+    /// "<picked>'s <Source> copy stays.", with "'s" whatever the package's name ends in ("less's").
     static func keptCopy(_ plan: MovePlan) -> String {
-        "\(plan.picked.displayName.possessive) \(plan.picked.id.engine.displayName) copy stays."
+        "\(plan.picked.displayName)'s \(plan.picked.id.engine.displayName) copy stays."
     }
 
     private static func isNotOnTarget(_ entry: CantMove, _ plan: MovePlan) -> Bool {

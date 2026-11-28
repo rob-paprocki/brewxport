@@ -561,7 +561,9 @@ extension RunController {
         let run = Self.controller(executor)
         #expect(run.start(Self.plan([F.formula()]), ensureHelper: Self.enabled))
         #expect(run.quitDecision() == .confirm)
-        #expect(await run.cancelForQuit())
+        // Nothing is timed: the bound only has to outlast a loaded runner (CI took up to 4.3 s for the whole test, near
+        // the 10 s default). A run that ignored the cancel still makes it return false.
+        #expect(await run.cancelForQuit(bound: .seconds(60)))
         #expect(executor.cancelCount == 1)
         #expect(!run.isRunning)
         #expect(run.log.lines.last?.text == "Done.")

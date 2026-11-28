@@ -7,6 +7,17 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.8.1] - 2026-11-28
+
+**Upgrading:** Nothing to do.
+
+### Fixed
+
+- The Capabilities line on a package manager's page is grey again, as in 0.7.0. It's grey on the language package managers' pages too.
+- When Add to PATH can't change your shell's startup file, RubyGems' page tells you to click Check again once you've added the line yourself.
+- Package names that end in "s" get "'s" again: "less's Homebrew copy stays" when you move a package, and the same in Mint's messages. 0.8.0 wrote "less'". Package manager names that end in "s" keep the apostrophe alone. 0.8.0 changed that without a line here: a package installed twice says "MacPorts' copy runs first on your PATH", where 0.7.0 said "MacPorts's".
+- When Set Up switches a package manager to another copy, like RubyGems from macOS's Ruby to Homebrew's, Updates and Installed load once afterwards instead of twice.
+
 ## [0.8.0] - 2026-11-27
 
 **Upgrading:** If automatic updates are set to Update what doesn't need a password or Update everything, they now also update the tools BrewxPort finds from npm, pipx, uv, Cargo, Bun, RubyGems and Mint, except held ones. To keep a tool as it is, choose Ignore updates on its row.

@@ -21,7 +21,8 @@ import Testing
                 return 0
             }
         }
-        #expect(ContinuousClock.now - start < .seconds(2))
+        // Guards against waiting for the operation (a hang, cut off at the 60 s time limit); CI took up to 2.3 s here.
+        #expect(ContinuousClock.now - start < .seconds(11))
     }
 
     @Test(.timeLimit(.minutes(1))) func cancellingTheCallerEndsTheWait() async {
@@ -35,7 +36,8 @@ import Testing
         let start = ContinuousClock.now
         waiter.cancel()
         let result = await waiter.result
-        #expect(ContinuousClock.now - start < .seconds(2))
+        // Guards against waiting for the 30 s timeout (or the operation); CI took up to 2.2 s here.
+        #expect(ContinuousClock.now - start < .seconds(8))
         guard case .failure(let error) = result else { Issue.record("expected a failure"); return }
         #expect(error is CancellationError)
     }

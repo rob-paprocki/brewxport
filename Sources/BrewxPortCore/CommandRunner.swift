@@ -81,9 +81,22 @@ public struct ProcessRunner: CommandRunning {
     }()
 
     private let environment: [String: String]
+    /// How long a stopped child gets after SIGTERM before the SIGKILL.
+    private let killGrace: Duration
+    /// How long, after a stop was requested, to keep waiting for the child's pipes to close.
+    /// A descendant that escaped the child's process group can hold them open indefinitely.
+    private let stopGrace: Duration
 
     public init(environment: [String: String] = ProcessRunner.baseEnvironment) {
+        self.init(environment: environment, killGrace: .seconds(5), stopGrace: .seconds(2))
+    }
+
+    /// `killGrace` replaces the 5 s between SIGTERM and SIGKILL, and `stopGrace` the 2 s a stopped call still waits
+    /// for the pipes. Tests lengthen both, so a child that doesn't end on SIGTERM costs far more than one that does.
+    init(environment: [String: String], killGrace: Duration, stopGrace: Duration) {
         self.environment = environment
+        self.killGrace = killGrace
+        self.stopGrace = stopGrace
     }
 
     public func run(_ executable: URL, _ arguments: [String], options: RunOptions) async throws -> CommandResult {
@@ -107,10 +120,6 @@ public struct ProcessRunner: CommandRunning {
         return status
     }
 
-    /// How long, after a stopped child has exited, to keep waiting for its pipes to close.
-    /// A descendant that escaped the child's process group can hold them open indefinitely.
-    private static let stopGrace: Double = 2
-
     private func execute(
         _ executable: URL, _ arguments: [String], _ options: RunOptions,
         onStdout: @escaping @Sendable (Data) -> Void, onStderr: @escaping @Sendable (Data) -> Void
@@ -128,14 +137,15 @@ public struct ProcessRunner: CommandRunning {
             throw CommandRunnerError.launchFailed("\(executable.path): \(reason)")
         }
 
-        let control = ProcessControl()
+        let control = ProcessControl(killGrace: killGrace)
         // The readers own (and close) the read ends.
         let outReader = PipeReader(fd: outFds[0], onData: onStdout, onFailure: { _ in control.stop(.readFailed) })
         let errReader = PipeReader(fd: errFds[0], onData: onStderr, onFailure: { _ in control.stop(.readFailed) })
         // Once a stop is requested (even after the child has exited), stop waiting for the pipes soon.
+        let grace = stopGrace.seconds
         control.onFirstStop = {
-            outReader.expire(after: Self.stopGrace)
-            errReader.expire(after: Self.stopGrace)
+            outReader.expire(after: grace)
+            errReader.expire(after: grace)
         }
 
         do {
@@ -215,8 +225,12 @@ private final class ProcessControl: @unchecked Sendable {
     private var signalled = false
     private var reaped = false
     private var escalation: DispatchWorkItem?
+    /// How long after SIGTERM the SIGKILL comes.
+    private let killGrace: Duration
     /// Called once, outside the lock, when the first stop is requested.
     var onFirstStop: (@Sendable () -> Void)?
+
+    init(killGrace: Duration) { self.killGrace = killGrace }
 
     var stopReason: Reason? {
         lock.lock(); defer { lock.unlock() }
@@ -325,7 +339,7 @@ private final class ProcessControl: @unchecked Sendable {
     }
 
     /// SIGTERM now (child and its process group), then SIGCONT so a stopped member (an interactive shell stopped
-    /// by SIGTTIN, say) wakes up to handle it; SIGKILL after 5 s unless reaped first.
+    /// by SIGTTIN, say) wakes up to handle it; SIGKILL after `killGrace` (5 s in BrewxPort) unless reaped first.
     private func terminate() {
         lock.lock()
         defer { lock.unlock() }
@@ -339,7 +353,7 @@ private final class ProcessControl: @unchecked Sendable {
             lock.unlock()
         }
         escalation = item
-        DispatchQueue.global().asyncAfter(deadline: .now() + 5, execute: item)
+        DispatchQueue.global().asyncAfter(deadline: .now() + killGrace.seconds, execute: item)
     }
 
     /// Must hold the lock and have checked `!reaped`. The child itself first (a root child such

@@ -67,7 +67,8 @@ import Foundation
         let start = ContinuousClock.now
         task.cancel()
         await #expect(throws: CancellationError.self) { _ = try await task.value }
-        #expect(ContinuousClock.now - start < .seconds(6))
+        // Guards against the child never being signalled (sleep 31 runs out: 31 s); CI took up to about 3 s here.
+        #expect(ContinuousClock.now - start < .seconds(10))
         try await Task.sleep(for: .milliseconds(200))
         let pg = Process()
         pg.executableURL = URL(fileURLWithPath: "/usr/bin/pgrep")
@@ -94,7 +95,8 @@ import Foundation
         let start = ContinuousClock.now
         task.cancel()
         await #expect(throws: CancellationError.self) { _ = try await task.value }
-        #expect(ContinuousClock.now - start < .seconds(8))
+        // Guards against waiting for EOF from sleep 33 (33 s); CI took up to about 3.3 s here.
+        #expect(ContinuousClock.now - start < .seconds(10))
         try await Task.sleep(for: .milliseconds(300))
         #expect(pgrepCount("sleep 33") == 0)
     }
@@ -105,7 +107,8 @@ import Foundation
             _ = try await runner.run(URL(fileURLWithPath: "/bin/sh"), ["-c", "sleep 34 & wait"],
                                      options: RunOptions(timeout: .milliseconds(300)))
         }
-        #expect(ContinuousClock.now - start < .seconds(8))
+        // Guards against waiting for EOF from sleep 34 (34 s); CI took up to about 3.3 s here.
+        #expect(ContinuousClock.now - start < .seconds(10))
         try await Task.sleep(for: .milliseconds(300))
         #expect(pgrepCount("sleep 34") == 0)
     }
@@ -118,7 +121,8 @@ import Foundation
         let start = ContinuousClock.now
         task.cancel()
         await #expect(throws: CancellationError.self) { _ = try await task.value }
-        #expect(ContinuousClock.now - start < .seconds(8))
+        // Guards against waiting for EOF from sleep 35 (35 s); CI took up to about 3.3 s here.
+        #expect(ContinuousClock.now - start < .seconds(10))
         try await Task.sleep(for: .milliseconds(300))
         #expect(pgrepCount("sleep 35") == 0)
     }
@@ -129,7 +133,8 @@ import Foundation
             _ = try await runner.run(URL(fileURLWithPath: "/bin/sh"), ["-c", "sleep 36 &"],
                                      options: RunOptions(timeout: .milliseconds(600)))
         }
-        #expect(ContinuousClock.now - start < .seconds(8))
+        // Guards against waiting for EOF from sleep 36 (36 s); CI took up to about 3.3 s here.
+        #expect(ContinuousClock.now - start < .seconds(10))
         try await Task.sleep(for: .milliseconds(300))
         #expect(pgrepCount("sleep 36") == 0)
     }
@@ -143,21 +148,26 @@ import Foundation
 
     @Test func stoppedChildEndsOnTimeoutWithoutWaitingForKill() async {
         // The shell stops itself, as an interactive shell on a terminal it doesn't own is stopped by SIGTTIN. SIGTERM
-        // alone stays pending on a stopped process; the SIGCONT after it lets the trap run at once. (Without SIGCONT
-        // this took over 2 s.)
+        // alone stays pending on a stopped process; the SIGCONT after it lets the trap run at once. Without SIGCONT the
+        // stopped shell keeps its pipes open, so the call waits out the stop grace (2 s in BrewxPort) before it kills
+        // the group, or the SIGKILL (5 s). This runner makes both 60 s, far from the fast path even on a slow runner.
+        let runner = ProcessRunner(environment: ProcessRunner.baseEnvironment, killGrace: .seconds(60),
+                                   stopGrace: .seconds(60))
         let start = ContinuousClock.now
         await #expect(throws: CommandRunnerError.timedOut(.milliseconds(300))) {
             _ = try await runner.run(URL(fileURLWithPath: "/bin/sh"),
                                      ["-c", "trap 'exit 7' TERM; kill -STOP $$; sleep 38"],
                                      options: RunOptions(timeout: .milliseconds(300)))
         }
-        #expect(ContinuousClock.now - start < .seconds(1))
+        // Guards against waiting out a grace (about 60.3 s without SIGCONT); CI took up to 2.15 s here.
+        #expect(ContinuousClock.now - start < .seconds(11))
     }
 
     @Test func newSessionHasNoControllingTerminal() async throws {
         // Opening /dev/tty needs a controlling terminal. In a new session there is none, even when the test itself
         // runs on a terminal (Tests/scripts/test-login-shell.sh runs this under `script`).
-        let options = RunOptions(timeout: .seconds(5), newSession: true)
+        // The timeout only turns a hang into a failure; nothing is timed here, so it allows for a slow, loaded runner.
+        let options = RunOptions(timeout: .seconds(60), newSession: true)
         let r = try await runner.run(URL(fileURLWithPath: "/bin/sh"), ["-c", ": </dev/tty"], options: options)
         #expect(r.exitCode != 0)
         #expect(!r.stderr.isEmpty)
@@ -170,7 +180,8 @@ import Foundation
             _ = try await runner.run(URL(fileURLWithPath: "/bin/sh"), ["-c", "sleep 39 & wait"],
                                      options: RunOptions(timeout: .milliseconds(300), newSession: true))
         }
-        #expect(ContinuousClock.now - start < .seconds(8))
+        // Guards against waiting for EOF from sleep 39 (39 s); CI took up to about 3.3 s here.
+        #expect(ContinuousClock.now - start < .seconds(10))
         try await Task.sleep(for: .milliseconds(300))
         #expect(pgrepCount("sleep 39") == 0)
     }

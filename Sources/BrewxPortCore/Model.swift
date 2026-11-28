@@ -33,14 +33,9 @@ public enum EngineID: String, Codable, Sendable, CaseIterable {
     /// A language package manager: installs a language's global command-line tools, always as the user.
     public var isLanguage: Bool { group == .languages }
 
-    /// The display name's possessive: "Cargo's", "RubyGems'", "MacPorts'" (`String.possessive`).
-    public var possessive: String { displayName.possessive }
-}
-
-extension String {
-    /// The possessive the copy builds from a name: "Cargo's", but "RubyGems'" and "MacPorts'": a name that ends in
-    /// "s" takes the apostrophe alone. An upper-case "S" ("AWS") takes "'s".
-    public var possessive: String { hasSuffix("s") ? self + "'" : self + "'s" }
+    /// The display name's possessive: "Cargo's", but "RubyGems'" and "MacPorts'": a package manager's name that ends in
+    /// "s" takes the apostrophe alone. Only for managers' names: a package's name always takes "'s" ("less's").
+    public var possessive: String { displayName.hasSuffix("s") ? displayName + "'" : displayName + "'s" }
 }
 
 /// Which sidebar group an engine is listed in.

@@ -55,16 +55,18 @@ import Testing
 
     @Test func hungLoginShellFallsBack() async {
         let runner = Self.runner(stdout: "__BREWXPORT_PATH_BEGIN__/opt/homebrew/bin__BREWXPORT_PATH_END__\n")
-        // Blocks for 3 s and ignores both the timeout it was given and cancellation.
+        // Blocks for 30 s and ignores both the timeout it was given and cancellation. Nothing awaits it once
+        // resolve() has returned.
         runner.block = { _ in
             await withCheckedContinuation { (done: CheckedContinuation<Void, Never>) in
-                DispatchQueue.global().asyncAfter(deadline: .now() + 3) { done.resume() }
+                DispatchQueue.global().asyncAfter(deadline: .now() + 30) { done.resume() }
             }
         }
         let clock = ContinuousClock()
         let start = clock.now
         let resolved = await Self.resolver(runner, timeout: .milliseconds(200)).resolve()
-        #expect(clock.now - start < .seconds(1))
+        // Guards against waiting for the shell (30 s) instead of the 0.2 s timeout; CI took up to 1.67 s here.
+        #expect(clock.now - start < .seconds(7))
         #expect(resolved.source == .systemDefault)
         #expect(resolved.entries == Self.system)
         #expect(runner.optionsCalls.map(\.timeout) == [.milliseconds(200)])
@@ -190,14 +192,17 @@ import Testing
 
     @Test func answerCountsWhenTheEndMarkerArrives() async {
         // The shell prints the markers, then never exits and never closes its output (a background job from an rc
-        // file holding the pipe). The answer is in at once, not after the 5 s timeout.
+        // file holding the pipe). The answer is in at once, not after the timeout (30 s here, so a regression that
+        // waits for the shell's end is far from the bound).
         let runner = MarkerThenHangRunner()
         let resolver = LoginShellPath(runner: runner, shell: Self.shell, allowedShells: [Self.shell],
-                                      systemPaths: { Self.system }, processEnvironment: Self.processEnvironment)
+                                      systemPaths: { Self.system }, timeout: .seconds(30),
+                                      processEnvironment: Self.processEnvironment)
         let clock = ContinuousClock()
         let start = clock.now
         let resolved = await resolver.resolve()
-        #expect(clock.now - start < .seconds(1))
+        // Guards against waiting for the 30 s timeout (or the fake's 60 s hang); CI took up to 1.58 s here.
+        #expect(clock.now - start < .seconds(7))
         #expect(resolved == ResolvedPath(entries: ["/opt/local/bin", "/bin"], source: .loginShell))
         #expect(await waitUntil { runner.cancelled })
     }
@@ -256,18 +261,21 @@ import Testing
     /// With a fake slow shell: once it didn't answer within the timeout, the next calls don't wait for it again.
     @Test func slowShellIsWaitedForOnce() async {
         let runner = Self.runner(stdout: "__BREWXPORT_PATH_BEGIN__/opt/homebrew/bin__BREWXPORT_PATH_END__\n")
+        // Hangs for 30 s, ignoring cancellation, so awaiting it again would cost far more than the bound below.
         runner.block = { _ in
             await withCheckedContinuation { (done: CheckedContinuation<Void, Never>) in
-                DispatchQueue.global().asyncAfter(deadline: .now() + 3) { done.resume() }
+                DispatchQueue.global().asyncAfter(deadline: .now() + 30) { done.resume() }
             }
         }
-        let resolver = Self.resolver(runner, timeout: .milliseconds(200))
+        // A 2 s timeout: every wait on the shell is capped at it, so waiting again on each of the 7 calls would take
+        // about 14 s, twice the bound below, while CI has delayed in-process work by up to 1.65 s.
+        let resolver = Self.resolver(runner, timeout: .seconds(2))
         let first = await resolver.resolve()
         #expect(first.source == .systemDefault)
         let clock = ContinuousClock()
         let start = clock.now
         for _ in 0..<7 { #expect(await resolver.resolve() == first) }
-        #expect(clock.now - start < .milliseconds(150))
+        #expect(clock.now - start < .seconds(7))
         #expect(runner.calls.count == 1)
     }
 
@@ -376,7 +384,8 @@ private final class CallCount: @unchecked Sendable {
     func next() -> Int { lock.withLock { count += 1; return count } }
 }
 
-/// A shell that prints the markers and then hangs, ignoring cancellation, until 10 s pass. Records the cancel.
+/// A shell that prints the markers and then hangs, ignoring cancellation, until 60 s pass (longer than the 30 s
+/// timeout its test sets). Records the cancel.
 private final class MarkerThenHangRunner: CommandRunning, @unchecked Sendable {
     private let lock = NSLock()
     private var _cancelled = false
@@ -393,7 +402,7 @@ private final class MarkerThenHangRunner: CommandRunning, @unchecked Sendable {
         onOutput(.stdout("__BREWXPORT_PATH_BEGIN__/opt/local/bin:/bin__BREWXPORT_PATH_END__"))
         await withTaskCancellationHandler {
             await withCheckedContinuation { (done: CheckedContinuation<Void, Never>) in
-                DispatchQueue.global().asyncAfter(deadline: .now() + 10) { done.resume() }
+                DispatchQueue.global().asyncAfter(deadline: .now() + 60) { done.resume() }
             }
         } onCancel: {
             lock.withLock { _cancelled = true }

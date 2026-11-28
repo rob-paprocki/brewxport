@@ -21,6 +21,13 @@ import BrewxPortRun
     }
 }
 
+/// Counts the demo executor's pauses, from whatever thread it pauses on.
+private final class PauseCount: @unchecked Sendable {
+    private let lock = NSLock()
+    private var count = 0
+    func next() -> Int { lock.withLock { count += 1; return count } }
+}
+
 @MainActor @Suite struct DemoTests {
     static let program = "/Applications/BrewxPort.app/Contents/MacOS/BrewxPort"
 
@@ -31,8 +38,8 @@ import BrewxPortRun
         return options
     }
 
-    static func services(_ host: Arch = .arm64, delay: Duration = .zero) throws -> Services {
-        try DemoServices.make(options(host), delay: delay)
+    static func services(_ host: Arch = .arm64) throws -> Services {
+        try DemoServices.make(options(host), delay: .zero)
     }
 
     static func engine(_ services: Services, _ id: EngineID) -> any Engine {
@@ -960,11 +967,14 @@ import BrewxPortRun
         #expect(!installed.packages.contains { $0.id == jq })
     }
 
-    @Test func demoCancelEndsWithCancelledDone() async throws {
-        // The run doesn't wait for the reader, so the pause before each line must outlast any lag in reading the
-        // first one (100 ms didn't on a busy CI runner). The test waits one pause for the first line; cancelling
-        // interrupts the second.
-        let services = try Self.services(delay: .seconds(3))
+    @Test(.timeLimit(.minutes(1))) func demoCancelEndsWithCancelledDone() async throws {
+        // The run doesn't wait for the reader, so the pause before the second line must outlast any lag in reading
+        // the first one (100 ms, then 3 s, didn't always on a busy CI runner). So the first line comes at once and the
+        // pause before the second lasts until the cancel interrupts it, however slowly the first is read.
+        let pauses = PauseCount()
+        let services = try DemoServices.make(Self.options(), delay: .zero, pause: { _ in
+            if pauses.next() > 1 { try await Task.sleep(for: .seconds(3600)) }
+        })
         let executor = try #require(services.executor)
         var events: [RunEvent] = []
         for await event in executor.run([try Self.step(services, .upgrade, Self.adaURL)], reason: "r") {

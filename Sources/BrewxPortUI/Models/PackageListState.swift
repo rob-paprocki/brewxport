@@ -43,6 +43,12 @@ import BrewxPortCore
     @ObservationIgnored private var task: Task<Void, Never>?
     /// Bumped by every start, so a stream that was cancelled can't touch the list after its replacement started.
     @ObservationIgnored private var generation = 0
+    /// The load (`generation`) whose answer `outcomes` holds, per engine.
+    @ObservationIgnored private var answeredIn: [EngineID: Int] = [:]
+
+    /// How many loads have started: read before a load is asked for, it tells that load's answers from older ones
+    /// (`dropRows(of:loadedUpTo:)`).
+    public var loadsStarted: Int { generation }
     @ObservationIgnored private var settledWaiters: [CheckedContinuation<Void, Never>] = []
 
     public init(order: [EngineID], archFor: @escaping (EngineID) -> Arch) {
@@ -81,9 +87,17 @@ import BrewxPortCore
     /// isn't the one BrewxPort uses any more. The load in flight may have asked the old copy, so its answers from them
     /// are left out too; the next load brings back what they answer then.
     public func dropRows(of engines: Set<EngineID>) {
-        if loading { dropped.formUnion(engines) }
-        guard !engines.isDisjoint(with: outcomes.keys) else { return }
-        for engine in engines { outcomes[engine] = nil }
+        dropRows(of: engines, loadedUpTo: generation)
+    }
+
+    /// `dropRows(of:)` when the loads after `load` (a `loadsStarted`) already ask the copy BrewxPort uses now, as a
+    /// run end's reload does once it read the login shell again: only rows from `load` or an older one go, and only
+    /// such a load in flight leaves its answers from `engines` out. A later load's rows and answers stay.
+    public func dropRows(of engines: Set<EngineID>, loadedUpTo load: Int) {
+        if loading, generation <= load { dropped.formUnion(engines) }
+        let old = engines.filter { outcomes[$0] != nil && answeredIn[$0, default: 0] <= load }
+        guard !old.isEmpty else { return }
+        for engine in old { outcomes[engine] = nil }
         recompute()
     }
 
@@ -131,6 +145,7 @@ import BrewxPortCore
                 guard !self.dropped.contains(outcome.engine) else { continue }
                 self.answered.insert(outcome.engine)
                 self.outcomes[outcome.engine] = outcome
+                self.answeredIn[outcome.engine] = mine
                 self.merge()
             }
             guard let self, self.generation == mine else { return }

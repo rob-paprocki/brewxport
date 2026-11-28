@@ -152,6 +152,21 @@ final class SettablePath: PathResolving, @unchecked Sendable {
         #expect(EngineRowText.capabilityLines(for: .mas, []) == ["Install, update and remove"])
     }
 
+    /// R49: the page's plain Capabilities line is secondary, as 0.7.0 showed it: the line for an engine with no
+    /// capabilities of its own (a not-installed engine's page), and every language engine's one line. A system
+    /// engine's own capabilities stay primary.
+    @Test func plainCapabilitiesLineIsSecondary() {
+        #expect(EngineRowText.capabilityLinesArePlain(for: .macports, []))
+        #expect(EngineRowText.capabilityLinesArePlain(for: .mas, []))
+        for engine in EngineID.allCases where engine.isLanguage {
+            #expect(EngineRowText.capabilityLinesArePlain(for: engine, []), "\(engine)")
+            #expect(EngineRowText.capabilityLinesArePlain(for: engine, [.jsonOutput]), "\(engine)")
+        }
+        #expect(!EngineRowText.capabilityLinesArePlain(for: .homebrew, [.casks, .jsonOutput]))
+        #expect(!EngineRowText.capabilityLinesArePlain(for: .macports, [.sourceBuilds]))
+        #expect(!EngineRowText.capabilityLinesArePlain(for: .mas, [.jsonOutput]))
+    }
+
     /// A person's update that worked, whose package now offers a newer version held back for its own reason (a crate
     /// updated to 15 whose 16 needs a newer Rust), isn't "still out of date" in the run panel.
     @Test func heldNewerVersionAfterAPersonsUpdateIsntStillOutOfDate() async throws {
@@ -275,6 +290,33 @@ final class SettablePath: PathResolving, @unchecked Sendable {
         #expect(unwritten.pathNote(for: .gem)?.line == nil)
         #expect(unwritten.readOnlyReason(for: .gem) == "This is macOS's own Ruby, and only an administrator can change "
                 + "its gems. Homebrew's Ruby is installed: add it to your PATH below, then click Check again.")
+    }
+
+    /// R49: when Add to PATH couldn't write the line (here ~/.zprofile is a folder), the person adds it themselves, so
+    /// RubyGems' reason asks for Check again after, as it does where Add to PATH isn't offered.
+    @Test func failedAddToPathAsksForCheckAgain() async throws {
+        let home = FileManager.default.temporaryDirectory.appendingPathComponent("brewxport-path-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: home.appendingPathComponent(".zprofile"),
+                                                withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: home) }
+        let gem = FakeLanguageEngine(.gem, binLocation: URL(fileURLWithPath: "/usr/bin", isDirectory: true),
+                                     readOnlyReason: "This is macOS's own Ruby, and only an administrator can change "
+                                     + "its gems.")
+        let brew = EngineStatus.present(path: URL(fileURLWithPath: "/opt/homebrew/bin/brew"), version: "4")
+        let system = EngineStatus.present(path: URL(fileURLWithPath: "/usr/bin/gem"), version: "3.5")
+        let catalog = FakeCatalog(engines: [.homebrew: brew, .gem: system])
+        catalog.script(.installed, .homebrew, packages: [Self.formula("ruby", "4.0.10")])
+        let model = await model([gem], outdated: [], catalog: catalog,
+                                path: SettablePath(["/opt/homebrew/bin", "/usr/bin"]),
+                                shellPath: ShellPathEditor(home: home, shell: "/bin/zsh"))
+        model.checkEnginesAgain()
+        #expect(await waitUntil { model.enginesChecked && model.pathNote(for: .gem) != nil })
+        let reason = "This is macOS's own Ruby, and only an administrator can change its gems. Homebrew's Ruby is "
+            + "installed: add it to your PATH below"
+        #expect(model.readOnlyReason(for: .gem) == reason + ".")
+        model.addToPath(.gem)
+        #expect(model.pathFix(for: .gem) == .failed("~/.zprofile isn't a regular file, so BrewxPort didn't change it."))
+        #expect(model.readOnlyReason(for: .gem) == reason + ", then click Check again.")
     }
 
     /// Post-VM fix (VM 1): RubyGems kept showing macOS's Ruby after Add to PATH until Check again. Add to PATH now asks
@@ -411,6 +453,57 @@ final class SettablePath: PathResolving, @unchecked Sendable {
         model.checkEnginesAgain()
         #expect(await waitUntil { !model.checkingEngines })
         #expect(model.listReloadCount == settled)
+    }
+
+    /// R49: a Set Up run's end loads the lists once, though the check after it finds RubyGems on Homebrew's Ruby. The
+    /// run end's reload read the login shell again first, so it already asks the new copy: the check takes out only
+    /// the rows the old copy listed that this reload hasn't replaced yet, at once, and leaves the reload's answer in.
+    @Test func setUpRunEndLoadsTheListsOnce() async throws {
+        let gem = FakeLanguageEngine(.gem, readOnlyReason: "This is macOS's own Ruby, and only an administrator can "
+                                     + "change its gems.")
+        let rake = Self.tool(.gem, "rake", installed: "13.1.0", latest: "13.3.1")
+        let brew = EngineStatus.present(path: URL(fileURLWithPath: "/opt/homebrew/bin/brew"), version: "4")
+        let system = EngineStatus.present(path: URL(fileURLWithPath: "/usr/bin/gem"), version: "3.5.22")
+        let catalog = FakeCatalog(engines: [.homebrew: brew, .gem: system])
+        catalog.script(.installed, .homebrew, packages: [])
+        let executor = FakeRunExecutor(events: [], hang: true)
+        let model = await model([gem], outdated: [rake, Self.wget], installed: [rake], executor: executor,
+                                catalog: catalog)
+        model.checkEnginesAgain()
+        #expect(await waitUntil { model.enginesChecked })
+        #expect(model.setUpEngine(.gem))
+        #expect(await waitUntil { executor.runs.count == 1 && model.run.isRunning })
+
+        // The run installs Homebrew's Ruby; the shell now finds its gem, whose gems answer once released.
+        let homebrewGem = EngineStatus.present(path: URL(fileURLWithPath: "/opt/homebrew/opt/ruby/bin/gem"),
+                                               version: "4.1.0")
+        catalog.setEngines([.homebrew: brew, .gem: homebrewGem])
+        gem.readOnlyReason = nil
+        let rubocop = Self.tool(.gem, "rubocop", installed: "1.80.0", latest: "1.81.0")
+        let gate = Gate()
+        catalog.script(.outdated, .gem, FakeCatalog.Script(result: .success([rubocop]), gate: gate))
+        catalog.script(.installed, .gem, FakeCatalog.Script(result: .success([rubocop]), gate: gate))
+        let reloads = model.listReloadCount
+        Self.succeed(executor, run: 0)
+        #expect(await waitUntil {
+            !model.run.isRunning && !model.checkingEngines && model.engineStatuses[.gem] == homebrewGem
+        })
+        // macOS's Ruby's rake is gone at once, and nothing would update it with the new copy.
+        #expect(model.updates.list.byRef[rake.id] == nil)
+        #expect(model.installed.list.byRef[rake.id] == nil)
+        #expect(model.updates.updateAllRequests().map(\.package.id) == [Self.wget.id])
+        #expect(model.updates.list.byRef[Self.wget.id] != nil)
+
+        // The run end's reload brings Homebrew's Ruby's gems; nothing loads them again.
+        #expect(await waitUntil { gate.waiting == 2 })
+        gate.release()
+        #expect(await waitUntil {
+            model.updates.list.byRef[rubocop.id] != nil && model.installed.list.byRef[rubocop.id] != nil
+        })
+        #expect(await waitUntil { !model.updates.list.loading && !model.installed.list.loading })
+        #expect(model.listReloadCount == reloads + 1)
+        #expect(model.updates.list.byRef[rake.id] == nil)
+        gate.release()
     }
 
     /// Post-VM fix (VM 2), with the lists still loading: a load that had asked macOS's Ruby's gem before the check found

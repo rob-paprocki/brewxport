@@ -300,7 +300,7 @@ final class FakeCatalog: PackageQuerying, @unchecked Sendable {
         var unchecked = UncheckedPackages.none
         var held: [HeldUpdate] = []
         var delay: Duration = .zero
-        /// Answers only once the gate is released.
+        /// Answers only once the gate is released. With `timeout`, the timeout's wait starts only then.
         var gate: Gate?
         /// Never answers (until the consumer stops iterating).
         var hang = false
@@ -396,6 +396,7 @@ final class FakeCatalog: PackageQuerying, @unchecked Sendable {
                                 return
                             }
                             if let timeout = script.timeout {
+                                if let gate = script.gate { await gate.wait() }
                                 try? await Task.sleep(for: timeout)
                                 guard !Task.isCancelled else { return }
                                 let message = "\(engine.displayName) didn't answer within 60 seconds"

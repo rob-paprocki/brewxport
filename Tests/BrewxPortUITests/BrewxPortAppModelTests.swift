@@ -1385,8 +1385,9 @@ import BrewxPortRun
         #expect(await waitUntil { executor.runs.count == 1 })
         #expect(model.setup.stage != .needsHelperApproval)
         #expect(helper.refreshCount >= 3)
-        // The poll stopped with the stage, and it never registers anything.
-        try? await Task.sleep(for: .milliseconds(100))
+        // The poll stopped with the stage, and it never registers anything. A helper call still in flight has landed
+        // before `reads` is taken, however slow the runner; a poll still running would tick in the 100 ms after.
+        #expect(await waitUntil { !model.checkingHelper })
         let reads = helper.refreshCount
         try? await Task.sleep(for: .milliseconds(100))
         #expect(helper.refreshCount == reads)
@@ -1400,7 +1401,9 @@ import BrewxPortRun
         model.setup.setUp(.homebrew)
         #expect(await waitUntil { helper.refreshCount >= 2 })
         model.setup.notNow()
-        try? await Task.sleep(for: .milliseconds(100))
+        // A helper call still in flight has landed before `reads` is taken, however slow the runner; a poll still
+        // running would tick in the 100 ms after.
+        #expect(await waitUntil { !model.checkingHelper })
         let reads = helper.refreshCount
         try? await Task.sleep(for: .milliseconds(100))
         #expect(helper.refreshCount == reads)
@@ -1422,7 +1425,8 @@ import BrewxPortRun
             try? await Task.sleep(for: .seconds(30))
         })
         model.setup.setUp(.homebrew)
-        #expect(await waitUntil { model.setup.stage == .needsHelperApproval })
+        // Coming back to the app is ignored while a helper call is in flight, so wait for the setup's own call to end.
+        #expect(await waitUntil { model.setup.stage == .needsHelperApproval && !model.checkingHelper })
         let before = helper.refreshCount
         center.post(name: NSApplication.didBecomeActiveNotification, object: nil)
         #expect(await waitUntil { helper.refreshCount == before + 1 })
@@ -1499,7 +1503,9 @@ import BrewxPortRun
         model.openLoginItems()
         #expect(await waitUntil { helper.refreshCount >= 2 })
         model.sidebar = .updates
-        try? await Task.sleep(for: .milliseconds(100))
+        // A helper call still in flight has landed before `reads` is taken, however slow the runner; a poll still
+        // running would tick in the 100 ms after.
+        #expect(await waitUntil { !model.checkingHelper })
         let reads = helper.refreshCount
         try? await Task.sleep(for: .milliseconds(100))
         #expect(helper.refreshCount == reads)

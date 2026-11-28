@@ -139,14 +139,17 @@ extension BrewxPortAppModel {
     /// Why this account can't change `engine`'s tools, with the fix, as its last detect found it; nil when it can.
     /// Once Homebrew's Ruby is installed beside a read-only RubyGems but isn't on the PATH, the fix is the PATH line
     /// (R30, `homebrewRubyPathNote`). Add to PATH checks the engine again itself; where the person adds the line
-    /// (a shell BrewxPort doesn't write to, or a folder it won't write), they click Check again after.
+    /// (a shell BrewxPort doesn't write to, a folder it won't write, or a file Add to PATH couldn't change), they click
+    /// Check again after.
     public func readOnlyReason(for engine: EngineID) -> String? {
         let reason = (self.engine(engine) as? any InstallLocationReporting)?.readOnlyReason
         guard engine == .gem, reason != nil, let aside = homebrewRubyAside(), let note = homebrewRubyPathNote() else {
             return reason
         }
-        let then: String
-        if case .append = pathOffer, note.line != nil { then = "." } else { then = ", then click Check again." }
+        var adds = note.line != nil
+        if case .copyOnly = pathOffer { adds = false }
+        if case .failed = pathFix(for: engine) { adds = false }
+        let then = adds ? "." : ", then click Check again."
         return "This is \(aside.ruby), and only an administrator can change its gems. Homebrew's Ruby is installed: add "
             + "it to your PATH below" + then
     }

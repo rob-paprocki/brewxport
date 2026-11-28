@@ -791,6 +791,18 @@ private final class QueuedGit: CommandRunning, @unchecked Sendable {
         #expect(runner.calls == [lsRemote(ink)])
     }
 
+    /// R49: a package's name takes "'s" whatever its last letter ("devtools's versions"); only a package manager's
+    /// name ending in "s" takes the apostrophe alone.
+    @Test func packageNameEndingInSTakesApostropheS() throws {
+        let (engine, _, _) = try makeEngine([:])
+        let error = try #require(throws: EngineError.self) {
+            _ = try engine.command(for: .install, [tool("someone/devtools")], options: InstallOptions())
+        }
+        let expected = "BrewxPort hasn't looked up someone/devtools's versions on GitHub, so it doesn't know which to "
+            + "install. Find it in Discover first."
+        #expect(error.message == expected)
+    }
+
     @Test func upgradeUsesTheNewerTagTheCheckFound() async throws {
         let (engine, _, _) = try makeEngine([["list"]: try captured("list-final"),
                                              lsRemote(ink): try captured("ls-remote-tags-refs")])

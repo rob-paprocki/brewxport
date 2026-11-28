@@ -61,6 +61,31 @@ struct PackageListStateTests {
         #expect(state.selection.checked == [wget])
     }
 
+    /// R49: rows a load after `loadedUpTo` brought (a run end's reload, which asks the copy found) stay, and so does
+    /// that load's answer still to come; rows from that load or an older one go at once.
+    @Test func dropRowsUpToALoadKeepsWhatLaterLoadsBring() async {
+        let catalog = FakeCatalog()
+        catalog.script(.installed, .nanobrew, packages: [package("jq", engine: .nanobrew)])
+        catalog.script(.installed, .homebrew, packages: [package("wget")])
+        let state = state()
+        state.load { catalog.stream(.installed) }
+        #expect(await waitUntil { !state.loading && state.rows.count == 2 })
+        let before = state.loadsStarted
+
+        let gate = Gate()
+        let yq = package("yq", engine: .nanobrew)
+        catalog.script(.installed, .nanobrew, FakeCatalog.Script(result: .success([yq]), gate: gate))
+        catalog.script(.installed, .homebrew, packages: [package("curl")])
+        state.load { catalog.stream(.installed) }
+        #expect(await waitUntil { state.rows.map(\.name).contains("curl") && gate.waiting == 1 })
+        state.dropRows(of: [.nanobrew, .homebrew], loadedUpTo: before)
+        // nanobrew's jq came from the older load and goes; Homebrew's curl came from the later one and stays.
+        #expect(state.rows.map(\.name) == ["curl"])
+        gate.release()
+        #expect(await waitUntil { !state.loading })
+        #expect(state.rows.map(\.name).sorted() == ["curl", "yq"])
+    }
+
     @Test func refreshDropsEngineThatNoLongerAnswers() async {
         let catalog = FakeCatalog()
         catalog.script(.installed, .nanobrew, packages: [package("jq", engine: .nanobrew)])

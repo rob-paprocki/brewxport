@@ -165,7 +165,9 @@ public struct EngineSetupRunner: Sendable {
         } catch let error as SetupError {
             throw error
         } catch {
-            throw .noAsset("BrewxPort couldn't find \(name.possessive) download in the latest release.")
+            // Homebrew, MacPorts or nanobrew: the Command Line Tools were set up above.
+            let owner = target.engine?.possessive ?? name + "'s"
+            throw .noAsset("BrewxPort couldn't find \(owner) download in the latest release.")
         }
         // The name goes into a path and into the first line of spctl's output, which the verdict reads.
         guard Self.isSafeFileName(asset.name) else {

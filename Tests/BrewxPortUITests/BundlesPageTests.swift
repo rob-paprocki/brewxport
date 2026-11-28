@@ -162,7 +162,8 @@ import BrewxPortCore
         #expect(model.bundles.openError != nil)
         let clock = ContinuousClock()
         let took = await clock.measure { await model.prepareSnapshot(.bundles) }
-        #expect(took < .seconds(1))
+        // Guards against the full preview poll (200 x 50 ms, at least 10 s); CI took up to 3.7 s for the whole test.
+        #expect(took < .seconds(6))
         #expect(model.sidebar == .bundles)
     }
 
@@ -171,7 +172,8 @@ import BrewxPortCore
         let model = K.app()
         let clock = ContinuousClock()
         let took = await clock.measure { await model.prepareSnapshot(.bundles) }
-        #expect(took < .seconds(1))
+        // Guards against the full preview poll (200 x 50 ms, at least 10 s); CI took up to 3.7 s for the whole test.
+        #expect(took < .seconds(6))
         #expect(model.bundles.state == .empty)
     }
 

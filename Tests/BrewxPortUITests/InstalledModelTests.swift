@@ -250,8 +250,9 @@ import Testing
         #expect(model.removeTitle == "Remove 1")
     }
 
-    @Test func onLoadedGetsEveryInstalledRefBeforeThePath() async {
-        let model = Self.model(Self.catalog([Self.jq, Self.portFiglet]), path: SlowPath())
+    @Test(.timeLimit(.minutes(1))) func onLoadedGetsEveryInstalledRefBeforeThePath() async {
+        let gate = Gate()
+        let model = Self.model(Self.catalog([Self.jq, Self.portFiglet]), path: SlowPath(gate: gate))
         var loaded: [Set<PackageRef>] = []
         model.addLoadedObserver { loaded.append($0) }
         #expect(!model.hasLoaded)
@@ -260,6 +261,8 @@ import Testing
         #expect(loaded == [[Self.jq.id, Self.portFiglet.id]])
         #expect(model.hasLoaded)
         #expect(model.analyzing)
+        #expect(await waitUntil { gate.waiting >= 1 })
+        gate.release()
         await model.settled()
         #expect(!model.analyzing)
     }
@@ -289,10 +292,12 @@ import Testing
         #expect(await waitUntil { order.count == 4 })
     }
 
+    /// A PATH that answers only once the test opens `gate`, so the test sees the state before it without a timer.
     struct SlowPath: PathResolving {
+        let gate: Gate
         var entries = ["/usr/bin"]
         func resolve() async -> ResolvedPath {
-            try? await Task.sleep(for: .milliseconds(300))
+            await gate.wait()
             return ResolvedPath(entries: entries, source: .loginShell)
         }
     }
@@ -324,8 +329,8 @@ import Testing
                 == "Another copy, in /usr/bin, runs first on your PATH.")
     }
 
-    @Test func rowsCarryTheirMarksAndChangeWhenWinnersArrive() async {
-        let path = SlowPath(entries: ["/opt/local/bin", "/opt/nanobrew/prefix/bin"])
+    @Test(.timeLimit(.minutes(1))) func rowsCarryTheirMarksAndChangeWhenWinnersArrive() async {
+        let path = SlowPath(gate: Gate(), entries: ["/opt/local/bin", "/opt/nanobrew/prefix/bin"])
         let model = Self.model(Self.catalog([Self.nbFiglet, Self.portFiglet, Self.jq]), path: path,
                                files: Self.figletFiles)
         model.reload()
@@ -336,6 +341,8 @@ import Testing
         #expect(model.analyzing)
         #expect(before.allSatisfy { !$0.runsFirst })
         #expect(before.first { $0.id == Self.portFiglet.id }?.duplicateHelp == "Also installed by nanobrew.")
+        #expect(await waitUntil { path.gate.waiting >= 1 })
+        path.gate.release()
         await model.settled()
         // New row values once the winners arrive, so the table sees the change.
         let after = model.rows
